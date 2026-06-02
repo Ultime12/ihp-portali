@@ -1,0 +1,13 @@
+{
+  "name": "ihp-topluluk-portali",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "node scripts/deploy-build.mjs",
+    "check": "npm run build && node --check dist/src/app.js && node --check dist/src/lib/supabase.js && node --check dist/src/lib/portal-service.js && node --check api/config.js && node --check api/invite-member.js"
+  }
+}
