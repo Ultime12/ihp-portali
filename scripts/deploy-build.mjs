@@ -5,6 +5,14 @@ import { brotliDecompressSync } from "node:zlib";
 const root = process.cwd();
 const packageDir = join(root, "package");
 
+function normalizeBase64Chunk(name, content) {
+  if (name !== "runtime-000.br.b64") return content;
+
+  return content
+    .replace("TPVT0ebyiEfSVirbfWtq9K712Hve3K", "TPVT0ebyiEfSVirbfWtq9KML7o1Xs6K712Hve3K")
+    .replace("GOTHOuHaZmNX/jYHCFoS7", "GOTHOuHaZmNX/jnYHCFoS7");
+}
+
 async function unpackSnapshot() {
   const entries = (await readdir(packageDir))
     .filter((name) => name.startsWith("runtime-") && (name.endsWith(".br") || name.endsWith(".br.b64")))
@@ -14,7 +22,7 @@ async function unpackSnapshot() {
 
   const chunks = await Promise.all(entries.map(async (name) => {
     const chunk = await readFile(join(packageDir, name));
-    return name.endsWith(".b64") ? Buffer.from(chunk.toString("utf8"), "base64") : chunk;
+    return name.endsWith(".b64") ? Buffer.from(normalizeBase64Chunk(name, chunk.toString("utf8")), "base64") : chunk;
   }));
   const files = JSON.parse(brotliDecompressSync(Buffer.concat(chunks)).toString("utf8"));
 
