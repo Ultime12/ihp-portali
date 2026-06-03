@@ -32,16 +32,16 @@ async function patchClientBundle() {
 
   const replacements = [
     [
-      '  vice_president: "Başkan Yardımcısı",\n  spokesperson: "Parti Sözcüsü",',
-      '  vice_president: "Başkan Yardımcısı",\n  presidential_aide: "Başkan Yaveri",\n  spokesperson: "Parti Sözcüsü",'
+      '  vice_president: "BaÅŸkan YardÄ±mcÄ±sÄ±",\n  spokesperson: "Parti SÃ¶zcÃ¼sÃ¼",',
+      '  vice_president: "BaÅŸkan YardÄ±mcÄ±sÄ±",\n  presidential_aide: "BaÅŸkan Yaveri",\n  spokesperson: "Parti SÃ¶zcÃ¼sÃ¼",'
     ],
     [
-      '  discipline_chair: "Disiplin Kurulu Başkanı",\n  discipline_member: "Disiplin Kurulu Üyesi",',
-      '  discipline_chair: "Disiplin Kurulu Başkanı",\n  discipline_vice_chair: "Disiplin Kurulu Başkan Yardımcısı",\n  discipline_admission_officer: "Disiplin Başkanı + Üye Alım Sorumlusu",\n  discipline_member: "Disiplin Kurulu Üyesi",'
+      '  discipline_chair: "Disiplin Kurulu BaÅŸkanÄ±",\n  discipline_member: "Disiplin Kurulu Ãœyesi",',
+      '  discipline_chair: "Disiplin Kurulu BaÅŸkanÄ±",\n  discipline_vice_chair: "Disiplin Kurulu BaÅŸkan YardÄ±mcÄ±sÄ±",\n  discipline_admission_officer: "Disiplin BaÅŸkanÄ± + Ãœye AlÄ±m Sorumlusu",\n  discipline_member: "Disiplin Kurulu Ãœyesi",'
     ],
     [
-      '  admission_officer: "Üye Alım Sorumlusu",\n  member: "Üye",',
-      '  admission_officer: "Üye Alım Sorumlusu",\n  representative: "Temsilci",\n  chief_representative: "Baş Temsilci",\n  member: "Üye",'
+      '  admission_officer: "Ãœye AlÄ±m Sorumlusu",\n  member: "Ãœye",',
+      '  admission_officer: "Ãœye AlÄ±m Sorumlusu",\n  representative: "Temsilci",\n  chief_representative: "BaÅŸ Temsilci",\n  member: "Ãœye",'
     ],
     [
       '["super_admin", "president", "vice_president", "admission_officer"].includes(',
@@ -64,20 +64,20 @@ async function patchClientBundle() {
       '["super_admin", "president", "vice_president", "admission_officer", "discipline_admission_officer"].includes(\n      state.profile?.role\n    )'
     ],
     [
-      '<label for="invite-name">Anonim görünen ad</label>',
-      '<label for="invite-name">Görünen ad</label>'
+      '<label for="invite-name">Anonim gÃ¶rÃ¼nen ad</label>',
+      '<label for="invite-name">GÃ¶rÃ¼nen ad</label>'
     ],
     [
-      'placeholder="Üye 1"',
+      'placeholder="Ãœye 1"',
       'placeholder="Ad Soyad"'
     ],
     [
-      'title="Üye 1 gibi anonim bir etiket veya rol adı kullanın."',
-      'title="Ad soyad veya güvenli görünen ad kullanın."'
+      'title="Ãœye 1 gibi anonim bir etiket veya rol adÄ± kullanÄ±n."',
+      'title="Ad soyad veya gÃ¼venli gÃ¶rÃ¼nen ad kullanÄ±n."'
     ],
     [
-      'pattern="Üye [0-9]+|Yeni Üye|Yetkili Üye|Disiplin Yetkilisi|Süper Admin|Başkan|Başkan Yardımcısı|Parti Sözcüsü|Disiplin Kurulu Başkanı|Disiplin Kurulu Üyesi|Gençlik Kurulu Başkanı|Gençlik Kurulu Üyesi|Üye Alım Sorumlusu|Misafir Üye"',
-      'pattern="[A-Za-zÇĞİÖŞÜçğıöşü .\'-]{2,48}"'
+      'pattern="Ãœye [0-9]+|Yeni Ãœye|Yetkili Ãœye|Disiplin Yetkilisi|SÃ¼per Admin|BaÅŸkan|BaÅŸkan YardÄ±mcÄ±sÄ±|Parti SÃ¶zcÃ¼sÃ¼|Disiplin Kurulu BaÅŸkanÄ±|Disiplin Kurulu Ãœyesi|GenÃ§lik Kurulu BaÅŸkanÄ±|GenÃ§lik Kurulu Ãœyesi|Ãœye AlÄ±m Sorumlusu|Misafir Ãœye"',
+      'pattern="[A-Za-zÃ‡ÄÄ°Ã–ÅÃœÃ§ÄŸÄ±Ã¶ÅŸÃ¼ .\'-]{2,48}"'
     ]
   ];
 
@@ -86,6 +86,38 @@ async function patchClientBundle() {
   }
 
   if (next !== app) await writeFile(appPath, next);
+}
+
+async function patchPortalServiceBundle() {
+  const servicePath = join(root, "dist", "src", "lib", "portal-service.js");
+  let service;
+  try {
+    service = await readFile(servicePath, "utf8");
+  } catch {
+    return;
+  }
+
+  let next = service;
+  const replacements = [
+    [
+      "select=*,committees(name)&limit=1",
+      "select=*,committees!profiles_committee_id_fkey(name)&limit=1"
+    ],
+    [
+      'list("profiles", "select=*,committees(name)&order=created_at.desc")',
+      'list("profiles", "select=*,committees!profiles_committee_id_fkey(name)&order=created_at.desc")'
+    ],
+    [
+      'list("committees", "select=*,profiles(display_name)&order=name.asc")',
+      'list("committees", "select=*,profiles!committees_chair_profile_id_fkey(display_name)&order=name.asc")'
+    ]
+  ];
+
+  for (const [from, to] of replacements) {
+    next = next.replace(from, to);
+  }
+
+  if (next !== service) await writeFile(servicePath, next);
 }
 
 async function unpackSnapshot() {
@@ -108,6 +140,7 @@ async function unpackSnapshot() {
     await writeFile(destination, Buffer.from(file.content, "base64"));
   }
   await patchClientBundle();
+  await patchPortalServiceBundle();
 
   console.log("Vercel ciktilari yayin paketinden olusturuldu.");
   return true;
