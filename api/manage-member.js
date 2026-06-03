@@ -1,7 +1,5 @@
-const MANAGER_ROLES = new Set(["super_admin", "president", "chief_representative"]);
+const MANAGER_ROLES = new Set(["super_admin", "president", "vice_president"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin", "president"]);
-const REPRESENTATIVE_MANAGER_ROLES = new Set(["chief_representative"]);
-const REPRESENTATIVE_SCOPE_ROLES = new Set(["member", "representative"]);
 const VALID_PROFILE_ROLES = new Set([
   "super_admin",
   "president",
@@ -119,6 +117,11 @@ function cleanProfilePayload(body, actorRoles) {
   };
 }
 
+function isProtectedForVice(profile) {
+  const roles = Array.isArray(profile?.roles) && profile.roles.length ? profile.roles : [profile?.role];
+  return roles.some((role) => role === "super_admin" || role === "president");
+}
+
 export default async function handler(request, response) {
   if (request.method !== "POST") {
     return json(response, 405, { error: "Yalnizca POST istegi kabul edilir." });
@@ -159,41 +162,23 @@ export default async function handler(request, response) {
 
   if (action !== "update") return json(response, 400, { error: "Gecersiz islem." });
 
-  const representativeOnly = !hasAny(actor.roles, FULL_MANAGER_ROLES) && hasAny(actor.roles, REPRESENTATIVE_MANAGER_ROLES);
-  if (representativeOnly) {
+  const viceOnly = !hasAny(actor.roles, FULL_MANAGER_ROLES) && actor.roles.includes("vice_president");
+  if (viceOnly) {
     const target = await getProfileById(id);
     if (!target) return json(response, 404, { error: "Uye bulunamadi." });
 
-    const targetRoles = Array.isArray(target.roles) && target.roles.length ? target.roles : [target.role];
-    const roles = normalizeRoles(request.body.roles || request.body.role, actor.roles);
-    if (
-      !roles ||
-      targetRoles.some((role) => !REPRESENTATIVE_SCOPE_ROLES.has(role)) ||
-      roles.some((role) => !REPRESENTATIVE_SCOPE_ROLES.has(role))
-    ) {
-      return json(response, 403, { error: "Bas temsilci yalnizca uye ve temsilci rollerini yonetebilir." });
+    const requestedRoles = normalizeRoles(request.body.roles || request.body.role, actor.roles);
+    if (!requestedRoles || isProtectedForVice(target) || requestedRoles.some((role) => role === "super_admin" || role === "president")) {
+      return json(response, 403, { error: "Baskan yardimcisi super admin veya baskan rollerini yonetemez." });
     }
-
-    const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({
-        role: primaryRole(roles),
-        roles
-      })
-    });
-    const patched = await patchResponse.json().catch(() => null);
-    if (!patchResponse.ok) {
-      return json(response, patchResponse.status, {
-        error: patched?.message || "Temsilci yetkisi guncellenemedi."
-      });
-    }
-
-    return json(response, 200, { ok: true, profile: patched?.[0] || null });
   }
 
   const payload = cleanProfilePayload(request.body, actor.roles);
   if (!payload) return json(response, 400, { error: "Uye bilgileri gecersiz." });
+
+  if (viceOnly && payload.roles.some((role) => role === "super_admin" || role === "president")) {
+    return json(response, 403, { error: "Baskan yardimcisi super admin veya baskan rollerini veremez." });
+  }
 
   const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -208,6 +193,9 @@ export default async function handler(request, response) {
   }
 
   if (password) {
+    if (!hasAny(actor.roles, FULL_MANAGER_ROLES)) {
+      return json(response, 403, { error: "Sifre degistirmek icin baskan veya super admin yetkisi gerekir." });
+    }
     if (String(password).length < 8) return json(response, 400, { error: "Sifre en az 8 karakter olmali." });
     const passwordResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
       method: "PUT",
