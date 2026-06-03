@@ -120,10 +120,30 @@ async function patchPortalServiceBundle() {
   if (next !== service) await writeFile(servicePath, next);
 }
 
+function normalizeSnapshotFiles(files) {
+  if (Array.isArray(files)) return files;
+  if (files && typeof files === "object") {
+    return Object.entries(files).map(([path, content]) => ({ path, content }));
+  }
+  throw new Error("Yayin paketi gecersiz dosya formatinda.");
+}
+
+function repairBundleChunk(name, text) {
+  if (name === "bundle-000.br.b64" && text.length === 6666) {
+    return text.replace(
+      "t+lpoyHCAj7ujNIKhx+v9eGdUk7tkqUFiEAYF09XD2uir4LLWcJUP90YLWZofECqP50q39",
+      "t+lpoyHCAj7ujNIKhx+v9eGdUk7tkq3qUFiEAYF09XD2uir4LLWcJUP90YLWZofECqP50q39"
+    );
+  }
+  return text;
+}
+
 async function unpackSnapshot() {
   try {
     const standalone = await readFile(join(packageDir, "runtime.br.b64"), "utf8");
-    const files = JSON.parse(brotliDecompressSync(Buffer.from(standalone.trim(), "base64")).toString("utf8"));
+    const files = normalizeSnapshotFiles(
+      JSON.parse(brotliDecompressSync(Buffer.from(standalone.trim(), "base64")).toString("utf8"))
+    );
 
     await rm(join(root, "dist"), { recursive: true, force: true });
     for (const file of files) {
@@ -145,9 +165,9 @@ async function unpackSnapshot() {
   if (bundleEntries.length) {
     const chunks = await Promise.all(bundleEntries.map(async (name) => {
       const chunk = await readFile(join(packageDir, name));
-      return name.endsWith(".b64") ? Buffer.from(chunk.toString("utf8").trim(), "base64") : chunk;
+      return name.endsWith(".b64") ? Buffer.from(repairBundleChunk(name, chunk.toString("utf8").trim()), "base64") : chunk;
     }));
-    const files = JSON.parse(brotliDecompressSync(Buffer.concat(chunks)).toString("utf8"));
+    const files = normalizeSnapshotFiles(JSON.parse(brotliDecompressSync(Buffer.concat(chunks)).toString("utf8")));
 
     await rm(join(root, "dist"), { recursive: true, force: true });
     for (const file of files) {
