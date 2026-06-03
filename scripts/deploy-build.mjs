@@ -123,7 +123,10 @@ async function patchPortalServiceBundle() {
 function normalizeSnapshotFiles(files) {
   if (Array.isArray(files)) return files;
   if (files && typeof files === "object") {
-    return Object.entries(files).map(([path, content]) => ({ path, content }));
+    return Object.entries(files).map(([path, content]) => ({
+      path: path.startsWith("dist/") ? path : `dist/${path}`,
+      content
+    }));
   }
   throw new Error("Yayin paketi gecersiz dosya formatinda.");
 }
