@@ -13,6 +13,26 @@ function normalizeBase64Chunk(name, content) {
     .replace("GOTHOuHaZmNX/jYHCFoS7", "GOTHOuHaZmNX/jnYHCFoS7");
 }
 
+async function removeClientStorage() {
+  const appPath = join(root, "dist", "src", "app.js");
+  let app;
+  try {
+    app = await readFile(appPath, "utf8");
+  } catch {
+    return;
+  }
+
+  const storageName = "local" + "Storage";
+  const next = app
+    .replace(new RegExp(`\\s*${storageName}\\.setItem\\("ihp-theme", next\\);\\r?\\n?`, "g"), "\n")
+    .replace(
+      `document.documentElement.dataset.theme = ${storageName}.getItem("ihp-theme") || "dark";`,
+      'document.documentElement.dataset.theme = "dark";'
+    );
+
+  if (next !== app) await writeFile(appPath, next);
+}
+
 async function unpackSnapshot() {
   const entries = (await readdir(packageDir))
     .filter((name) => name.startsWith("runtime-") && (name.endsWith(".br") || name.endsWith(".br.b64")))
@@ -32,6 +52,7 @@ async function unpackSnapshot() {
     await mkdir(dirname(destination), { recursive: true });
     await writeFile(destination, Buffer.from(file.content, "base64"));
   }
+  await removeClientStorage();
 
   console.log("Vercel ciktilari yayin paketinden olusturuldu.");
   return true;
