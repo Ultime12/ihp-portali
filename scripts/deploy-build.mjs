@@ -24,7 +24,7 @@ async function patchClientBundle() {
 
   const storageName = "local" + "Storage";
   let next = app
-    .replace(new RegExp(`\\s*${storageName}\\.setItem\("ihp-theme", next\);\\r?\\n?`, "g"), "\n")
+    .replace(new RegExp(`\\s*${storageName}\\.setItem\\("ihp-theme", next\\);\\r?\\n?`, "g"), "\n")
     .replace(
       `document.documentElement.dataset.theme = ${storageName}.getItem("ihp-theme") || "dark";`,
       'document.documentElement.dataset.theme = "dark";'
@@ -32,16 +32,16 @@ async function patchClientBundle() {
 
   const replacements = [
     [
-      '  vice_president: "BaÅŸkan YardÄ±mcÄ±sÄ±",\n  spokesperson: "Parti SÃ¶zcÃ¼sÃ¼",',
-      '  vice_president: "BaÅŸkan YardÄ±mcÄ±sÄ±",\n  presidential_aide: "BaÅŸkan Yaveri",\n  spokesperson: "Parti SÃ¶zcÃ¼sÃ¼",'
+      '  vice_president: "Başkan Yardımcısı",\n  spokesperson: "Parti Sözcüsü",',
+      '  vice_president: "Başkan Yardımcısı",\n  presidential_aide: "Başkan Yaveri",\n  spokesperson: "Parti Sözcüsü",'
     ],
     [
-      '  discipline_chair: "Disiplin Kurulu BaÅŸkanÄ±",\n  discipline_member: "Disiplin Kurulu Ãœyesi",',
-      '  discipline_chair: "Disiplin Kurulu BaÅŸkanÄ±",\n  discipline_vice_chair: "Disiplin Kurulu BaÅŸkan YardÄ±mcÄ±sÄ±",\n  discipline_admission_officer: "Disiplin BaÅŸkanÄ± + Ãœye AlÄ±m Sorumlusu",\n  discipline_member: "Disiplin Kurulu Ãœyesi",'
+      '  discipline_chair: "Disiplin Kurulu Başkanı",\n  discipline_member: "Disiplin Kurulu Üyesi",',
+      '  discipline_chair: "Disiplin Kurulu Başkanı",\n  discipline_vice_chair: "Disiplin Kurulu Başkan Yardımcısı",\n  discipline_admission_officer: "Disiplin Başkanı + Üye Alım Sorumlusu",\n  discipline_member: "Disiplin Kurulu Üyesi",'
     ],
     [
-      '  admission_officer: "Ãœye AlÄ±m Sorumlusu",\n  member: "Ãœye",',
-      '  admission_officer: "Ãœye AlÄ±m Sorumlusu",\n  representative: "Temsilci",\n  chief_representative: "BaÅŸ Temsilci",\n  member: "Ãœye",'
+      '  admission_officer: "Üye Alım Sorumlusu",\n  member: "Üye",',
+      '  admission_officer: "Üye Alım Sorumlusu",\n  representative: "Temsilci",\n  chief_representative: "Baş Temsilci",\n  member: "Üye",'
     ],
     [
       '["super_admin", "president", "vice_president", "admission_officer"].includes(',
@@ -64,20 +64,20 @@ async function patchClientBundle() {
       '["super_admin", "president", "vice_president", "admission_officer", "discipline_admission_officer"].includes(\n      state.profile?.role\n    )'
     ],
     [
-      '<label for="invite-name">Anonim gÃ¶rÃ¼nen ad</label>',
-      '<label for="invite-name">GÃ¶rÃ¼nen ad</label>'
+      '<label for="invite-name">Anonim görünen ad</label>',
+      '<label for="invite-name">Görünen ad</label>'
     ],
     [
-      'placeholder="Ãœye 1"',
+      'placeholder="Üye 1"',
       'placeholder="Ad Soyad"'
     ],
     [
-      'title="Ãœye 1 gibi anonim bir etiket veya rol adÄ± kullanÄ±n."',
-      'title="Ad soyad veya gÃ¼venli gÃ¶rÃ¼nen ad kullanÄ±n."'
+      'title="Üye 1 gibi anonim bir etiket veya rol adı kullanın."',
+      'title="Ad soyad veya güvenli görünen ad kullanın."'
     ],
     [
-      'pattern="Ãœye [0-9]+|Yeni Ãœye|Yetkili Ãœye|Disiplin Yetkilisi|SÃ¼per Admin|BaÅŸkan|BaÅŸkan YardÄ±mcÄ±sÄ±|Parti SÃ¶zcÃ¼sÃ¼|Disiplin Kurulu BaÅŸkanÄ±|Disiplin Kurulu Ãœyesi|GenÃ§lik Kurulu BaÅŸkanÄ±|GenÃ§lik Kurulu Ãœyesi|Ãœye AlÄ±m Sorumlusu|Misafir Ãœye"',
-      'pattern="[A-Za-zÃ‡ÄÄ°Ã–ÅÃœÃ§ÄŸÄ±Ã¶ÅŸÃ¼ .\'-]{2,48}"'
+      'pattern="Üye [0-9]+|Yeni Üye|Yetkili Üye|Disiplin Yetkilisi|Süper Admin|Başkan|Başkan Yardımcısı|Parti Sözcüsü|Disiplin Kurulu Başkanı|Disiplin Kurulu Üyesi|Gençlik Kurulu Başkanı|Gençlik Kurulu Üyesi|Üye Alım Sorumlusu|Misafir Üye"',
+      'pattern="[A-Za-zÇĞİÖŞÜçğıöşü .\'-]{2,48}"'
     ]
   ];
 
@@ -125,12 +125,24 @@ async function patchPortalServiceBundle() {
 }
 
 function normalizeSnapshotFiles(files) {
-  if (Array.isArray(files)) return files;
-  if (files && typeof files === "object") {
-    return Object.entries(files).map(([path, content]) => ({
-      path: path.startsWith("dist/") ? path : `dist/${path}`,
-      content
+  const normalizePath = (path) => {
+    const normalizedPath = path.replaceAll("\\", "/");
+    return normalizedPath.startsWith("dist/") ? normalizedPath : `dist/${normalizedPath}`;
+  };
+
+  if (Array.isArray(files)) {
+    return files.map((file) => ({
+      ...file,
+      path: normalizePath(file.path)
     }));
+  }
+  if (files && typeof files === "object") {
+    return Object.entries(files).map(([path, content]) => {
+      return {
+        path: normalizePath(path),
+        content
+      };
+    });
   }
   throw new Error("Yayin paketi gecersiz dosya formatinda.");
 }
