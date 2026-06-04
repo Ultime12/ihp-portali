@@ -18,6 +18,7 @@ const VALID_STATUSES = new Set(["active", "passive", "suspended", "left", "pendi
 const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'-]{1,47}$/u;
 const INITIALS_PATTERN = /^[\p{L}0-9]{1,4}$/u;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -117,6 +118,47 @@ function cleanProfilePayload(body, actorRoles) {
   };
 }
 
+function normalizeCommitteeIds(input) {
+  if (!Array.isArray(input)) return null;
+  const ids = [...new Set(input.map((id) => String(id).trim()).filter(Boolean))];
+  return ids.every((id) => UUID_PATTERN.test(id)) ? ids : null;
+}
+
+async function updateProfileCommittees(profileId, committeeIds, actorId) {
+  const deleteResponse = await supabaseRequest(
+    `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(profileId)}`,
+    {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" }
+    }
+  );
+  if (!deleteResponse.ok) {
+    const result = await deleteResponse.json().catch(() => ({}));
+    throw new Error(result.message || "Kurul \u00fcyelikleri temizlenemedi.");
+  }
+
+  if (!committeeIds.length) {
+    return null;
+  }
+
+  const rows = committeeIds.map((committeeId) => ({
+    profile_id: profileId,
+    committee_id: committeeId,
+    role_in_committee: "manual",
+    assigned_by: actorId
+  }));
+  const insertResponse = await supabaseRequest("/rest/v1/profile_committees", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(rows)
+  });
+  const result = await insertResponse.json().catch(() => null);
+  if (!insertResponse.ok) {
+    throw new Error(result?.message || "Kurul \u00fcyelikleri kaydedilemedi.");
+  }
+  return result;
+}
+
 function isProtectedForVice(profile) {
   const roles = Array.isArray(profile?.roles) && profile.roles.length ? profile.roles : [profile?.role];
   return roles.some((role) => role === "super_admin" || role === "president");
@@ -175,9 +217,23 @@ export default async function handler(request, response) {
 
   const payload = cleanProfilePayload(request.body, actor.roles);
   if (!payload) return json(response, 400, { error: "Uye bilgileri gecersiz." });
+  const committeeIds = Object.prototype.hasOwnProperty.call(request.body || {}, "committee_ids")
+    ? normalizeCommitteeIds(request.body.committee_ids)
+    : null;
+  if (committeeIds === null && Object.prototype.hasOwnProperty.call(request.body || {}, "committee_ids")) {
+    return json(response, 400, { error: "Kurul secimi gecersiz." });
+  }
 
   if (viceOnly && payload.roles.some((role) => role === "super_admin" || role === "president")) {
     return json(response, 403, { error: "Baskan yardimcisi super admin veya baskan rollerini veremez." });
+  }
+
+  if (committeeIds && !hasAny(actor.roles, FULL_MANAGER_ROLES)) {
+    return json(response, 403, { error: "Kurul atamak icin baskan veya super admin yetkisi gerekir." });
+  }
+
+  if (committeeIds) {
+    payload.committee_id = committeeIds[0] || null;
   }
 
   const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
@@ -190,6 +246,14 @@ export default async function handler(request, response) {
     return json(response, patchResponse.status, {
       error: patched?.message || "Profil guncellenemedi."
     });
+  }
+
+  if (committeeIds) {
+    try {
+      await updateProfileCommittees(id, committeeIds, actor.authUser.id);
+    } catch (error) {
+      return json(response, 500, { error: error.message || "Kurul uyelikleri kaydedilemedi." });
+    }
   }
 
   if (password) {
