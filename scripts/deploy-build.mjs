@@ -110,6 +110,10 @@ async function patchPortalServiceBundle() {
     [
       'list("committees", "select=*,profiles(display_name)&order=name.asc")',
       'list("committees", "select=*,profiles!committees_chair_profile_id_fkey(display_name)&order=name.asc")'
+    ],
+    [
+      "profile_committees(committee_id,role_in_committee,committee:committees(id,name,status))",
+      "profile_committees!profile_committees_profile_id_fkey(committee_id,role_in_committee,committee:committees(id,name,status))"
     ]
   ];
 
@@ -178,6 +182,7 @@ async function unpackSnapshot() {
       await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, Buffer.from(file.content, "base64"));
     }
+    await patchPortalServiceBundle();
 
     console.log("Vercel ciktilari yeni yayin paketinden olusturuldu.");
     return true;
