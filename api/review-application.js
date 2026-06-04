@@ -1,8 +1,8 @@
-const UPPER_ROLES = new Set(["super_admin", "president", "vice_president", "presidential_aide"]);
 const VALID_DECISIONS = new Set(["reviewing", "accepted", "rejected"]);
 const REQUESTABLE_ROLES = new Set([
   "spokesperson",
   "discipline_chair",
+  "discipline_vice_chair",
   "discipline_member",
   "youth_chair",
   "youth_member",
@@ -70,6 +70,7 @@ function primaryRole(roles) {
     "vice_president",
     "presidential_aide",
     "discipline_chair",
+    "discipline_vice_chair",
     "youth_chair",
     "spokesperson",
     "chief_representative",
@@ -87,10 +88,54 @@ async function fetchSingle(path) {
   return response.ok ? row || null : null;
 }
 
-function canReview(actorRoles, committeeName) {
-  if (hasAny(actorRoles, UPPER_ROLES)) return true;
-  if (committeeName === "Disiplin Kurulu") return actorRoles.includes("discipline_chair");
+async function actorCommitteeIds(actorId) {
+  const response = await supabaseRequest(
+    `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(actorId)}&select=committee_id`
+  );
+  const rows = await response.json().catch(() => []);
+  return response.ok ? rows.map((row) => row.committee_id).filter(Boolean) : [];
+}
+
+function isExecutiveCommittee(name = "") {
+  return name === "Yürütme Kurulu" || name === "Yönetim Kurulu";
+}
+
+function canReview(actor, committee, application, actorCommittees = []) {
+  const actorRoles = actor.roles;
+  const committeeName = committee?.name || "";
+  const committeeId = committee?.id || "";
+  if (application.claimed_by && application.claimed_by !== actor.authUser.id && !actorRoles.includes("super_admin")) {
+    return false;
+  }
+  if (actorRoles.includes("super_admin")) return true;
+  if (
+    (isExecutiveCommittee(committeeName) || actorCommittees.includes(committeeId)) &&
+    hasAny(actorRoles, new Set(["president", "vice_president", "presidential_aide"]))
+  ) {
+    return true;
+  }
+  if (committeeName === "Disiplin Kurulu") {
+    return hasAny(actorRoles, new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]));
+  }
   if (committeeName === "Gen\u00e7lik Kollar\u0131") return actorRoles.includes("youth_chair");
+  return false;
+}
+
+function canAcceptRequestedRole(actorRoles, committeeName, requestedRole) {
+  if (actorRoles.includes("super_admin")) return true;
+  if (committeeName === "Disiplin Kurulu") {
+    if (actorRoles.includes("discipline_member")) return requestedRole === "discipline_member";
+    if (actorRoles.includes("discipline_vice_chair")) return requestedRole === "discipline_member";
+    if (actorRoles.includes("discipline_chair")) {
+      return ["discipline_member", "discipline_vice_chair"].includes(requestedRole);
+    }
+  }
+  if (committeeName === "Gen\u00e7lik Kollar\u0131") {
+    return actorRoles.includes("youth_chair") && ["youth_member"].includes(requestedRole);
+  }
+  if (hasAny(actorRoles, new Set(["president", "vice_president", "presidential_aide"]))) {
+    return !["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"].includes(requestedRole);
+  }
   return false;
 }
 
@@ -106,6 +151,36 @@ async function addCommitteeMembership(profileId, committeeId, actorId) {
       assigned_by: actorId
     })
   });
+}
+
+async function notify(profileId, actorId, title, body) {
+  if (!profileId) return;
+  await supabaseRequest("/rest/v1/notifications", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      recipient_id: profileId,
+      actor_id: actorId,
+      title,
+      body,
+      category: "application",
+      link: "#/portal/applications"
+    })
+  }).catch(() => undefined);
+}
+
+async function audit(actorId, applicationId, summary, details = {}) {
+  await supabaseRequest("/rest/v1/audit_logs", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      action: "update",
+      actor_id: actorId,
+      target_type: "applications",
+      target_id: applicationId,
+      details: { summary, ...details }
+    })
+  }).catch(() => undefined);
 }
 
 export default async function handler(request, response) {
@@ -124,7 +199,7 @@ export default async function handler(request, response) {
   const actor = await authenticateActor(request);
   if (!actor) return json(response, 401, { error: "Oturum bulunamadi." });
 
-  const { id, status, decisionNote = "" } = request.body || {};
+  const { id, status, decisionNote = "", claim = false } = request.body || {};
   if (!id || !VALID_DECISIONS.has(status)) {
     return json(response, 400, { error: "Basvuru karari gecersiz." });
   }
@@ -138,13 +213,42 @@ export default async function handler(request, response) {
   const committee = committeeId
     ? await fetchSingle(`/rest/v1/committees?id=eq.${encodeURIComponent(committeeId)}&select=id,name&limit=1`)
     : null;
-  if (!canReview(actor.roles, committee?.name || "")) {
+  const actorCommittees = await actorCommitteeIds(actor.authUser.id);
+  if (!canReview(actor, committee, application, actorCommittees)) {
     return json(response, 403, { error: "Bu basvuruyu sonuclandirma yetkiniz yok." });
   }
 
   const requestedRole = application.requested_role || "member";
   if (status === "accepted" && !REQUESTABLE_ROLES.has(requestedRole)) {
     return json(response, 400, { error: "Bu rol basvuru uzerinden verilemez." });
+  }
+  if (status === "accepted" && !canAcceptRequestedRole(actor.roles, committee?.name || "", requestedRole)) {
+    return json(response, 403, { error: "Bu rol icin onay hiyerarsisi uygun degil." });
+  }
+
+  if (claim) {
+    if ((committee?.name || "") !== "Disiplin Kurulu" || !actor.roles.includes("discipline_chair")) {
+      return json(response, 403, { error: "Sorumlulugu yalnizca disiplin kurulu baskani alabilir." });
+    }
+    const claimResponse = await supabaseRequest(`/rest/v1/applications?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        status: "reviewing",
+        decision_note: String(decisionNote).slice(0, 600),
+        claimed_by: actor.authUser.id,
+        claimed_at: new Date().toISOString(),
+        decided_by: actor.authUser.id,
+        decided_at: new Date().toISOString()
+      })
+    });
+    const claimed = await claimResponse.json().catch(() => null);
+    if (!claimResponse.ok) {
+      return json(response, claimResponse.status, { error: claimed?.message || "Sorumluluk kaydedilemedi." });
+    }
+    await audit(actor.authUser.id, id, "Başvuru sorumluluğu alındı", { status: "reviewing" });
+    await notify(application.applicant_profile_id, actor.authUser.id, "Başvurunuz incelemeye alındı", "Disiplin kurulu başkanı başvurunuzun sorumluluğunu aldı.");
+    return json(response, 200, { ok: true, application: claimed?.[0] || null });
   }
 
   if (status === "accepted" && application.applicant_profile_id) {
@@ -193,6 +297,17 @@ export default async function handler(request, response) {
       error: result?.message || "Basvuru sonucu kaydedilemedi."
     });
   }
+
+  await audit(actor.authUser.id, id, `Başvuru ${status === "accepted" ? "kabul edildi" : status === "rejected" ? "reddedildi" : "incelemeye alındı"}`, {
+    status,
+    requested_role: requestedRole
+  });
+  await notify(
+    application.applicant_profile_id,
+    actor.authUser.id,
+    status === "accepted" ? "Başvurunuz kabul edildi" : status === "rejected" ? "Başvurunuz reddedildi" : "Başvurunuz incelemeye alındı",
+    `${committee?.name || "Kurul"} başvurunuz ${status === "accepted" ? "kabul edildi" : status === "rejected" ? "reddedildi" : "incelemeye alındı"}. ${decisionNote ? `Not: ${decisionNote}` : ""}`
+  );
 
   return json(response, 200, { ok: true, application: result?.[0] || null });
 }
