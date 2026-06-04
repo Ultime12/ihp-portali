@@ -24,7 +24,7 @@ async function patchClientBundle() {
 
   const storageName = "local" + "Storage";
   let next = app
-    .replace(new RegExp(`\\s*${storageName}\\.setItem\\("ihp-theme", next\\);\\r?\\n?`, "g"), "\n")
+    .replace(new RegExp(`\\s*${storageName}\\.setItem\("ihp-theme", next\);\\r?\\n?`, "g"), "\n")
     .replace(
       `document.documentElement.dataset.theme = ${storageName}.getItem("ihp-theme") || "dark";`,
       'document.documentElement.dataset.theme = "dark";'
@@ -82,7 +82,7 @@ async function patchClientBundle() {
   ];
 
   for (const [from, to] of replacements) {
-    next = next.replace(from, to);
+    next = next.replaceAll(from, to);
   }
 
   if (next !== app) await writeFile(appPath, next);
@@ -118,7 +118,7 @@ async function patchPortalServiceBundle() {
   ];
 
   for (const [from, to] of replacements) {
-    next = next.replace(from, to);
+    next = next.replaceAll(from, to);
   }
 
   if (next !== service) await writeFile(servicePath, next);
@@ -158,6 +158,7 @@ async function unpackSnapshot() {
       await mkdir(dirname(destination), { recursive: true });
       await writeFile(destination, Buffer.from(file.content, "base64"));
     }
+    await patchPortalServiceBundle();
 
     console.log("Vercel ciktilari tek yayin paketinden olusturuldu.");
     return true;
@@ -226,10 +227,13 @@ async function sourceBuildAvailable() {
 try {
   if (await sourceBuildAvailable()) {
     await import("./build.mjs");
+    await patchPortalServiceBundle();
   } else if (!(await unpackSnapshot())) {
     await import("./build.mjs");
+    await patchPortalServiceBundle();
   }
 } catch (error) {
   if (error?.code !== "ENOENT") throw error;
   await import("./build.mjs");
+  await patchPortalServiceBundle();
 }
