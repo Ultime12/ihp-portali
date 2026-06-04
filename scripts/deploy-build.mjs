@@ -237,10 +237,12 @@ async function sourceBuildAvailable() {
 }
 
 try {
-  if (await sourceBuildAvailable()) {
+  if (await unpackSnapshot()) {
+    // Yayın paketini önce kullanarak canlı çıktının yerelde doğrulanan sürümle aynı kalmasını sağlıyoruz.
+  } else if (await sourceBuildAvailable()) {
     await import("./build.mjs");
     await patchPortalServiceBundle();
-  } else if (!(await unpackSnapshot())) {
+  } else {
     await import("./build.mjs");
     await patchPortalServiceBundle();
   }

@@ -125,7 +125,7 @@ function canAcceptRequestedRole(actorRoles, committeeName, requestedRole) {
   if (actorRoles.includes("super_admin")) return true;
   if (committeeName === "Disiplin Kurulu") {
     if (actorRoles.includes("discipline_member")) return requestedRole === "discipline_member";
-    if (actorRoles.includes("discipline_vice_chair")) return requestedRole === "discipline_member";
+    if (actorRoles.includes("discipline_vice_chair")) return ["discipline_member", "discipline_vice_chair"].includes(requestedRole);
     if (actorRoles.includes("discipline_chair")) {
       return ["discipline_member", "discipline_vice_chair"].includes(requestedRole);
     }

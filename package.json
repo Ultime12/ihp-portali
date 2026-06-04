@@ -8,6 +8,6 @@
   },
   "scripts": {
     "build": "node scripts/deploy-build.mjs",
-    "check": "npm run build && node --check dist/src/app.js && node --check dist/src/lib/supabase.js && node --check dist/src/lib/portal-service.js && node --check api/config.js && node --check api/invite-member.js && node --check api/manage-member.js && node --check api/review-application.js && node --check api/apply-discipline.js"
+    "check": "npm run build && node --check dist/src/app.js && node --check dist/src/lib/supabase.js && node --check dist/src/lib/portal-service.js && node --check api/config.js && node --check api/invite-member.js && node --check api/manage-member.js && node --check api/review-application.js && node --check api/review-complaint.js && node --check api/apply-discipline.js"
   }
 }

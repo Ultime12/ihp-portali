@@ -1,5 +1,8 @@
 const MANAGER_ROLES = new Set(["super_admin", "president", "vice_president"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin", "president"]);
+const DISCIPLINE_ROLE_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair"]);
+const DISCIPLINE_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const SETTABLE_DISCIPLINE_ROLES = new Set(["none", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const VALID_PROFILE_ROLES = new Set([
   "super_admin",
   "president",
@@ -16,7 +19,7 @@ const VALID_PROFILE_ROLES = new Set([
   "member"
 ]);
 const VALID_STATUSES = new Set(["active", "passive", "suspended", "left", "pending"]);
-const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'-]{1,47}$/u;
+const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'/-]{1,47}$/u;
 const INITIALS_PATTERN = /^[\p{L}0-9]{1,4}$/u;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -172,20 +175,65 @@ function rolesOf(profile) {
   return [...new Set(roles.filter(Boolean))];
 }
 
-function canRemoveDisciplineRole(actorRoles, targetRoles) {
-  if (!targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role))) {
-    return false;
-  }
+function disciplineRank(roles) {
+  if (roles.includes("discipline_chair")) return 3;
+  if (roles.includes("discipline_vice_chair")) return 2;
+  if (roles.includes("discipline_member")) return 1;
+  return 0;
+}
+
+function targetDisciplineRank(targetRole) {
+  if (targetRole === "discipline_chair") return 3;
+  if (targetRole === "discipline_vice_chair") return 2;
+  if (targetRole === "discipline_member") return 1;
+  return 0;
+}
+
+function canSetDisciplineRole(actorRoles, targetRoles, targetRole) {
+  const currentRank = disciplineRank(targetRoles);
+  const nextRank = targetDisciplineRank(targetRole);
+  if (currentRank === nextRank) return false;
   if (actorRoles.includes("super_admin") || actorRoles.includes("president")) return true;
+  if (targetRoles.some((role) => ["super_admin", "president", "vice_president"].includes(role))) return false;
   if (actorRoles.includes("discipline_chair")) {
-    return targetRoles.some((role) => ["discipline_vice_chair", "discipline_member"].includes(role)) &&
-      !targetRoles.some((role) => ["super_admin", "president"].includes(role));
+    return currentRank > 0 && currentRank < 3 && nextRank < 3;
   }
   if (actorRoles.includes("discipline_vice_chair")) {
-    return targetRoles.includes("discipline_member") &&
-      !targetRoles.some((role) => ["super_admin", "president", "discipline_chair", "discipline_vice_chair"].includes(role));
+    return currentRank === 1 && (nextRank === 2 || nextRank === 0);
   }
   return false;
+}
+
+function nextRolesWithDisciplineRole(currentRoles, targetRole) {
+  const nextRoles = currentRoles.filter((role) => !DISCIPLINE_ROLES.has(role));
+  if (targetRole !== "none") nextRoles.push(targetRole);
+  if (!nextRoles.length) nextRoles.push("member");
+  return [...new Set(nextRoles)];
+}
+
+async function setDisciplineCommitteeMembership(profileId, targetRole, actorId) {
+  const committeeResponse = await supabaseRequest("/rest/v1/committees?name=eq.Disiplin%20Kurulu&select=id&limit=1");
+  const [committee] = await committeeResponse.json().catch(() => []);
+  if (!committee?.id) return;
+
+  if (targetRole === "none") {
+    await supabaseRequest(
+      `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(profileId)}&committee_id=eq.${encodeURIComponent(committee.id)}`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } }
+    ).catch(() => undefined);
+    return;
+  }
+
+  await supabaseRequest("/rest/v1/profile_committees?on_conflict=profile_id,committee_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      profile_id: profileId,
+      committee_id: committee.id,
+      role_in_committee: "discipline_hierarchy",
+      assigned_by: actorId
+    })
+  }).catch(() => undefined);
 }
 
 async function insertAudit(actorId, targetId, summary, details = {}) {
@@ -230,13 +278,16 @@ export default async function handler(request, response) {
     return json(response, 500, { error: "Sunucu yapilandirmasi eksik." });
   }
 
-  const actor = await authenticateActor(request);
-  if (!actor || !hasAny(actor.roles, MANAGER_ROLES)) {
-    return json(response, 403, { error: "Bu islem icin baskan veya super admin yetkisi gerekir." });
-  }
-
   const { action, id, password } = request.body || {};
   if (!id || !action) return json(response, 400, { error: "Eksik uye islemi." });
+
+  const actor = await authenticateActor(request);
+  const actionAllowed = ["set_discipline_role", "remove_discipline_role"].includes(action)
+    ? actor && hasAny(actor.roles, DISCIPLINE_ROLE_MANAGERS)
+    : actor && hasAny(actor.roles, MANAGER_ROLES);
+  if (!actionAllowed) {
+    return json(response, 403, { error: "Bu islem icin yetkiniz yok." });
+  }
 
   if (action === "delete") {
     if (!hasAny(actor.roles, FULL_MANAGER_ROLES)) {
@@ -255,28 +306,27 @@ export default async function handler(request, response) {
     return json(response, 200, { ok: true, message: "Uye silindi." });
   }
 
-  if (action === "remove_discipline_role") {
+  if (action === "remove_discipline_role" || action === "set_discipline_role") {
+    const targetRole = action === "remove_discipline_role" ? "none" : String(request.body.targetRole || "none");
+    if (!SETTABLE_DISCIPLINE_ROLES.has(targetRole)) {
+      return json(response, 400, { error: "Disiplin rol hedefi gecersiz." });
+    }
     const target = await getProfileById(id);
     if (!target) return json(response, 404, { error: "Uye bulunamadi." });
     const currentRoles = rolesOf(target);
-    if (!canRemoveDisciplineRole(actor.roles, currentRoles)) {
-      return json(response, 403, { error: "Bu disiplin yetkisini alma yetkiniz yok." });
+    if (!canSetDisciplineRole(actor.roles, currentRoles, targetRole)) {
+      return json(response, 403, { error: "Disiplin hiyerarsisi bu isleme izin vermiyor." });
     }
 
-    const removable = actor.roles.includes("super_admin") || actor.roles.includes("president")
-      ? new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"])
-      : actor.roles.includes("discipline_chair")
-        ? new Set(["discipline_vice_chair", "discipline_member"])
-        : new Set(["discipline_member"]);
-    const nextRoles = currentRoles.filter((role) => !removable.has(role));
-    if (!nextRoles.length) nextRoles.push("member");
+    const nextRoles = nextRolesWithDisciplineRole(currentRoles, targetRole);
 
     const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({
         roles: nextRoles,
-        role: primaryRole(nextRoles)
+        role: primaryRole(nextRoles),
+        committee_id: targetRole === "none" ? null : target.committee_id
       })
     });
     const patched = await patchResponse.json().catch(() => null);
@@ -286,22 +336,19 @@ export default async function handler(request, response) {
       });
     }
 
-    if (!nextRoles.some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role))) {
-      const committeeResponse = await supabaseRequest("/rest/v1/committees?name=eq.Disiplin%20Kurulu&select=id&limit=1");
-      const [committee] = await committeeResponse.json().catch(() => []);
-      if (committee?.id) {
-        await supabaseRequest(
-          `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(id)}&committee_id=eq.${encodeURIComponent(committee.id)}`,
-          { method: "DELETE", headers: { Prefer: "return=minimal" } }
-        ).catch(() => undefined);
-      }
-    }
+    await setDisciplineCommitteeMembership(id, targetRole, actor.authUser.id);
 
-    await insertAudit(actor.authUser.id, id, "Disiplin kurulu yetkisi hiyerarşiye göre alındı", {
+    await insertAudit(actor.authUser.id, id, "Disiplin kurulu yetkisi hiyerarşiye göre güncellendi", {
       old_roles: currentRoles,
-      new_roles: nextRoles
+      new_roles: nextRoles,
+      target_role: targetRole
     });
-    await notify(id, actor.authUser.id, "Disiplin kurulu yetkiniz güncellendi", "Disiplin kurulu rolünüz hiyerarşi kuralına göre kaldırıldı.");
+    await notify(
+      id,
+      actor.authUser.id,
+      "Disiplin kurulu yetkiniz güncellendi",
+      `Yeni disiplin kurul durumunuz: ${targetRole === "none" ? "Disiplin kurulunda görev yok" : targetRole}.`
+    );
     return json(response, 200, { ok: true, profile: patched?.[0] || null });
   }
 
