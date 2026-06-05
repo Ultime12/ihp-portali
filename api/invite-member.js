@@ -1,5 +1,18 @@
 const MANAGER_ROLES = new Set(["super_admin", "president", "vice_president", "presidential_aide"]);
-const SUPER_MANAGER_ROLES = new Set(["super_admin"]);
+const PARTY_ROLES = new Set([
+  "president",
+  "vice_president",
+  "presidential_aide",
+  "spokesperson",
+  "discipline_chair",
+  "discipline_vice_chair",
+  "discipline_member",
+  "youth_chair",
+  "youth_member",
+  "representative",
+  "chief_representative",
+  "member"
+]);
 
 const VALID_PROFILE_ROLES = new Set([
   "super_admin",
@@ -35,8 +48,12 @@ function normalizeRoles(input, actorRoles) {
   const values = Array.isArray(input) ? input : [input || "member"];
   const roles = [...new Set(values.map((role) => String(role).trim()).filter(Boolean))];
   if (!roles.length || roles.some((role) => !VALID_PROFILE_ROLES.has(role))) return null;
-  if (roles.includes("super_admin") && !actorRoles.includes("super_admin")) return null;
+  if (roles.includes("super_admin") && !isTechnicalSuperAdminRoles(actorRoles)) return null;
   return roles;
+}
+
+function isTechnicalSuperAdminRoles(roles) {
+  return roles.includes("super_admin");
 }
 
 function primaryRole(roles) {
@@ -129,7 +146,7 @@ export default async function handler(request, response) {
     });
   }
 
-  if (!hasAny(actor.roles, SUPER_MANAGER_ROLES) && roles.some((role) => role !== "member")) {
+  if (!isTechnicalSuperAdminRoles(actor.roles) && roles.some((role) => role !== "member")) {
     return json(response, 403, {
       error: "Ilk kayitta ozel rol atamak icin super admin yetkisi gerekir."
     });
