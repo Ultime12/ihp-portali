@@ -1,4 +1,4 @@
-const SANCTION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair"]);
+const SANCTION_MANAGERS = new Set(["discipline_chair", "discipline_vice_chair"]);
 const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
 const VALID_EFFECTS = new Set(["remove_roles", "suspend_member", "passive_member"]);
 
@@ -74,7 +74,6 @@ function primaryRole(roles) {
 }
 
 function canAffectTarget(actorRoles, targetRoles) {
-  if (actorRoles.includes("super_admin")) return true;
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role) || role === "discipline_chair")) return false;
   if (actorRoles.includes("discipline_chair")) {
     return targetRoles.some((role) => ["discipline_vice_chair", "discipline_member"].includes(role));
@@ -143,9 +142,7 @@ export default async function handler(request, response) {
     return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
   }
 
-  const nextRoles = actor.roles.includes("super_admin")
-    ? ["member"]
-    : targetRoles.filter((role) => !["discipline_vice_chair", "discipline_member"].includes(role));
+  const nextRoles = targetRoles.filter((role) => !["discipline_vice_chair", "discipline_member"].includes(role));
   if (!nextRoles.length) nextRoles.push("member");
 
   const payload =
@@ -168,20 +165,13 @@ export default async function handler(request, response) {
   }
 
   if (effect === "remove_roles") {
-    if (actor.roles.includes("super_admin")) {
-      await supabaseRequest(`/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(memberId)}`, {
-        method: "DELETE",
-        headers: { Prefer: "return=minimal" }
-      }).catch(() => undefined);
-    } else {
-      const committeeResponse = await supabaseRequest("/rest/v1/committees?name=eq.Disiplin%20Kurulu&select=id&limit=1");
-      const [committee] = await committeeResponse.json().catch(() => []);
-      if (committee?.id) {
-        await supabaseRequest(
-          `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(memberId)}&committee_id=eq.${encodeURIComponent(committee.id)}`,
-          { method: "DELETE", headers: { Prefer: "return=minimal" } }
-        ).catch(() => undefined);
-      }
+    const committeeResponse = await supabaseRequest("/rest/v1/committees?name=eq.Disiplin%20Kurulu&select=id&limit=1");
+    const [committee] = await committeeResponse.json().catch(() => []);
+    if (committee?.id) {
+      await supabaseRequest(
+        `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(memberId)}&committee_id=eq.${encodeURIComponent(committee.id)}`,
+        { method: "DELETE", headers: { Prefer: "return=minimal" } }
+      ).catch(() => undefined);
     }
   }
 

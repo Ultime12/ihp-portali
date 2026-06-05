@@ -104,10 +104,9 @@ function canReview(actor, committee, application, actorCommittees = []) {
   const actorRoles = actor.roles;
   const committeeName = committee?.name || "";
   const committeeId = committee?.id || "";
-  if (application.claimed_by && application.claimed_by !== actor.authUser.id && !actorRoles.includes("super_admin")) {
+  if (application.claimed_by && application.claimed_by !== actor.authUser.id && !actorRoles.includes("discipline_chair")) {
     return false;
   }
-  if (actorRoles.includes("super_admin")) return true;
   if (
     (isExecutiveCommittee(committeeName) || actorCommittees.includes(committeeId)) &&
     hasAny(actorRoles, new Set(["president", "vice_president", "presidential_aide"]))
@@ -122,7 +121,6 @@ function canReview(actor, committee, application, actorCommittees = []) {
 }
 
 function canAcceptRequestedRole(actorRoles, committeeName, requestedRole) {
-  if (actorRoles.includes("super_admin")) return true;
   if (committeeName === "Disiplin Kurulu") {
     if (actorRoles.includes("discipline_member")) return requestedRole === "discipline_member";
     if (actorRoles.includes("discipline_vice_chair")) return ["discipline_member", "discipline_vice_chair"].includes(requestedRole);

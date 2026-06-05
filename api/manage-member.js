@@ -1,7 +1,7 @@
 const MANAGER_ROLES = new Set(["super_admin"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin"]);
 const ROLE_MODERATOR_ROLES = new Set(["super_admin", "president", "vice_president"]);
-const DISCIPLINE_ROLE_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair"]);
+const DISCIPLINE_ROLE_MANAGERS = new Set(["president", "discipline_chair", "discipline_vice_chair"]);
 const DISCIPLINE_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const SETTABLE_DISCIPLINE_ROLES = new Set(["none", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const VALID_PROFILE_ROLES = new Set([
@@ -205,7 +205,7 @@ function canSetDisciplineRole(actorRoles, targetRoles, targetRole) {
   const currentRank = disciplineRank(targetRoles);
   const nextRank = targetDisciplineRank(targetRole);
   if (currentRank === nextRank) return false;
-  if (actorRoles.includes("super_admin") || actorRoles.includes("president")) return true;
+  if (actorRoles.includes("president")) return true;
   if (targetRoles.some((role) => ["super_admin", "president", "vice_president"].includes(role))) return false;
   if (actorRoles.includes("discipline_chair")) {
     return currentRank > 0 && currentRank < 3 && nextRank < 3;
