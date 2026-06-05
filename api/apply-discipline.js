@@ -1,4 +1,4 @@
-const SANCTION_MANAGERS = new Set(["discipline_chair", "discipline_vice_chair"]);
+const SANCTION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
 const VALID_EFFECTS = new Set(["remove_roles", "suspend_member", "passive_member"]);
 
@@ -74,6 +74,7 @@ function primaryRole(roles) {
 }
 
 function canAffectTarget(actorRoles, targetRoles) {
+  if (actorRoles.includes("super_admin")) return true;
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role) || role === "discipline_chair")) return false;
   if (actorRoles.includes("discipline_chair")) {
     return targetRoles.some((role) => ["discipline_vice_chair", "discipline_member"].includes(role));
@@ -81,6 +82,9 @@ function canAffectTarget(actorRoles, targetRoles) {
   if (actorRoles.includes("discipline_vice_chair")) {
     return targetRoles.includes("discipline_member") &&
       !targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair"].includes(role));
+  }
+  if (actorRoles.includes("discipline_member")) {
+    return !targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role));
   }
   return false;
 }
@@ -135,14 +139,14 @@ export default async function handler(request, response) {
   }
 
   const targetRoles = rolesOf(target);
-  if (hasAny(targetRoles, PROTECTED_ROLES)) {
+  if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
     return json(response, 403, { error: "Baskan, baskan yardimcisi veya super admin yetkisi disiplin kaydindan alinamaz." });
   }
   if (!canAffectTarget(actor.roles, targetRoles)) {
     return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
   }
 
-  const nextRoles = targetRoles.filter((role) => !["discipline_vice_chair", "discipline_member"].includes(role));
+  const nextRoles = targetRoles.filter((role) => role === "member");
   if (!nextRoles.length) nextRoles.push("member");
 
   const payload =
@@ -195,8 +199,8 @@ export default async function handler(request, response) {
   await notify(
     memberId,
     actor.authUser.id,
-    "Disiplin yapt\u0131r\u0131m\u0131 uyguland\u0131",
-    `${effect === "remove_roles" ? "Disiplin kurulu yetkiniz g\u00fcncellendi" : "\u00dcyelik durumunuz g\u00fcncellendi"}. Kararname: ${reason}`
+    "Disiplin yaptırımı uygulandı",
+    `${effect === "remove_roles" ? "Disiplin kurulu yetkiniz güncellendi" : "Üyelik durumunuz güncellendi"}. Kararname: ${reason}`
   );
 
   return json(response, 200, { ok: true, profile: patched?.[0] || null });
