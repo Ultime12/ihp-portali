@@ -1,5 +1,5 @@
 const MANAGER_ROLES = new Set(["super_admin", "president", "vice_president", "presidential_aide"]);
-const SUPER_MANAGER_ROLES = new Set(["super_admin", "president"]);
+const SUPER_MANAGER_ROLES = new Set(["super_admin"]);
 
 const VALID_PROFILE_ROLES = new Set([
   "super_admin",
@@ -131,7 +131,7 @@ export default async function handler(request, response) {
 
   if (!hasAny(actor.roles, SUPER_MANAGER_ROLES) && roles.some((role) => role !== "member")) {
     return json(response, 403, {
-      error: "Bu rolleri atamak icin baskan veya super admin yetkisi gerekir."
+      error: "Ilk kayitta ozel rol atamak icin super admin yetkisi gerekir."
     });
   }
 
