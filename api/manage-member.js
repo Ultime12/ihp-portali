@@ -1,9 +1,23 @@
 const MANAGER_ROLES = new Set(["super_admin"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin"]);
 const ROLE_MODERATOR_ROLES = new Set(["super_admin", "president", "vice_president"]);
-const DISCIPLINE_ROLE_MANAGERS = new Set(["president", "discipline_chair", "discipline_vice_chair"]);
+const DISCIPLINE_ROLE_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair"]);
 const DISCIPLINE_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const SETTABLE_DISCIPLINE_ROLES = new Set(["none", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const PARTY_ROLES = new Set([
+  "president",
+  "vice_president",
+  "presidential_aide",
+  "spokesperson",
+  "discipline_chair",
+  "discipline_vice_chair",
+  "discipline_member",
+  "youth_chair",
+  "youth_member",
+  "representative",
+  "chief_representative",
+  "member"
+]);
 const VALID_PROFILE_ROLES = new Set([
   "super_admin",
   "president",
@@ -69,9 +83,13 @@ function hasAny(roles, allowed) {
   return roles.some((role) => allowed.has(role));
 }
 
+function isTechnicalSuperAdminRoles(roles) {
+  return roles.includes("super_admin");
+}
+
 async function getProfileById(id) {
   const response = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,role,roles,status,committee_id&limit=1`
   );
   const [profile] = await response.json().catch(() => []);
   return profile || null;
@@ -81,7 +99,7 @@ function normalizeRoles(input, actorRoles) {
   const values = Array.isArray(input) ? input : [input || "member"];
   const roles = [...new Set(values.map((role) => String(role).trim()).filter(Boolean))];
   if (!roles.length || roles.some((role) => !VALID_PROFILE_ROLES.has(role))) return null;
-  if (roles.includes("super_admin") && !actorRoles.includes("super_admin")) return null;
+  if (roles.includes("super_admin") && !isTechnicalSuperAdminRoles(actorRoles)) return null;
   return roles;
 }
 
@@ -140,12 +158,10 @@ async function updateProfileCommittees(profileId, committeeIds, actorId) {
   );
   if (!deleteResponse.ok) {
     const result = await deleteResponse.json().catch(() => ({}));
-    throw new Error(result.message || "Kurul \u00fcyelikleri temizlenemedi.");
+    throw new Error(result.message || "Kurul uyelikleri temizlenemedi.");
   }
 
-  if (!committeeIds.length) {
-    return null;
-  }
+  if (!committeeIds.length) return null;
 
   const rows = committeeIds.map((committeeId) => ({
     profile_id: profileId,
@@ -160,7 +176,7 @@ async function updateProfileCommittees(profileId, committeeIds, actorId) {
   });
   const result = await insertResponse.json().catch(() => null);
   if (!insertResponse.ok) {
-    throw new Error(result?.message || "Kurul \u00fcyelikleri kaydedilemedi.");
+    throw new Error(result?.message || "Kurul uyelikleri kaydedilemedi.");
   }
   return result;
 }
@@ -171,7 +187,7 @@ function isProtectedForVice(profile) {
 }
 
 function canModerateProfile(actorRoles, targetRoles, requestedRoles) {
-  if (actorRoles.includes("super_admin")) return true;
+  if (isTechnicalSuperAdminRoles(actorRoles)) return true;
   if (targetRoles.some((role) => ["super_admin", "president"].includes(role))) return false;
   if (actorRoles.includes("vice_president") && targetRoles.includes("vice_president")) return false;
 
@@ -205,6 +221,7 @@ function canSetDisciplineRole(actorRoles, targetRoles, targetRole) {
   const currentRank = disciplineRank(targetRoles);
   const nextRank = targetDisciplineRank(targetRole);
   if (currentRank === nextRank) return false;
+  if (actorRoles.includes("super_admin")) return true;
   if (actorRoles.includes("president")) return true;
   if (targetRoles.some((role) => ["super_admin", "president", "vice_president"].includes(role))) return false;
   if (actorRoles.includes("discipline_chair")) {
@@ -294,11 +311,12 @@ export default async function handler(request, response) {
   if (!id || !action) return json(response, 400, { error: "Eksik uye islemi." });
 
   const actor = await authenticateActor(request);
+  const isFullManager = actor && isTechnicalSuperAdminRoles(actor.roles);
   const actionAllowed = ["set_discipline_role", "remove_discipline_role"].includes(action)
     ? actor && hasAny(actor.roles, DISCIPLINE_ROLE_MANAGERS)
     : action === "moderate"
       ? actor && hasAny(actor.roles, ROLE_MODERATOR_ROLES)
-      : actor && hasAny(actor.roles, MANAGER_ROLES);
+      : isFullManager;
   if (!actionAllowed) {
     return json(response, 403, { error: "Bu islem icin yetkiniz yok." });
   }
@@ -439,7 +457,7 @@ export default async function handler(request, response) {
   }
 
   if (committeeIds && !hasAny(actor.roles, FULL_MANAGER_ROLES)) {
-    return json(response, 403, { error: "Kurul atamak icin baskan veya super admin yetkisi gerekir." });
+    return json(response, 403, { error: "Kurul atamak icin super admin yetkisi gerekir." });
   }
 
   if (committeeIds) {
