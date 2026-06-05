@@ -1,5 +1,5 @@
-const COMPLAINT_MANAGERS = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
-const OVERRIDE_MANAGERS = new Set(["discipline_chair"]);
+const COMPLAINT_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const OVERRIDE_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const VALID_STATUSES = new Set(["new", "reviewing", "resolved", "rejected", "closed"]);
 
 function json(response, status, body) {
@@ -160,16 +160,16 @@ export default async function handler(request, response) {
     await notify(
       complaint.assigned_to,
       actor.authUser.id,
-      "Şikayet sorumluluğu devredildi",
-      "Üstlendiğiniz şikayet disiplin kurulu başkanı tarafından devralındı."
+      "Åikayet sorumluluÄŸu devredildi",
+      "ÃœstlendiÄŸiniz ÅŸikayet disiplin kurulu baÅŸkanÄ± tarafÄ±ndan devralÄ±ndÄ±."
     );
   }
 
   await notify(
     complaint.complainant_profile_id,
     actor.authUser.id,
-    status === "reviewing" ? "Şikayetiniz incelemeye alındı" : "Şikayetiniz güncellendi",
-    decisionNote || "Şikayet kaydınız disiplin kurulu tarafından güncellendi."
+    status === "reviewing" ? "Åikayetiniz incelemeye alÄ±ndÄ±" : "Åikayetiniz gÃ¼ncellendi",
+    decisionNote || "Åikayet kaydÄ±nÄ±z disiplin kurulu tarafÄ±ndan gÃ¼ncellendi."
   );
 
   return json(response, 200, { ok: true, complaint: updated?.[0] || null });
