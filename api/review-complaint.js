@@ -112,13 +112,14 @@ export default async function handler(request, response) {
   if (assignedToOther && !hasAny(actor.roles, OVERRIDE_MANAGERS)) {
     return json(response, 403, { error: "Bu sikayet baska bir yetkili tarafindan ustlenilmis." });
   }
+  const shouldAssignToActor = claim || !complaint.assigned_to || assignedToOther;
 
   const patch = {
     status,
     decision_note: decisionNote || complaint.decision_note || null
   };
 
-  if (claim || !complaint.assigned_to) {
+  if (shouldAssignToActor) {
     patch.assigned_to = actor.authUser.id;
     patch.assigned_at = new Date().toISOString();
   }
@@ -143,8 +144,10 @@ export default async function handler(request, response) {
     });
   }
 
-  const summary = claim || !complaint.assigned_to
-    ? "Sikayet sorumlulugu alindi"
+  const summary = assignedToOther && shouldAssignToActor
+    ? "Sikayet sorumlulugu disiplin kurulu baskani tarafindan devralindi"
+    : claim || !complaint.assigned_to
+      ? "Sikayet sorumlulugu alindi"
     : `Sikayet durumu ${status} olarak guncellendi`;
   await audit(actor.authUser.id, id, summary, {
     old_status: complaint.status,
@@ -152,6 +155,15 @@ export default async function handler(request, response) {
     old_assigned_to: complaint.assigned_to,
     new_assigned_to: patch.assigned_to || complaint.assigned_to
   });
+
+  if (assignedToOther && shouldAssignToActor) {
+    await notify(
+      complaint.assigned_to,
+      actor.authUser.id,
+      "Şikayet sorumluluğu devredildi",
+      "Üstlendiğiniz şikayet disiplin kurulu başkanı tarafından devralındı."
+    );
+  }
 
   await notify(
     complaint.complainant_profile_id,
