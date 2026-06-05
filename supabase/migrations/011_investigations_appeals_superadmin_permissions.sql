@@ -236,11 +236,11 @@ grant execute on function private.can_manage_investigations() to authenticated, 
 grant execute on function private.discipline_rank(public.app_role[]) to authenticated, service_role;
 grant execute on function private.enforce_discipline_record_hierarchy() to authenticated, service_role;
 
-delete from public.notifications;
-delete from public.audit_logs;
 delete from public.discipline_records;
 delete from public.applications;
 delete from public.complaints;
 delete from public.investigations;
 delete from public.youth_activities;
 delete from public.announcements;
+delete from public.notifications;
+delete from public.audit_logs;
