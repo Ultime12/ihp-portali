@@ -1,5 +1,6 @@
-const MANAGER_ROLES = new Set(["super_admin", "president", "vice_president"]);
-const FULL_MANAGER_ROLES = new Set(["super_admin", "president"]);
+const MANAGER_ROLES = new Set(["super_admin"]);
+const FULL_MANAGER_ROLES = new Set(["super_admin"]);
+const ROLE_MODERATOR_ROLES = new Set(["super_admin", "president", "vice_president"]);
 const DISCIPLINE_ROLE_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair"]);
 const DISCIPLINE_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const SETTABLE_DISCIPLINE_ROLES = new Set(["none", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
@@ -19,7 +20,7 @@ const VALID_PROFILE_ROLES = new Set([
   "member"
 ]);
 const VALID_STATUSES = new Set(["active", "passive", "suspended", "left", "pending"]);
-const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'/-]{1,47}$/u;
+const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'-]{1,47}$/u;
 const INITIALS_PATTERN = /^[\p{L}0-9]{1,4}$/u;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -169,6 +170,17 @@ function isProtectedForVice(profile) {
   return roles.some((role) => role === "super_admin" || role === "president");
 }
 
+function canModerateProfile(actorRoles, targetRoles, requestedRoles) {
+  if (actorRoles.includes("super_admin")) return true;
+  if (targetRoles.some((role) => ["super_admin", "president"].includes(role))) return false;
+  if (actorRoles.includes("vice_president") && targetRoles.includes("vice_president")) return false;
+
+  const forbidden = actorRoles.includes("president")
+    ? new Set(["super_admin", "president"])
+    : new Set(["super_admin", "president", "vice_president"]);
+  return !requestedRoles.some((role) => forbidden.has(role));
+}
+
 function rolesOf(profile) {
   const roles = Array.isArray(profile?.roles) && profile.roles.length ? [...profile.roles] : [];
   if (profile?.role && !roles.includes(profile.role)) roles.unshift(profile.role);
@@ -284,14 +296,16 @@ export default async function handler(request, response) {
   const actor = await authenticateActor(request);
   const actionAllowed = ["set_discipline_role", "remove_discipline_role"].includes(action)
     ? actor && hasAny(actor.roles, DISCIPLINE_ROLE_MANAGERS)
-    : actor && hasAny(actor.roles, MANAGER_ROLES);
+    : action === "moderate"
+      ? actor && hasAny(actor.roles, ROLE_MODERATOR_ROLES)
+      : actor && hasAny(actor.roles, MANAGER_ROLES);
   if (!actionAllowed) {
     return json(response, 403, { error: "Bu islem icin yetkiniz yok." });
   }
 
   if (action === "delete") {
     if (!hasAny(actor.roles, FULL_MANAGER_ROLES)) {
-      return json(response, 403, { error: "Uye silmek icin baskan veya super admin yetkisi gerekir." });
+      return json(response, 403, { error: "Uye silmek icin super admin yetkisi gerekir." });
     }
     if (id === actor.authUser.id) return json(response, 400, { error: "Kendi hesabinizi silemezsiniz." });
     const deleteResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
@@ -352,6 +366,52 @@ export default async function handler(request, response) {
     return json(response, 200, { ok: true, profile: patched?.[0] || null });
   }
 
+  if (action === "moderate") {
+    const beforeProfile = await getProfileById(id);
+    if (!beforeProfile) return json(response, 404, { error: "Uye bulunamadi." });
+    if (id === actor.authUser.id) return json(response, 400, { error: "Kendi rolunuzu bu panelden degistiremezsiniz." });
+
+    const currentRoles = rolesOf(beforeProfile);
+    const requestedRoles = normalizeRoles(request.body.roles || request.body.role, actor.roles);
+    if (!requestedRoles || !VALID_STATUSES.has(request.body.status || beforeProfile.status || "active")) {
+      return json(response, 400, { error: "Rol veya durum bilgisi gecersiz." });
+    }
+    if (!canModerateProfile(actor.roles, currentRoles, requestedRoles)) {
+      return json(response, 403, { error: "Baskanlik hiyerarsisi bu rol degisikligine izin vermiyor." });
+    }
+
+    const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        roles: requestedRoles,
+        role: primaryRole(requestedRoles),
+        status: request.body.status || beforeProfile.status || "active"
+      })
+    });
+    const patched = await patchResponse.json().catch(() => null);
+    if (!patchResponse.ok) {
+      return json(response, patchResponse.status, {
+        error: patched?.message || "Rol ve durum guncellenemedi."
+      });
+    }
+
+    await insertAudit(actor.authUser.id, id, "Baskanlik panelinden rol ve durum guncellendi", {
+      old_roles: currentRoles,
+      new_roles: requestedRoles,
+      old_status: beforeProfile.status,
+      new_status: request.body.status || beforeProfile.status || "active"
+    });
+    await notify(
+      id,
+      actor.authUser.id,
+      "Portal rol/durum bilginiz guncellendi",
+      `Yeni rolleriniz: ${requestedRoles.join(", ")}.`
+    );
+
+    return json(response, 200, { ok: true, profile: patched?.[0] || null });
+  }
+
   if (action !== "update") return json(response, 400, { error: "Gecersiz islem." });
 
   const beforeProfile = await getProfileById(id);
@@ -408,7 +468,7 @@ export default async function handler(request, response) {
 
   if (password) {
     if (!hasAny(actor.roles, FULL_MANAGER_ROLES)) {
-      return json(response, 403, { error: "Sifre degistirmek icin baskan veya super admin yetkisi gerekir." });
+      return json(response, 403, { error: "Sifre degistirmek icin super admin yetkisi gerekir." });
     }
     if (String(password).length < 8) return json(response, 400, { error: "Sifre en az 8 karakter olmali." });
     const passwordResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
