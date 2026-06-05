@@ -97,13 +97,14 @@ async function actorCommitteeIds(actorId) {
 }
 
 function isExecutiveCommittee(name = "") {
-  return name === "Yürütme Kurulu" || name === "Yönetim Kurulu";
+  return name === "YÃ¼rÃ¼tme Kurulu" || name === "YÃ¶netim Kurulu";
 }
 
 function canReview(actor, committee, application, actorCommittees = []) {
   const actorRoles = actor.roles;
   const committeeName = committee?.name || "";
   const committeeId = committee?.id || "";
+  if (actorRoles.includes("super_admin")) return true;
   if (application.claimed_by && application.claimed_by !== actor.authUser.id && !actorRoles.includes("discipline_chair")) {
     return false;
   }
@@ -116,11 +117,12 @@ function canReview(actor, committee, application, actorCommittees = []) {
   if (committeeName === "Disiplin Kurulu") {
     return hasAny(actorRoles, new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]));
   }
-  if (committeeName === "Gen\u00e7lik Kollar\u0131") return actorRoles.includes("youth_chair");
+  if (committeeName === "Gençlik Kolları") return actorRoles.includes("youth_chair");
   return false;
 }
 
 function canAcceptRequestedRole(actorRoles, committeeName, requestedRole) {
+  if (actorRoles.includes("super_admin")) return true;
   if (committeeName === "Disiplin Kurulu") {
     if (actorRoles.includes("discipline_member")) return requestedRole === "discipline_member";
     if (actorRoles.includes("discipline_vice_chair")) return ["discipline_member", "discipline_vice_chair"].includes(requestedRole);
@@ -128,7 +130,7 @@ function canAcceptRequestedRole(actorRoles, committeeName, requestedRole) {
       return ["discipline_member", "discipline_vice_chair"].includes(requestedRole);
     }
   }
-  if (committeeName === "Gen\u00e7lik Kollar\u0131") {
+  if (committeeName === "Gençlik Kolları") {
     return actorRoles.includes("youth_chair") && ["youth_member"].includes(requestedRole);
   }
   if (hasAny(actorRoles, new Set(["president", "vice_president", "presidential_aide"]))) {
@@ -225,7 +227,7 @@ export default async function handler(request, response) {
   }
 
   if (claim) {
-    if ((committee?.name || "") !== "Disiplin Kurulu" || !actor.roles.includes("discipline_chair")) {
+    if (!actor.roles.includes("super_admin") && ((committee?.name || "") !== "Disiplin Kurulu" || !actor.roles.includes("discipline_chair"))) {
       return json(response, 403, { error: "Sorumlulugu yalnizca disiplin kurulu baskani alabilir." });
     }
     const claimResponse = await supabaseRequest(`/rest/v1/applications?id=eq.${encodeURIComponent(id)}`, {
