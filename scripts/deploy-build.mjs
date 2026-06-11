@@ -26,18 +26,18 @@ async function readPackageEntry(name) {
 }
 
 async function readSnapshotBuffer() {
+  try {
+    return await readPackageEntry("runtime.br.b64");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
   const runtimeEntries = (await readdir(packageDir))
     .filter((name) => /^runtime-\d+\.br(\.b64)?$/.test(name))
     .sort();
   if (runtimeEntries.length) {
     const chunks = await Promise.all(runtimeEntries.map(readPackageEntry));
     return Buffer.concat(chunks);
-  }
-
-  try {
-    return await readPackageEntry("runtime.br.b64");
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
   }
 
   const bundleEntries = (await readdir(packageDir))
