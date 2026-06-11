@@ -1,4 +1,4 @@
-const SANCTION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const SANCTION_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
 const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "passive_member"]);
 const POINT_MIN = 0;
@@ -141,14 +141,21 @@ export default async function handler(request, response) {
     return json(response, 403, { error: "Disiplin yaptirimi uygulama yetkiniz yok." });
   }
 
-  const { memberId, disciplineRecordId, reason = "Disiplin kararnamesi" } = request.body || {};
+  const {
+    memberId,
+    disciplineRecordId,
+    reason = "Disiplin kararnamesi",
+    recordType,
+    description,
+    decreeText
+  } = request.body || {};
   let effect = request.body?.effect || "none";
   const pointDelta = normalizePointDelta(request.body?.pointDelta);
 
   if (!memberId || !VALID_EFFECTS.has(effect) || pointDelta === null) {
     return json(response, 400, { error: "Yaptirim bilgisi gecersiz." });
   }
-  if (!String(reason || "").trim()) {
+  if (!String(decreeText || reason || "").trim()) {
     return json(response, 400, { error: "Kararname metni zorunludur." });
   }
 
@@ -161,6 +168,27 @@ export default async function handler(request, response) {
   if (effect !== "reward_points" && pointDelta > 0) {
     return json(response, 400, { error: "Pozitif puan yalnizca odul islemiyle verilebilir." });
   }
+  const isReward = effect === "reward_points";
+  const decreeBody = String(decreeText || reason || "").trim();
+  const recordReason = String(description || request.body?.shortReason || (isReward ? "Odul puani" : "Disiplin kararnamesi")).trim();
+
+  let disciplineRecord = null;
+  if (disciplineRecordId) {
+    const recordResponse = await supabaseRequest(
+      `/rest/v1/discipline_records?id=eq.${encodeURIComponent(disciplineRecordId)}&select=id,member_id,investigation_id,record_type&limit=1`
+    );
+    const [record] = await recordResponse.json().catch(() => []);
+    if (!recordResponse.ok || !record) {
+      return json(response, 404, { error: "Disiplin kaydi bulunamadi." });
+    }
+    if (record.member_id !== memberId) {
+      return json(response, 400, { error: "Disiplin kaydi ilgili uye ile eslesmiyor." });
+    }
+    disciplineRecord = record;
+  }
+  if (!isReward && (!disciplineRecord || !disciplineRecord.investigation_id)) {
+    return json(response, 400, { error: "Ceza yaptirimi icin once sorusturmaya bagli disiplin kaydi gerekir." });
+  }
 
   const profileResponse = await supabaseRequest(
     `/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}&select=id,role,roles,status,discipline_points&limit=1`
@@ -171,9 +199,13 @@ export default async function handler(request, response) {
   }
 
   const targetRoles = rolesOf(target);
-  const isReward = effect === "reward_points";
-  if (isReward && !actor.roles.includes("super_admin") && !actor.roles.includes("discipline_chair")) {
-    return json(response, 403, { error: "Odul puanini yalnizca disiplin kurulu baskani veya super admin verebilir." });
+  if (
+    isReward &&
+    !actor.roles.includes("super_admin") &&
+    !actor.roles.includes("president") &&
+    !actor.roles.includes("discipline_chair")
+  ) {
+    return json(response, 403, { error: "Odul puanini yalnizca super admin, baskan veya disiplin kurulu baskani verebilir." });
   }
   if (!isReward) {
     if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
@@ -226,17 +258,46 @@ export default async function handler(request, response) {
     ).catch(() => undefined);
   }
 
+  let savedDisciplineRecord = null;
+  const disciplinePayload = {
+    point_delta: pointDelta,
+    points_before: pointsBefore,
+    points_after: pointsAfter,
+    sanction_effect: effect
+  };
+
   if (disciplineRecordId) {
     await supabaseRequest(`/rest/v1/discipline_records?id=eq.${encodeURIComponent(disciplineRecordId)}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({
-        point_delta: pointDelta,
-        points_before: pointsBefore,
-        points_after: pointsAfter,
-        sanction_effect: effect
-      })
+      body: JSON.stringify(disciplinePayload)
     }).catch(() => undefined);
+    savedDisciplineRecord = { id: disciplineRecordId };
+  } else if (isReward) {
+    const insertResponse = await supabaseRequest("/rest/v1/discipline_records", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        member_id: memberId,
+        record_type: recordType || "\u00d6d\u00fcl",
+        reason: recordReason || "Odul puani",
+        description: recordReason || "Odul puani",
+        severity: "low",
+        decision_status: "decided",
+        decree_text: decreeBody,
+        action_taken: decreeBody,
+        privacy_level: "restricted",
+        created_by: actor.authUser.id,
+        ...disciplinePayload
+      })
+    });
+    const inserted = await insertResponse.json().catch(() => null);
+    if (!insertResponse.ok) {
+      return json(response, insertResponse.status, {
+        error: inserted?.message || "Odul kaydi olusturulamadi."
+      });
+    }
+    savedDisciplineRecord = inserted?.[0] || null;
   }
 
   await supabaseRequest("/rest/v1/audit_logs", {
@@ -286,6 +347,7 @@ export default async function handler(request, response) {
   return json(response, 200, {
     ok: true,
     profile: patched?.[0] || null,
+    disciplineRecord: savedDisciplineRecord,
     points: { before: pointsBefore, after: pointsAfter, delta: pointDelta }
   });
 }
