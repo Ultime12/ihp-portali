@@ -1,7 +1,7 @@
 const INVESTIGATION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const OVERRIDE_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
-const VALID_ACTIONS = new Set(["create", "claim", "reviewing", "closed", "cancelled"]);
+const VALID_ACTIONS = new Set(["create", "claim", "reviewing", "closed", "cancelled", "update", "delete"]);
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -170,7 +170,7 @@ export default async function handler(request, response) {
 
     const investigation = inserted?.[0] || null;
     await audit(actor.authUser.id, investigation?.id || subjectProfileId, "Sorusturma acildi", { subject_profile_id: subjectProfileId });
-    await notify(subjectProfileId, actor.authUser.id, "Hakkınızda soruşturma açıldı", title);
+    await notify(subjectProfileId, actor.authUser.id, "Hakkinizda sorusturma acildi", title);
     return json(response, 200, { ok: true, investigation });
   }
 
@@ -178,6 +178,54 @@ export default async function handler(request, response) {
   if (!id) return json(response, 400, { error: "Sorusturma id eksik." });
   const investigation = await fetchSingle(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
   if (!investigation) return json(response, 404, { error: "Sorusturma bulunamadi." });
+
+  if (action === "delete") {
+    if (!actor.roles.includes("super_admin")) {
+      return json(response, 403, { error: "Sorusturmayi yalnizca super admin silebilir." });
+    }
+    const deleteResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" }
+    });
+    if (!deleteResponse.ok) {
+      const result = await deleteResponse.json().catch(() => ({}));
+      return json(response, deleteResponse.status, { error: result.message || "Sorusturma silinemedi." });
+    }
+    await audit(actor.authUser.id, id, "Sorusturma super admin tarafindan silindi", { old_status: investigation.status });
+    await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturma kaydi silindi", "Hakkinizdaki sorusturma kaydi super admin tarafindan kaldirildi.");
+    return json(response, 200, { ok: true });
+  }
+
+  if (action === "update") {
+    if (!actor.roles.includes("super_admin")) {
+      return json(response, 403, { error: "Sorusturmayi yalnizca super admin duzenleyebilir." });
+    }
+    const title = String(body.title || investigation.title || "").trim();
+    const description = String(body.description || investigation.description || "").trim();
+    if (title.length < 3 || description.length < 10) {
+      return json(response, 400, { error: "Sorusturma basligi veya aciklamasi eksik." });
+    }
+    const patch = {
+      title: title.slice(0, 140),
+      description: description.slice(0, 1600),
+      evidence_note: String(body.evidenceNote ?? investigation.evidence_note ?? "").slice(0, 1200),
+      evidence_file: String(body.evidenceFile ?? investigation.evidence_file ?? ""),
+      evidence_filename: String(body.evidenceFilename ?? investigation.evidence_filename ?? "").slice(0, 180)
+    };
+    const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return json(response, updateResponse.status, { error: updated?.message || "Sorusturma duzenlenemedi." });
+    }
+    await audit(actor.authUser.id, id, "Sorusturma super admin tarafindan duzenlendi", { title: patch.title });
+    await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturma kaydi duzenlendi", patch.title);
+    return json(response, 200, { ok: true, investigation: updated?.[0] || null });
+  }
+
   if (["cancelled", "closed"].includes(investigation.status)) {
     return json(response, 400, { error: "Kapanmis sorusturma guncellenemez." });
   }
@@ -233,9 +281,9 @@ export default async function handler(request, response) {
     new_assigned_to: patch.assigned_to || investigation.assigned_to
   });
   if (assignedToOther && patch.assigned_to) {
-    await notify(investigation.assigned_to, actor.authUser.id, "Soruşturma sorumluluğu devredildi", "Üstlendiğiniz soruşturma DK başkanı/super admin tarafından devralındı.");
+    await notify(investigation.assigned_to, actor.authUser.id, "Sorusturma sorumlulugu devredildi", "Ustlendiginiz sorusturma DK baskani/super admin tarafindan devralindi.");
   }
-  await notify(investigation.subject_profile_id, actor.authUser.id, "Soruşturmanız güncellendi", decisionNote || "Soruşturma kaydınız güncellendi.");
+  await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturmaniz guncellendi", decisionNote || "Sorusturma kaydiniz guncellendi.");
 
   return json(response, 200, { ok: true, investigation: updated?.[0] || null });
 }
