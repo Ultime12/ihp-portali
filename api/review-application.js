@@ -1,10 +1,8 @@
 const VALID_DECISIONS = new Set(["reviewing", "accepted", "rejected"]);
 const REQUESTABLE_ROLES = new Set([
   "spokesperson",
-  "discipline_chair",
   "discipline_vice_chair",
   "discipline_member",
-  "youth_chair",
   "youth_member",
   "representative",
   "chief_representative",
@@ -96,8 +94,13 @@ async function actorCommitteeIds(actorId) {
   return response.ok ? rows.map((row) => row.committee_id).filter(Boolean) : [];
 }
 
+function normalizeCommitteeName(name = "") {
+  return String(name).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 function isExecutiveCommittee(name = "") {
-  return name === "YÃ¼rÃ¼tme Kurulu" || name === "YÃ¶netim Kurulu";
+  const normalized = normalizeCommitteeName(name);
+  return normalized === "Yurutme Kurulu" || normalized === "Yonetim Kurulu";
 }
 
 function canReview(actor, committee, application, actorCommittees = []) {
@@ -117,7 +120,7 @@ function canReview(actor, committee, application, actorCommittees = []) {
   if (committeeName === "Disiplin Kurulu") {
     return hasAny(actorRoles, new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]));
   }
-  if (committeeName === "Gençlik Kolları") return actorRoles.includes("youth_chair");
+  if (committeeName === "Gen\u00e7lik Kollar\u0131") return actorRoles.includes("youth_chair");
   return false;
 }
 
@@ -130,11 +133,11 @@ function canAcceptRequestedRole(actorRoles, committeeName, requestedRole) {
       return ["discipline_member", "discipline_vice_chair"].includes(requestedRole);
     }
   }
-  if (committeeName === "Gençlik Kolları") {
+  if (committeeName === "Gen\u00e7lik Kollar\u0131") {
     return actorRoles.includes("youth_chair") && ["youth_member"].includes(requestedRole);
   }
   if (hasAny(actorRoles, new Set(["president", "vice_president", "presidential_aide"]))) {
-    return !["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"].includes(requestedRole);
+    return !["super_admin"].includes(requestedRole);
   }
   return false;
 }
@@ -246,8 +249,8 @@ export default async function handler(request, response) {
     if (!claimResponse.ok) {
       return json(response, claimResponse.status, { error: claimed?.message || "Sorumluluk kaydedilemedi." });
     }
-    await audit(actor.authUser.id, id, "Başvuru sorumluluğu alındı", { status: "reviewing" });
-    await notify(application.applicant_profile_id, actor.authUser.id, "Başvurunuz incelemeye alındı", "Disiplin kurulu başkanı başvurunuzun sorumluluğunu aldı.");
+    await audit(actor.authUser.id, id, "Basvuru sorumlulugu alindi", { status: "reviewing" });
+    await notify(application.applicant_profile_id, actor.authUser.id, "Basvurunuz incelemeye alindi", "Disiplin kurulu baskani basvurunuzun sorumlulugunu aldi.");
     return json(response, 200, { ok: true, application: claimed?.[0] || null });
   }
 
@@ -298,15 +301,15 @@ export default async function handler(request, response) {
     });
   }
 
-  await audit(actor.authUser.id, id, `Başvuru ${status === "accepted" ? "kabul edildi" : status === "rejected" ? "reddedildi" : "incelemeye alındı"}`, {
+  await audit(actor.authUser.id, id, `Basvuru ${status === "accepted" ? "kabul edildi" : status === "rejected" ? "reddedildi" : "incelemeye alindi"}`, {
     status,
     requested_role: requestedRole
   });
   await notify(
     application.applicant_profile_id,
     actor.authUser.id,
-    status === "accepted" ? "Başvurunuz kabul edildi" : status === "rejected" ? "Başvurunuz reddedildi" : "Başvurunuz incelemeye alındı",
-    `${committee?.name || "Kurul"} başvurunuz ${status === "accepted" ? "kabul edildi" : status === "rejected" ? "reddedildi" : "incelemeye alındı"}. ${decisionNote ? `Not: ${decisionNote}` : ""}`
+    status === "accepted" ? "Basvurunuz kabul edildi" : status === "rejected" ? "Basvurunuz reddedildi" : "Basvurunuz incelemeye alindi",
+    `${committee?.name || "Kurul"} basvurunuz ${status === "accepted" ? "kabul edildi" : status === "rejected" ? "reddedildi" : "incelemeye alindi"}. ${decisionNote ? `Not: ${decisionNote}` : ""}`
   );
 
   return json(response, 200, { ok: true, application: result?.[0] || null });
