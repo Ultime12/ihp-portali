@@ -1,6 +1,9 @@
 const SANCTION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
-const VALID_EFFECTS = new Set(["remove_roles", "suspend_member", "passive_member"]);
+const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "passive_member"]);
+const POINT_MIN = 0;
+const POINT_MAX = 200;
+const POINT_DELTA_LIMIT = 100;
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -73,6 +76,22 @@ function primaryRole(roles) {
   return priority.find((role) => roles.includes(role)) || roles[0] || "member";
 }
 
+function disciplinePointsOf(profile) {
+  const value = Number(profile?.discipline_points);
+  return Number.isFinite(value) ? value : 100;
+}
+
+function clampPoints(value) {
+  return Math.max(POINT_MIN, Math.min(POINT_MAX, value));
+}
+
+function normalizePointDelta(value) {
+  if (value === undefined || value === null || value === "") return 0;
+  const delta = Number(value);
+  if (!Number.isInteger(delta) || delta < -POINT_DELTA_LIMIT || delta > POINT_DELTA_LIMIT) return null;
+  return delta;
+}
+
 function canAffectTarget(actorRoles, targetRoles) {
   if (actorRoles.includes("super_admin")) return true;
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role) || role === "discipline_chair")) return false;
@@ -89,7 +108,7 @@ function canAffectTarget(actorRoles, targetRoles) {
   return false;
 }
 
-async function notify(profileId, actorId, title, body) {
+async function notify(profileId, actorId, title, body, category = "discipline") {
   await supabaseRequest("/rest/v1/notifications", {
     method: "POST",
     headers: { Prefer: "return=minimal" },
@@ -98,7 +117,7 @@ async function notify(profileId, actorId, title, body) {
       actor_id: actorId,
       title,
       body,
-      category: "discipline",
+      category,
       link: "#/portal/discipline"
     })
   }).catch(() => undefined);
@@ -122,16 +141,29 @@ export default async function handler(request, response) {
     return json(response, 403, { error: "Disiplin yaptirimi uygulama yetkiniz yok." });
   }
 
-  const { memberId, effect, reason = "Disiplin kararnamesi" } = request.body || {};
-  if (!memberId || !VALID_EFFECTS.has(effect)) {
+  const { memberId, disciplineRecordId, reason = "Disiplin kararnamesi" } = request.body || {};
+  let effect = request.body?.effect || "none";
+  const pointDelta = normalizePointDelta(request.body?.pointDelta);
+
+  if (!memberId || !VALID_EFFECTS.has(effect) || pointDelta === null) {
     return json(response, 400, { error: "Yaptirim bilgisi gecersiz." });
   }
   if (!String(reason || "").trim()) {
     return json(response, 400, { error: "Kararname metni zorunludur." });
   }
 
+  if (effect === "none" && pointDelta !== 0) {
+    effect = pointDelta > 0 ? "reward_points" : "points_only";
+  }
+  if (effect === "reward_points" && pointDelta <= 0) {
+    return json(response, 400, { error: "Odul icin pozitif puan girilmelidir." });
+  }
+  if (effect !== "reward_points" && pointDelta > 0) {
+    return json(response, 400, { error: "Pozitif puan yalnizca odul islemiyle verilebilir." });
+  }
+
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}&select=id,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}&select=id,role,roles,status,discipline_points&limit=1`
   );
   const [target] = await profileResponse.json().catch(() => []);
   if (!profileResponse.ok || !target) {
@@ -139,22 +171,41 @@ export default async function handler(request, response) {
   }
 
   const targetRoles = rolesOf(target);
-  if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
-    return json(response, 403, { error: "Baskan, baskan yardimcisi veya super admin yetkisi disiplin kaydindan alinamaz." });
+  const isReward = effect === "reward_points";
+  if (isReward && !actor.roles.includes("super_admin") && !actor.roles.includes("discipline_chair")) {
+    return json(response, 403, { error: "Odul puanini yalnizca disiplin kurulu baskani veya super admin verebilir." });
   }
-  if (!canAffectTarget(actor.roles, targetRoles)) {
-    return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
+  if (!isReward) {
+    if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
+      return json(response, 403, { error: "Baskan, baskan yardimcisi veya super admin yetkisi disiplin kaydindan alinamaz." });
+    }
+    if (!canAffectTarget(actor.roles, targetRoles)) {
+      return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
+    }
   }
 
   const nextRoles = targetRoles.filter((role) => role === "member");
   if (!nextRoles.length) nextRoles.push("member");
 
-  const payload =
-    effect === "remove_roles"
-      ? { role: primaryRole(nextRoles), roles: nextRoles, status: "active", committee_id: null }
-      : effect === "suspend_member"
-        ? { status: "suspended" }
-        : { status: "passive" };
+  const pointsBefore = disciplinePointsOf(target);
+  const pointsAfter = pointDelta ? clampPoints(pointsBefore + pointDelta) : pointsBefore;
+  const payload = {};
+
+  if (effect === "remove_roles") {
+    Object.assign(payload, { role: primaryRole(nextRoles), roles: nextRoles, status: "active", committee_id: null });
+  } else if (effect === "suspend_member") {
+    Object.assign(payload, { status: "suspended" });
+  } else if (effect === "passive_member") {
+    Object.assign(payload, { status: "passive" });
+  }
+
+  if (pointDelta !== 0) {
+    payload.discipline_points = pointsAfter;
+  }
+
+  if (!Object.keys(payload).length) {
+    return json(response, 400, { error: "Uygulanacak sistem islemi bulunamadi." });
+  }
 
   const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}`, {
     method: "PATCH",
@@ -169,14 +220,23 @@ export default async function handler(request, response) {
   }
 
   if (effect === "remove_roles") {
-    const committeeResponse = await supabaseRequest("/rest/v1/committees?name=eq.Disiplin%20Kurulu&select=id&limit=1");
-    const [committee] = await committeeResponse.json().catch(() => []);
-    if (committee?.id) {
-      await supabaseRequest(
-        `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(memberId)}&committee_id=eq.${encodeURIComponent(committee.id)}`,
-        { method: "DELETE", headers: { Prefer: "return=minimal" } }
-      ).catch(() => undefined);
-    }
+    await supabaseRequest(
+      `/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(memberId)}`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } }
+    ).catch(() => undefined);
+  }
+
+  if (disciplineRecordId) {
+    await supabaseRequest(`/rest/v1/discipline_records?id=eq.${encodeURIComponent(disciplineRecordId)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        point_delta: pointDelta,
+        points_before: pointsBefore,
+        points_after: pointsAfter,
+        sanction_effect: effect
+      })
+    }).catch(() => undefined);
   }
 
   await supabaseRequest("/rest/v1/audit_logs", {
@@ -188,20 +248,44 @@ export default async function handler(request, response) {
       target_type: "profiles",
       target_id: memberId,
       details: {
-        summary: effect === "remove_roles" ? "Disiplin yaptırımıyla yetki alındı" : "Disiplin yaptırımıyla üyelik durumu güncellendi",
+        summary: isReward
+          ? "Disiplin oduluyle puan verildi"
+          : effect === "remove_roles"
+            ? "Disiplin yaptirimiyla yetki alindi"
+            : "Disiplin yaptirimiyla uyelik durumu veya puani guncellendi",
         old_roles: targetRoles,
         new_roles: payload.roles || targetRoles,
-        effect
+        effect,
+        point_delta: pointDelta,
+        points_before: pointsBefore,
+        points_after: pointsAfter
       }
     })
   }).catch(() => undefined);
 
-  await notify(
-    memberId,
-    actor.authUser.id,
-    "Disiplin yaptırımı uygulandı",
-    `${effect === "remove_roles" ? "Disiplin kurulu yetkiniz güncellendi" : "Üyelik durumunuz güncellendi"}. Kararname: ${reason}`
-  );
+  if (isReward) {
+    await notify(
+      memberId,
+      actor.authUser.id,
+      "Tebrikler! Odul puani kazandiniz",
+      `+${pointDelta} puan kazandiniz. Guncel disiplin puaniniz: ${pointsAfter}. Kararname: ${reason}`,
+      "reward"
+    );
+  } else {
+    const pointText = pointDelta < 0
+      ? ` ${Math.abs(pointDelta)} puan dusuldu. Guncel disiplin puaniniz: ${pointsAfter}.`
+      : "";
+    await notify(
+      memberId,
+      actor.authUser.id,
+      "Disiplin yaptirimi uygulandi",
+      `${effect === "remove_roles" ? "Yetkileriniz guncellendi" : "Uyelik durumunuz veya disiplin puaniniz guncellendi"}.${pointText} Kararname: ${reason}`
+    );
+  }
 
-  return json(response, 200, { ok: true, profile: patched?.[0] || null });
+  return json(response, 200, {
+    ok: true,
+    profile: patched?.[0] || null,
+    points: { before: pointsBefore, after: pointsAfter, delta: pointDelta }
+  });
 }
