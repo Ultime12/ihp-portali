@@ -1,6 +1,6 @@
 const INVESTIGATION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const OVERRIDE_MANAGERS = new Set(["super_admin", "discipline_chair"]);
-const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
+const PROTECTED_ROLES = new Set(["president", "vice_president"]);
 const VALID_ACTIONS = new Set(["create", "claim", "reviewing", "closed", "cancelled", "update", "delete"]);
 
 function json(response, status, body) {
