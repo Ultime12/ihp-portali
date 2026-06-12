@@ -1,9 +1,11 @@
 const SANCTION_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
-const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "passive_member"]);
+const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "party_suspension", "passive_member"]);
 const POINT_MIN = 0;
 const POINT_MAX = 200;
 const POINT_DELTA_LIMIT = 100;
+const SUSPENSION_DAY_MIN = 1;
+const SUSPENSION_DAY_MAX = 365;
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -92,6 +94,19 @@ function normalizePointDelta(value) {
   return delta;
 }
 
+function normalizeSuspensionDays(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < SUSPENSION_DAY_MIN || days > SUSPENSION_DAY_MAX) return null;
+  return days;
+}
+
+function suspensionUntil(days) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString();
+}
+
 function canAffectTarget(actorRoles, targetRoles) {
   if (actorRoles.includes("super_admin")) return true;
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role) || role === "discipline_chair")) return false;
@@ -151,9 +166,13 @@ export default async function handler(request, response) {
   } = request.body || {};
   let effect = request.body?.effect || "none";
   const pointDelta = normalizePointDelta(request.body?.pointDelta);
+  const sanctionDays = normalizeSuspensionDays(request.body?.sanctionDays);
 
   if (!memberId || !VALID_EFFECTS.has(effect) || pointDelta === null) {
     return json(response, 400, { error: "Yaptirim bilgisi gecersiz." });
+  }
+  if (effect === "party_suspension" && sanctionDays === null) {
+    return json(response, 400, { error: "Partiden uzaklastirma icin 1-365 gun arasi sure girilmelidir." });
   }
   if (!String(decreeText || reason || "").trim()) {
     return json(response, 400, { error: "Kararname metni zorunludur." });
@@ -222,13 +241,16 @@ export default async function handler(request, response) {
   const pointsBefore = disciplinePointsOf(target);
   const pointsAfter = pointDelta ? clampPoints(pointsBefore + pointDelta) : pointsBefore;
   const payload = {};
+  const sanctionUntil = effect === "party_suspension" ? suspensionUntil(sanctionDays) : null;
 
   if (effect === "remove_roles") {
-    Object.assign(payload, { role: primaryRole(nextRoles), roles: nextRoles, status: "active", committee_id: null });
+    Object.assign(payload, { role: primaryRole(nextRoles), roles: nextRoles, status: "active", committee_id: null, suspended_until: null, suspension_note: "" });
   } else if (effect === "suspend_member") {
-    Object.assign(payload, { status: "suspended" });
+    Object.assign(payload, { status: "suspended", suspended_until: null, suspension_note: decreeBody });
+  } else if (effect === "party_suspension") {
+    Object.assign(payload, { status: "suspended", suspended_until: sanctionUntil, suspension_note: decreeBody });
   } else if (effect === "passive_member") {
-    Object.assign(payload, { status: "passive" });
+    Object.assign(payload, { status: "passive", suspended_until: null, suspension_note: "" });
   }
 
   if (pointDelta !== 0) {
@@ -263,7 +285,9 @@ export default async function handler(request, response) {
     point_delta: pointDelta,
     points_before: pointsBefore,
     points_after: pointsAfter,
-    sanction_effect: effect
+    sanction_effect: effect,
+    sanction_days: effect === "party_suspension" ? sanctionDays : null,
+    sanction_until: sanctionUntil
   };
 
   if (disciplineRecordId) {
@@ -317,6 +341,8 @@ export default async function handler(request, response) {
         old_roles: targetRoles,
         new_roles: payload.roles || targetRoles,
         effect,
+        sanction_days: effect === "party_suspension" ? sanctionDays : null,
+        sanction_until: sanctionUntil,
         point_delta: pointDelta,
         points_before: pointsBefore,
         points_after: pointsAfter
@@ -336,11 +362,14 @@ export default async function handler(request, response) {
     const pointText = pointDelta < 0
       ? ` ${Math.abs(pointDelta)} puan dusuldu. Guncel disiplin puaniniz: ${pointsAfter}.`
       : "";
+    const suspensionText = effect === "party_suspension"
+      ? ` Partiden uzaklastirma suresi: ${sanctionDays} gun. Bitis: ${new Date(sanctionUntil).toLocaleDateString("tr-TR")}.`
+      : "";
     await notify(
       memberId,
       actor.authUser.id,
       "Disiplin yaptirimi uygulandi",
-      `${effect === "remove_roles" ? "Yetkileriniz guncellendi" : "Uyelik durumunuz veya disiplin puaniniz guncellendi"}.${pointText} Kararname: ${reason}`
+      `${effect === "remove_roles" ? "Yetkileriniz guncellendi" : "Uyelik durumunuz veya disiplin puaniniz guncellendi"}.${pointText}${suspensionText} Kararname: ${reason}`
     );
   }
 
