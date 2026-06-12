@@ -51,6 +51,65 @@ async function readSnapshotBuffer() {
   throw new Error("Yayin paketi bulunamadi.");
 }
 
+async function patchInvestigationTargets() {
+  const appPath = join(root, "dist", "src", "app.js");
+  let source = await readFile(appPath, "utf8");
+
+  if (!source.includes("function isProtectedInvestigationTarget(profile)")) {
+    const disciplineProtection = `function isProtectedDisciplineTarget(profile) {
+  return rolesOf(profile).some((role) => ["super_admin", "president", "vice_president"].includes(role));
+}
+`;
+    source = source.replace(
+      disciplineProtection,
+      `${disciplineProtection}
+function isProtectedInvestigationTarget(profile) {
+  return rolesOf(profile).some((role) => ["president", "vice_president"].includes(role));
+}
+`
+    );
+  }
+
+  if (!source.includes("function investigationTargetMembers()")) {
+    source = source.replace(
+      `function disciplineTargetMembers() {
+  return (state.cache.disciplineMembers || state.cache.members || []).filter(canDisciplineTarget);
+}
+`,
+      `function disciplineTargetMembers() {
+  return (state.cache.disciplineMembers || state.cache.members || []).filter(canDisciplineTarget);
+}
+
+function canInvestigateTarget(member) {
+  if (!member || member.id === state.profile?.id) return false;
+  if (isTechnicalSuperAdmin(member)) return false;
+  if (hasRole("super_admin")) return true;
+  if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
+  if (isProtectedInvestigationTarget(member)) return false;
+  const actorRank = disciplineRank(state.profile);
+  const targetRank = disciplineRank(member);
+  return targetRank === 0 || targetRank < actorRank;
+}
+
+function investigationTargetMembers() {
+  return (state.cache.disciplineMembers || state.cache.members || []).filter(canInvestigateTarget);
+}
+`
+    );
+  }
+
+  source = source.replace(
+    `function openInvestigation() {
+  const openInvestigations = (state.cache.investigations || []).filter((item) => ["open", "reviewing"].includes(item.status));
+  const members = disciplineTargetMembers();`,
+    `function openInvestigation() {
+  const openInvestigations = (state.cache.investigations || []).filter((item) => ["open", "reviewing"].includes(item.status));
+  const members = investigationTargetMembers();`
+  );
+
+  await writeFile(appPath, source);
+}
+
 const files = normalizeSnapshotFiles(
   JSON.parse(brotliDecompressSync(await readSnapshotBuffer()).toString("utf8"))
 );
@@ -61,5 +120,7 @@ for (const file of files) {
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(destination, Buffer.from(file.content, "base64"));
 }
+
+await patchInvestigationTargets();
 
 console.log("Vercel ciktilari yayin paketinden olusturuldu.");
