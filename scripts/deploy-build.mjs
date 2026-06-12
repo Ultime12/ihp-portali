@@ -106,6 +106,14 @@ function investigationTargetMembers() {
   const openInvestigations = (state.cache.investigations || []).filter((item) => ["open", "reviewing"].includes(item.status));
   const members = investigationTargetMembers();`
   );
+  source = source.replace(
+    `function openInvestigation() {
+  if (!permissions.disciplineManage()) return;
+  const members = disciplineTargetMembers();`,
+    `function openInvestigation() {
+  if (!permissions.disciplineManage()) return;
+  const members = investigationTargetMembers();`
+  );
 
   await writeFile(appPath, source);
 }
