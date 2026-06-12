@@ -118,6 +118,21 @@ function investigationTargetMembers() {
   await writeFile(appPath, source);
 }
 
+async function patchPortalFeatureBundle() {
+  const appPath = join(root, "dist", "src", "app.js");
+  let source = await readFile(appPath, "utf8");
+  if (source.includes("IHP_ACCESS_FEATURE_PATCH_V1")) return;
+
+  const patchSource = await readFile(join(root, "scripts", "portal-feature-patch.js"), "utf8");
+  const listenerAnchor = 'document.addEventListener("click", handleClick);';
+  if (!source.includes(listenerAnchor)) {
+    throw new Error("Portal dinleyici noktasi bulunamadi.");
+  }
+
+  source = source.replace(listenerAnchor, `${patchSource}\n\n${listenerAnchor}`);
+  await writeFile(appPath, source);
+}
+
 const files = normalizeSnapshotFiles(
   JSON.parse(brotliDecompressSync(await readSnapshotBuffer()).toString("utf8"))
 );
@@ -130,5 +145,6 @@ for (const file of files) {
 }
 
 await patchInvestigationTargets();
+await patchPortalFeatureBundle();
 
 console.log("Vercel ciktilari yayin paketinden olusturuldu.");
