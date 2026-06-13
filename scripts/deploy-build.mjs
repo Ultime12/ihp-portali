@@ -118,19 +118,24 @@ function investigationTargetMembers() {
   await writeFile(appPath, source);
 }
 
-async function patchPortalFeatureBundle() {
+async function injectPortalPatch(scriptName, marker) {
   const appPath = join(root, "dist", "src", "app.js");
   let source = await readFile(appPath, "utf8");
-  if (source.includes("IHP_ACCESS_FEATURE_PATCH_V1")) return;
+  if (source.includes(marker)) return;
 
-  const patchSource = await readFile(join(root, "scripts", "portal-feature-patch.js"), "utf8");
   const listenerAnchor = 'document.addEventListener("click", handleClick);';
   if (!source.includes(listenerAnchor)) {
     throw new Error("Portal dinleyici noktasi bulunamadi.");
   }
 
+  const patchSource = await readFile(join(root, "scripts", scriptName), "utf8");
   source = source.replace(listenerAnchor, `${patchSource}\n\n${listenerAnchor}`);
   await writeFile(appPath, source);
+}
+
+async function patchPortalFeatureBundle() {
+  await injectPortalPatch("portal-feature-patch.js", "IHP_ACCESS_FEATURE_PATCH_V1");
+  await injectPortalPatch("portal-access-lock-patch.js", "IHP_ACCESS_LOCK_PATCH_V3");
 }
 
 const files = normalizeSnapshotFiles(
