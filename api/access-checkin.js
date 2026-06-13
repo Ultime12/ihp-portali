@@ -1,14 +1,6 @@
 import { createHash } from "node:crypto";
 
-const ACCESS_MANAGERS = new Set([
-  "super_admin",
-  "president",
-  "vice_president",
-  "presidential_aide",
-  "discipline_chair",
-  "discipline_vice_chair",
-  "discipline_member"
-]);
+const ENTRY_ACCOUNT_EMAIL = "giris@tfo.k12.tr";
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -43,7 +35,7 @@ async function authenticateActor(request) {
 
   const authUser = await authResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,display_name,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,display_name,email,role,roles,status,is_system_account&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
   if (!profile || profile.status !== "active") return null;
@@ -52,8 +44,11 @@ async function authenticateActor(request) {
   return { authUser, profile, roles };
 }
 
-function hasAccessRole(roles) {
-  return roles.some((role) => ACCESS_MANAGERS.has(role));
+function hasAccessRole(actor) {
+  return (
+    actor?.profile?.is_system_account === true &&
+    String(actor.profile.email || "").toLowerCase() === ENTRY_ACCOUNT_EMAIL
+  );
 }
 
 function generateCode() {
@@ -74,7 +69,7 @@ async function notify(profileId, actorId, title, body, category = "access") {
       title,
       body,
       category,
-      link: "#/portal/access"
+      link: "#/portal/overview"
     })
   }).catch(() => undefined);
 }
@@ -112,8 +107,8 @@ export default async function handler(request, response) {
   }
 
   const actor = await authenticateActor(request);
-  if (!actor || !hasAccessRole(actor.roles)) {
-    return json(response, 403, { error: "Gecis onayi icin yetkiniz yok." });
+  if (!actor || !hasAccessRole(actor)) {
+    return json(response, 403, { error: "Gecis onayi yalnizca ozel gecis hesabi ile yapilir." });
   }
 
   await expireOldCheckins();
@@ -124,11 +119,14 @@ export default async function handler(request, response) {
     if (!memberId) return json(response, 400, { error: "Uye secilmelidir." });
 
     const profileResponse = await supabaseRequest(
-      `/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}&select=id,display_name,status,role,roles&limit=1`
+      `/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}&select=id,display_name,email,status,role,roles,is_system_account&limit=1`
     );
     const [member] = await profileResponse.json().catch(() => []);
     if (!profileResponse.ok || !member) {
       return json(response, 404, { error: "Uye bulunamadi." });
+    }
+    if (member.is_system_account || String(member.email || "").toLowerCase() === ENTRY_ACCOUNT_EMAIL) {
+      return json(response, 400, { error: "Sistem hesabi icin gecis kodu olusturulamaz." });
     }
     if (member.status === "left") {
       return json(response, 400, { error: "Ayrilmis uye icin gecis kodu olusturulamaz." });
