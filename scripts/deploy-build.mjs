@@ -136,6 +136,7 @@ async function injectPortalPatch(scriptName, marker) {
 async function patchPortalFeatureBundle() {
   await injectPortalPatch("portal-feature-patch.js", "IHP_ACCESS_FEATURE_PATCH_V1");
   await injectPortalPatch("portal-access-lock-patch.js", "IHP_ACCESS_LOCK_PATCH_V3");
+  await injectPortalPatch("portal-logo-report-patch.js", "IHP_LOGO_REPORT_PATCH_V1");
 }
 
 const files = normalizeSnapshotFiles(
