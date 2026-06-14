@@ -141,6 +141,8 @@ async function patchPortalFeatureBundle() {
   }
   await injectPortalPatch("portal-logo-report-patch.js", "IHP_LOGO_REPORT_PATCH_V1");
   await injectPortalPatch("public-polish-patch.js", "IHP_PUBLIC_POLISH_PATCH_V1");
+  await injectPortalPatch("agreements-feature-patch-a.js", "IHP_AGREEMENTS_FEATURE_PATCH_V1");
+  await injectPortalPatch("agreements-feature-patch-b.js", "IHP_AGREEMENTS_RUNTIME_PATCH_V1");
 }
 
 const files = normalizeSnapshotFiles(
