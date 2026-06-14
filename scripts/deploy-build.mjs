@@ -144,6 +144,7 @@ async function patchPortalFeatureBundle() {
   await injectPortalPatch("google-auth-patch.js", "IHP_GOOGLE_AUTH_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-a.js", "IHP_AGREEMENTS_FEATURE_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-b.js", "IHP_AGREEMENTS_RUNTIME_PATCH_V1");
+  await injectPortalPatch("whatsapp-notifications-patch.js", "IHP_WHATSAPP_NOTIFICATIONS_PATCH_V1");
 }
 
 const files = normalizeSnapshotFiles(
