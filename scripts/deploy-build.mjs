@@ -132,6 +132,71 @@ async function injectPortalPatch(scriptName, marker) {
   await writeFile(appPath, source);
 }
 
+async function patchPersistentAuthSession() {
+  const supabasePath = join(root, "dist", "src", "lib", "supabase.js");
+  let source = await readFile(supabasePath, "utf8");
+  if (source.includes("function sessionStore()")) return;
+
+  const sessionBlockPattern =
+    /function readSession\(\)\s+\{[\s\S]*?\n\}\n\nfunction writeSession\(nextSession\s*\)\s+\{[\s\S]*?\n\}\n\nfunction isExpired/;
+  if (!sessionBlockPattern.test(source)) {
+    throw new Error("Supabase oturum saklama bolumu bulunamadi.");
+  }
+
+  const persistentSessionBlock = `function sessionStore() {
+  try {
+    return globalThis.localStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+function legacySessionStore() {
+  try {
+    return globalThis.sessionStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+function readSession()                     {
+  try {
+    const store = sessionStore();
+    const legacyStore = legacySessionStore();
+    const raw = store?.getItem(SESSION_KEY) || legacyStore?.getItem(SESSION_KEY);
+    session = raw ? JSON.parse(raw) : null;
+    if (session && store && legacyStore?.getItem(SESSION_KEY)) {
+      store.setItem(SESSION_KEY, JSON.stringify(session));
+      legacyStore.removeItem(SESSION_KEY);
+    }
+  } catch {
+    session = null;
+  }
+  return session;
+}
+
+function writeSession(nextSession                    ) {
+  session = nextSession;
+  const store = sessionStore();
+  const legacyStore = legacySessionStore();
+  try {
+    if (nextSession) {
+      store?.setItem(SESSION_KEY, JSON.stringify(nextSession));
+    } else {
+      store?.removeItem(SESSION_KEY);
+    }
+    legacyStore?.removeItem(SESSION_KEY);
+  } catch {
+    // Some browsers can block persistent storage in private or hardened modes.
+  }
+}
+
+function isExpired`;
+
+  source = source.replace(sessionBlockPattern, persistentSessionBlock);
+  await writeFile(supabasePath, source);
+}
+
 async function patchPortalFeatureBundle() {
   await injectPortalPatch("portal-feature-patch.js", "IHP_ACCESS_FEATURE_PATCH_V1");
   const appPath = join(root, "dist", "src", "app.js");
@@ -143,6 +208,59 @@ async function patchPortalFeatureBundle() {
   await injectPortalPatch("liquid-glass-patch.js", "IHP_LIQUID_GLASS_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-a.js", "IHP_AGREEMENTS_FEATURE_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-b.js", "IHP_AGREEMENTS_RUNTIME_PATCH_V1");
+}
+
+async function patchLiquidLoginOutput() {
+  const appPath = join(root, "dist", "src", "app.js");
+  let source = await readFile(appPath, "utf8");
+
+  source = source.replace(
+    `body:has(.liquid-public), body:has(.liquid-login) { background:#071426; }`,
+    `body:has(.liquid-public), body:has(.liquid-login) {
+      margin:0;
+      overflow-x:hidden;
+      background:
+        radial-gradient(circle at 14% 10%,rgba(112,167,255,.22),transparent 34rem),
+        radial-gradient(circle at 86% 18%,rgba(18,72,136,.3),transparent 34rem),
+        linear-gradient(135deg,#050d19 0%,#0a1a31 52%,#06111f 100%);
+    }`
+  );
+
+  source = source.replace(
+    `.liquid-login { display:grid; grid-template-columns:minmax(0,1fr) minmax(390px,480px); gap:clamp(2rem,6vw,4.6rem); align-items:center; width:min(1160px,calc(100vw - 3rem)); margin:0 auto; padding:2rem 0; }`,
+    `.liquid-login {
+      display:grid;
+      grid-template-columns:minmax(0,.95fr) minmax(390px,520px);
+      gap:clamp(2.2rem,6vw,5.6rem);
+      align-items:center;
+      box-sizing:border-box;
+      width:100%;
+      max-width:none;
+      min-height:100dvh;
+      margin:0;
+      padding:clamp(2rem,5vw,4.4rem) max(1.5rem,calc((100vw - 1320px) / 2));
+    }`
+  );
+  source = source.replace(
+    `.liquid-login-copy h1 { margin:1rem 0; font-family:"Manrope",sans-serif; font-size:clamp(3.9rem,7.6vw,7rem); letter-spacing:-.09em; line-height:.95; } .liquid-login-copy h1 span { display:block; color:var(--liquid-blue); }`,
+    `.liquid-login-copy h1 { margin:1rem 0; font-family:"Manrope",sans-serif; font-size:clamp(4rem,8vw,7.6rem); letter-spacing:-.09em; line-height:.95; } .liquid-login-copy h1 span { display:block; color:var(--liquid-blue); }`
+  );
+  source = source.replace(
+    `.liquid-login-card { border-radius:36px; padding:1px; border:1px solid rgba(255,255,255,.13); background:linear-gradient(145deg,rgba(255,255,255,.36),rgba(141,187,255,.16),rgba(255,255,255,.06)); box-shadow:0 44px 120px rgba(0,8,20,.46); backdrop-filter:blur(34px) saturate(150%); }`,
+    `.liquid-login-card { width:100%; max-width:520px; justify-self:end; border-radius:36px; padding:1px; border:1px solid rgba(255,255,255,.13); background:linear-gradient(145deg,rgba(255,255,255,.36),rgba(141,187,255,.16),rgba(255,255,255,.06)); box-shadow:0 44px 120px rgba(0,8,20,.46); backdrop-filter:blur(34px) saturate(150%); }`
+  );
+  source = source.replace(
+    `@media (max-width:980px){ .liquid-hero-grid,.liquid-login{grid-template-columns:1fr; gap:2.4rem}.liquid-device{transform:none; animation:none}.liquid-feature-grid{grid-template-columns:1fr}.liquid-public .nav-links a{display:none} }
+    @media (max-width:640px){ .liquid-title{font-size:clamp(3.4rem,20vw,5.3rem)}.liquid-dashboard-strip{grid-template-columns:1fr}.liquid-device-screen{min-height:auto}.liquid-login{width:min(100% - 2rem,480px)}.liquid-banner{align-items:flex-start; flex-direction:column} }`,
+    `@media (max-width:980px){ .liquid-hero-grid,.liquid-login{grid-template-columns:1fr; gap:2.4rem}.liquid-login{padding:2rem 1rem}.liquid-login-card{justify-self:stretch; max-width:none}.liquid-device{transform:none; animation:none}.liquid-feature-grid{grid-template-columns:1fr}.liquid-public .nav-links a{display:none} }
+    @media (max-width:640px){ .liquid-title{font-size:clamp(3.4rem,20vw,5.3rem)}.liquid-dashboard-strip{grid-template-columns:1fr}.liquid-device-screen{min-height:auto}.liquid-login{width:100%; padding:1.25rem}.liquid-banner{align-items:flex-start; flex-direction:column} }`
+  );
+  source = source.replace(
+    `İHP çalışma alanına hesabınızla giriş yapın. Yetkileriniz otomatik uygulanır, gereksiz açıklamalar değil doğrudan kullanacağınız panel görünür.`,
+    `Hesabınızla giriş yapın; portal sizi yetkinize göre doğrudan kendi çalışma alanınıza alır.`
+  );
+
+  await writeFile(appPath, source);
 }
 
 const files = normalizeSnapshotFiles(
@@ -157,6 +275,8 @@ for (const file of files) {
 }
 
 await patchInvestigationTargets();
+await patchPersistentAuthSession();
 await patchPortalFeatureBundle();
+await patchLiquidLoginOutput();
 
 console.log("Vercel ciktilari yayin paketinden olusturuldu.");
