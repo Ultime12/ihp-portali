@@ -1,7 +1,8 @@
+import { emailProfile } from "./_mail.js";
+
 const INVESTIGATION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
-const OVERRIDE_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const PROTECTED_ROLES = new Set(["president", "vice_president"]);
-const VALID_ACTIONS = new Set(["create", "claim", "reviewing", "closed", "cancelled", "update", "delete"]);
+const VALID_ACTIONS = new Set(["create", "claim", "transfer", "reviewing", "closed", "cancelled", "update", "delete"]);
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -62,6 +63,24 @@ function disciplineRank(roles) {
   return 0;
 }
 
+function canTakeResponsibility(actorRoles, assigneeRoles) {
+  if (actorRoles.includes("super_admin")) return true;
+  if (!assigneeRoles?.length) return actorRoles.includes("discipline_chair");
+  if (assigneeRoles.includes("super_admin")) return false;
+  const actorRank = disciplineRank(actorRoles);
+  const assigneeRank = disciplineRank(assigneeRoles);
+  return actorRank > 0 && assigneeRank > 0 && actorRank > assigneeRank;
+}
+
+function canDelegateResponsibility(actorRoles, targetRoles) {
+  if (actorRoles.includes("super_admin")) {
+    return disciplineRank(targetRoles) > 0 && !targetRoles.includes("super_admin");
+  }
+  const actorRank = disciplineRank(actorRoles);
+  const targetRank = disciplineRank(targetRoles);
+  return actorRank > 0 && targetRank > 0 && actorRank > targetRank;
+}
+
 function canAffectTarget(actorRoles, targetRoles) {
   if (actorRoles.includes("super_admin")) return true;
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role))) return false;
@@ -77,6 +96,22 @@ async function fetchSingle(path) {
   return response.ok ? row || null : null;
 }
 
+async function fetchProfileRoles(profileId) {
+  if (!profileId) return [];
+  const profile = await fetchSingle(
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(profileId)}&select=id,role,roles,status,is_system_account&limit=1`
+  );
+  if (!profile || profile.status !== "active" || profile.is_system_account) return [];
+  return rolesOf(profile);
+}
+
+async function fetchProfileForAssignment(profileId) {
+  if (!profileId) return null;
+  return fetchSingle(
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(profileId)}&select=id,display_name,role,roles,status,is_system_account&limit=1`
+  );
+}
+
 async function notify(profileId, actorId, title, body) {
   if (!profileId) return;
   await supabaseRequest("/rest/v1/notifications", {
@@ -90,6 +125,13 @@ async function notify(profileId, actorId, title, body) {
       category: "discipline",
       link: "#/portal/investigations"
     })
+  }).catch(() => undefined);
+  await emailProfile(supabaseRequest, profileId, {
+    subject: title,
+    title,
+    body,
+    actionUrl: "#/portal/investigations",
+    actionLabel: "Sorusturmalari ac"
   }).catch(() => undefined);
 }
 
@@ -181,7 +223,7 @@ export default async function handler(request, response) {
 
   if (action === "delete") {
     if (!actor.roles.includes("super_admin")) {
-      return json(response, 403, { error: "Sorusturmayi yalnizca super admin silebilir." });
+      return json(response, 403, { error: "Sorusturmayi yalnizca admin silebilir." });
     }
     const deleteResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
       method: "DELETE",
@@ -191,14 +233,14 @@ export default async function handler(request, response) {
       const result = await deleteResponse.json().catch(() => ({}));
       return json(response, deleteResponse.status, { error: result.message || "Sorusturma silinemedi." });
     }
-    await audit(actor.authUser.id, id, "Sorusturma super admin tarafindan silindi", { old_status: investigation.status });
-    await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturma kaydi silindi", "Hakkinizdaki sorusturma kaydi super admin tarafindan kaldirildi.");
+    await audit(actor.authUser.id, id, "Sorusturma admin tarafindan silindi", { old_status: investigation.status });
+    await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturma kaydi silindi", "Hakkinizdaki sorusturma kaydi admin tarafindan kaldirildi.");
     return json(response, 200, { ok: true });
   }
 
   if (action === "update") {
     if (!actor.roles.includes("super_admin")) {
-      return json(response, 403, { error: "Sorusturmayi yalnizca super admin duzenleyebilir." });
+      return json(response, 403, { error: "Sorusturmayi yalnizca admin duzenleyebilir." });
     }
     const title = String(body.title || investigation.title || "").trim();
     const description = String(body.description || investigation.description || "").trim();
@@ -221,7 +263,7 @@ export default async function handler(request, response) {
     if (!updateResponse.ok) {
       return json(response, updateResponse.status, { error: updated?.message || "Sorusturma duzenlenemedi." });
     }
-    await audit(actor.authUser.id, id, "Sorusturma super admin tarafindan duzenlendi", { title: patch.title });
+    await audit(actor.authUser.id, id, "Sorusturma admin tarafindan duzenlendi", { title: patch.title });
     await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturma kaydi duzenlendi", patch.title);
     return json(response, 200, { ok: true, investigation: updated?.[0] || null });
   }
@@ -238,11 +280,37 @@ export default async function handler(request, response) {
   }
 
   const assignedToOther = investigation.assigned_to && investigation.assigned_to !== actor.authUser.id;
-  if (assignedToOther && !hasAny(actor.roles, OVERRIDE_MANAGERS)) {
-    return json(response, 403, { error: "Bu sorusturma baska bir yetkili tarafindan ustlenilmis." });
+  const currentAssigneeRoles = assignedToOther ? await fetchProfileRoles(investigation.assigned_to) : [];
+
+  if (action === "claim") {
+    if (investigation.assigned_to === actor.authUser.id) {
+      return json(response, 400, { error: "Bu sorusturma zaten sizin sorumlulugunuzda." });
+    }
+    if (assignedToOther && !canTakeResponsibility(actor.roles, currentAssigneeRoles)) {
+      return json(response, 403, { error: "Disiplin hiyerarsisi bu sorumlulugu devralmaya izin vermiyor." });
+    }
+  } else if (action === "transfer") {
+    const assignedTo = String(body.assignedTo || "");
+    if (!assignedTo) return json(response, 400, { error: "Devredilecek yetkili secilmelidir." });
+    if (assignedTo === actor.authUser.id) return json(response, 400, { error: "Sorumlulugu kendinize devredemezsiniz; devralma islemini kullanin." });
+    if (assignedToOther && !canTakeResponsibility(actor.roles, currentAssigneeRoles)) {
+      return json(response, 403, { error: "Disiplin hiyerarsisi bu sorumlulugu devretmeye izin vermiyor." });
+    }
+    const targetAssignee = await fetchProfileForAssignment(assignedTo);
+    if (!targetAssignee) return json(response, 404, { error: "Devredilecek yetkili bulunamadi." });
+    if (targetAssignee.status !== "active" || targetAssignee.is_system_account) {
+      return json(response, 400, { error: "Sorumluluk yalnizca aktif DK personeline devredilebilir." });
+    }
+    const targetAssigneeRoles = rolesOf(targetAssignee);
+    if (!canDelegateResponsibility(actor.roles, targetAssigneeRoles)) {
+      return json(response, 403, { error: "Sorumluluk yalnizca DK hiyerarsisinde alt rutbeye devredilebilir." });
+    }
+  } else if (investigation.assigned_to !== actor.authUser.id) {
+    return json(response, 403, { error: "Bu islem icin once sorusturma sorumlulugunu devralmalisiniz." });
   }
-  if (action === "cancelled" && !hasAny(actor.roles, OVERRIDE_MANAGERS)) {
-    return json(response, 403, { error: "Sorusturmayi yalnizca DK baskani veya super admin iptal edebilir." });
+
+  if (action === "cancelled" && !hasAny(actor.roles, new Set(["super_admin", "discipline_chair"]))) {
+    return json(response, 403, { error: "Sorusturmayi yalnizca DK baskani veya admin iptal edebilir." });
   }
 
   const decisionNote = String(body.decisionNote || "").trim();
@@ -251,12 +319,16 @@ export default async function handler(request, response) {
   }
 
   const patch = {
-    status: action === "claim" ? "reviewing" : action,
+    status: ["claim", "transfer"].includes(action) ? "reviewing" : action,
     decision_note: decisionNote || investigation.decision_note || null
   };
 
-  if (action === "claim" || !investigation.assigned_to || assignedToOther) {
+  if (action === "claim") {
     patch.assigned_to = actor.authUser.id;
+    patch.assigned_at = new Date().toISOString();
+  }
+  if (action === "transfer") {
+    patch.assigned_to = String(body.assignedTo || "");
     patch.assigned_at = new Date().toISOString();
   }
   if (["closed", "cancelled"].includes(action)) {
@@ -274,14 +346,34 @@ export default async function handler(request, response) {
     return json(response, updateResponse.status, { error: updated?.message || "Sorusturma guncellenemedi." });
   }
 
-  await audit(actor.authUser.id, id, action === "claim" ? "Sorusturma sorumlulugu alindi" : `Sorusturma ${patch.status} durumuna alindi`, {
+  const auditSummary = action === "claim"
+    ? (assignedToOther ? "Sorusturma sorumlulugu hiyerarsiyle devralindi" : "Sorusturma sorumlulugu alindi")
+    : action === "transfer"
+      ? "Sorusturma sorumlulugu alt rutbeye devredildi"
+      : `Sorusturma ${patch.status} durumuna alindi`;
+  await audit(actor.authUser.id, id, auditSummary, {
     old_status: investigation.status,
     new_status: patch.status,
     old_assigned_to: investigation.assigned_to,
     new_assigned_to: patch.assigned_to || investigation.assigned_to
   });
   if (assignedToOther && patch.assigned_to) {
-    await notify(investigation.assigned_to, actor.authUser.id, "Sorusturma sorumlulugu devredildi", "Ustlendiginiz sorusturma DK baskani/super admin tarafindan devralindi.");
+    await notify(
+      investigation.assigned_to,
+      actor.authUser.id,
+      "Sorusturma sorumlulugu devredildi",
+      action === "transfer"
+        ? "Ustlendiginiz sorusturma hiyerarsiye gore baska bir DK personeline devredildi."
+        : "Ustlendiginiz sorusturma ust DK yetkilisi tarafindan devralindi."
+    );
+  }
+  if (action === "transfer" && patch.assigned_to) {
+    await notify(
+      patch.assigned_to,
+      actor.authUser.id,
+      "Soruşturma size devredildi",
+      decisionNote || investigation.title || "Bir soruşturmanın sorumluluğu size devredildi."
+    );
   }
   await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturmaniz guncellendi", decisionNote || "Sorusturma kaydiniz guncellendi.");
 
