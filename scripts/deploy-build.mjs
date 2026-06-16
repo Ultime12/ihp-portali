@@ -231,6 +231,35 @@ async function patchAdminRolePresentation() {
   await writeFile(appPath, source);
 }
 
+async function patchAdminRoleBadgeUsage() {
+  const appPath = join(root, "dist", "src", "app.js");
+  let source = await readFile(appPath, "utf8");
+  const replacements = [
+    ["${esc(roleLabels(item))}", "${ihpAdminRoleBadgesV1(item)}"],
+    ["${esc(roleLabels(member))}", "${ihpAdminRoleBadgesV1(member)}"],
+    ["${esc(roleLabels(profile))}", "${ihpAdminRoleBadgesV1(profile)}"],
+    ["${esc(roleLabels(row.profile))}", "${ihpAdminRoleBadgesV1(row.profile)}"],
+    ["${esc(roleLabels(state.profile))}", "${ihpAdminRoleBadgesV1(state.profile)}"],
+    ['${badge(roleLabels(state.profile), "gold")}', "${ihpAdminRoleBadgesV1(state.profile)}"],
+    [
+      '${typeof ihpRoleBadges === "function" ? ihpRoleBadges(item) : esc(roleLabels(item))}',
+      "${ihpAdminRoleBadgesV1(item)}"
+    ]
+  ];
+  for (const [before, after] of replacements) {
+    source = source.replaceAll(before, after);
+  }
+  source = source.replaceAll(
+    '${esc(member.display_name)} · ${ihpAdminRoleBadgesV1(member)}</option>',
+    '${esc(member.display_name)} · ${esc(roleLabels(member))}</option>'
+  );
+  source = source.replaceAll(
+    "${ihpAdminRoleBadgesV1(member)}</option>",
+    "${esc(roleLabels(member))}</option>"
+  );
+  await writeFile(appPath, source);
+}
+
 async function patchPortalFeatureBundle() {
   await injectPortalPatch("portal-feature-patch.js", "IHP_ACCESS_FEATURE_PATCH_V1");
   const appPath = join(root, "dist", "src", "app.js");
@@ -239,6 +268,7 @@ async function patchPortalFeatureBundle() {
     await injectPortalPatch("portal-access-lock-patch.js", "IHP_ACCESS_LOCK_PATCH_V3");
   }
   await injectPortalPatch("portal-logo-report-patch.js", "IHP_LOGO_REPORT_PATCH_V1");
+  await injectPortalPatch("admin-role-patch.js", "IHP_ADMIN_ROLE_PATCH_V1");
   await injectPortalPatch("liquid-glass-patch.js", "IHP_LIQUID_GLASS_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-a.js", "IHP_AGREEMENTS_FEATURE_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-b.js", "IHP_AGREEMENTS_RUNTIME_PATCH_V1");
@@ -313,6 +343,7 @@ await patchPersistentAuthSession();
 await patchDisciplineCouncilRoleHierarchy();
 await patchPortalFeatureBundle();
 await patchAdminRolePresentation();
+await patchAdminRoleBadgeUsage();
 await patchLiquidLoginOutput();
 
 console.log("Vercel ciktilari yayin paketinden olusturuldu.");
