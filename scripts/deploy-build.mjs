@@ -269,6 +269,7 @@ async function patchPortalFeatureBundle() {
   }
   await injectPortalPatch("portal-logo-report-patch.js", "IHP_LOGO_REPORT_PATCH_V1");
   await injectPortalPatch("admin-role-patch.js", "IHP_ADMIN_ROLE_PATCH_V1");
+  await injectPortalPatch("investigation-transfer-patch.js", "IHP_INVESTIGATION_TRANSFER_PATCH_V1");
   await injectPortalPatch("liquid-glass-patch.js", "IHP_LIQUID_GLASS_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-a.js", "IHP_AGREEMENTS_FEATURE_PATCH_V1");
   await injectPortalPatch("agreements-feature-patch-b.js", "IHP_AGREEMENTS_RUNTIME_PATCH_V1");
