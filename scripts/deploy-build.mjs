@@ -197,6 +197,40 @@ function isExpired`;
   await writeFile(supabasePath, source);
 }
 
+async function patchDisciplineCouncilRoleHierarchy() {
+  const appPath = join(root, "dist", "src", "app.js");
+  let source = await readFile(appPath, "utf8");
+  const legacyBlock = `  if (currentRank === targetRank) return false;
+  if (hasRole("super_admin")) return true;
+  if (hasRole("president")) return true;
+  if (isProtectedDisciplineTarget(member)) return false;
+  if (hasRole("discipline_chair")) {`;
+  const updatedBlock = `  if (currentRank === targetRank) return false;
+  if (hasRole("super_admin")) return true;
+  if (rolesOf(member).includes("super_admin")) return false;
+  if (hasRole("president")) return true;
+  if (hasRole("discipline_chair")) {`;
+  source = source.replace(legacyBlock, updatedBlock);
+  await writeFile(appPath, source);
+}
+
+async function patchAdminRolePresentation() {
+  const appPath = join(root, "dist", "src", "app.js");
+  let source = await readFile(appPath, "utf8");
+  const replacements = [
+    [`super_admin: "Süper Admin"`, `super_admin: "Admin"`],
+    ["Süper Admin", "Admin"],
+    ["Süper admin", "Admin"],
+    ["süper admin", "admin"],
+    ["Super admin", "Admin"],
+    ["super admin", "admin"]
+  ];
+  for (const [before, after] of replacements) {
+    source = source.replaceAll(before, after);
+  }
+  await writeFile(appPath, source);
+}
+
 async function patchPortalFeatureBundle() {
   await injectPortalPatch("portal-feature-patch.js", "IHP_ACCESS_FEATURE_PATCH_V1");
   const appPath = join(root, "dist", "src", "app.js");
@@ -276,7 +310,9 @@ for (const file of files) {
 
 await patchInvestigationTargets();
 await patchPersistentAuthSession();
+await patchDisciplineCouncilRoleHierarchy();
 await patchPortalFeatureBundle();
+await patchAdminRolePresentation();
 await patchLiquidLoginOutput();
 
 console.log("Vercel ciktilari yayin paketinden olusturuldu.");
