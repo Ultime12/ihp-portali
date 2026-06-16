@@ -1,3 +1,5 @@
+import { emailProfile, sendPortalEmail } from "./_mail.js";
+
 const MANAGER_ROLES = new Set(["super_admin"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin"]);
 const ROLE_MODERATOR_ROLES = new Set(["super_admin", "president", "vice_president"]);
@@ -37,7 +39,7 @@ const VALID_STATUSES = new Set(["active", "passive", "suspended", "left", "pendi
 const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'-]{1,47}$/u;
 const INITIALS_PATTERN = /^[\p{L}0-9]{1,4}$/u;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -89,7 +91,7 @@ function isTechnicalSuperAdminRoles(roles) {
 
 async function getProfileById(id) {
   const response = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,role,roles,status,committee_id&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,display_name,email,role,roles,status&limit=1`
   );
   const [profile] = await response.json().catch(() => []);
   return profile || null;
@@ -158,10 +160,12 @@ async function updateProfileCommittees(profileId, committeeIds, actorId) {
   );
   if (!deleteResponse.ok) {
     const result = await deleteResponse.json().catch(() => ({}));
-    throw new Error(result.message || "Kurul uyelikleri temizlenemedi.");
+    throw new Error(result.message || "Kurul \u00fcyelikleri temizlenemedi.");
   }
 
-  if (!committeeIds.length) return null;
+  if (!committeeIds.length) {
+    return null;
+  }
 
   const rows = committeeIds.map((committeeId) => ({
     profile_id: profileId,
@@ -176,7 +180,7 @@ async function updateProfileCommittees(profileId, committeeIds, actorId) {
   });
   const result = await insertResponse.json().catch(() => null);
   if (!insertResponse.ok) {
-    throw new Error(result?.message || "Kurul uyelikleri kaydedilemedi.");
+    throw new Error(result?.message || "Kurul \u00fcyelikleri kaydedilemedi.");
   }
   return result;
 }
@@ -222,8 +226,8 @@ function canSetDisciplineRole(actorRoles, targetRoles, targetRole) {
   const nextRank = targetDisciplineRank(targetRole);
   if (currentRank === nextRank) return false;
   if (actorRoles.includes("super_admin")) return true;
+  if (targetRoles.includes("super_admin")) return false;
   if (actorRoles.includes("president")) return true;
-  if (targetRoles.some((role) => ["super_admin", "president", "vice_president"].includes(role))) return false;
   if (actorRoles.includes("discipline_chair")) {
     return currentRank > 0 && currentRank < 3 && nextRank < 3;
   }
@@ -292,6 +296,13 @@ async function notify(profileId, actorId, title, body) {
       link: "#/portal/members"
     })
   }).catch(() => undefined);
+  await emailProfile(supabaseRequest, profileId, {
+    subject: title,
+    title,
+    body,
+    actionUrl: "#/portal/members",
+    actionLabel: "Uyeler sayfasini ac"
+  }).catch(() => undefined);
 }
 
 export default async function handler(request, response) {
@@ -323,7 +334,7 @@ export default async function handler(request, response) {
 
   if (action === "delete") {
     if (!hasAny(actor.roles, FULL_MANAGER_ROLES)) {
-      return json(response, 403, { error: "Uye silmek icin super admin yetkisi gerekir." });
+      return json(response, 403, { error: "Uye silmek icin admin yetkisi gerekir." });
     }
     if (id === actor.authUser.id) return json(response, 400, { error: "Kendi hesabinizi silemezsiniz." });
     const deleteResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
@@ -439,7 +450,7 @@ export default async function handler(request, response) {
   if (viceOnly) {
     const requestedRoles = normalizeRoles(request.body.roles || request.body.role, actor.roles);
     if (!requestedRoles || isProtectedForVice(beforeProfile) || requestedRoles.some((role) => role === "super_admin" || role === "president")) {
-      return json(response, 403, { error: "Baskan yardimcisi super admin veya baskan rollerini yonetemez." });
+      return json(response, 403, { error: "Baskan yardimcisi admin veya baskan rollerini yonetemez." });
     }
   }
 
@@ -453,11 +464,11 @@ export default async function handler(request, response) {
   }
 
   if (viceOnly && payload.roles.some((role) => role === "super_admin" || role === "president")) {
-    return json(response, 403, { error: "Baskan yardimcisi super admin veya baskan rollerini veremez." });
+    return json(response, 403, { error: "Baskan yardimcisi admin veya baskan rollerini veremez." });
   }
 
   if (committeeIds && !hasAny(actor.roles, FULL_MANAGER_ROLES)) {
-    return json(response, 403, { error: "Kurul atamak icin super admin yetkisi gerekir." });
+    return json(response, 403, { error: "Kurul atamak icin baskan veya admin yetkisi gerekir." });
   }
 
   if (committeeIds) {
@@ -486,7 +497,7 @@ export default async function handler(request, response) {
 
   if (password) {
     if (!hasAny(actor.roles, FULL_MANAGER_ROLES)) {
-      return json(response, 403, { error: "Sifre degistirmek icin super admin yetkisi gerekir." });
+      return json(response, 403, { error: "Sifre degistirmek icin admin yetkisi gerekir." });
     }
     if (String(password).length < 8) return json(response, 400, { error: "Sifre en az 8 karakter olmali." });
     const passwordResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
@@ -499,12 +510,28 @@ export default async function handler(request, response) {
         error: result.msg || result.message || "Sifre guncellenemedi."
       });
     }
+    await sendPortalEmail({
+      to: beforeProfile.email,
+      subject: "IHP Portal sifreniz guncellendi",
+      title: "Portal sifreniz guncellendi",
+      body: `Hesabinizin sifresi admin tarafindan guncellendi.\n\nYeni sifre: ${password}\n\nIlk giristen sonra sifrenizi portal ayarlarindan degistirebilirsiniz.`,
+      actionUrl: "#/login",
+      actionLabel: "Portala gir"
+    }).catch(() => undefined);
   }
 
   await insertAudit(actor.authUser.id, id, "Üye profili ve rolleri güncellendi", {
     old_roles: rolesOf(beforeProfile),
     new_roles: payload.roles
   });
+
+  await emailProfile(supabaseRequest, id, {
+    subject: "IHP Portal profiliniz guncellendi",
+    title: "Portal profiliniz guncellendi",
+    body: `Profil veya rol bilgileriniz guncellendi. Yeni rolleriniz: ${payload.roles.join(", ")}.`,
+    actionUrl: "#/portal/settings",
+    actionLabel: "Profilimi ac"
+  }).catch(() => undefined);
 
   return json(response, 200, { ok: true, profile: patched?.[0] || null });
 }
