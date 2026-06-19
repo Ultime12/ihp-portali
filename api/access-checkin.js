@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { emailProfile } from "./_mail.js";
 
 const ENTRY_ACCOUNT_EMAIL = "giris@tfo.k12.tr";
 
@@ -71,6 +72,13 @@ async function notify(profileId, actorId, title, body, category = "access") {
       category,
       link: "#/portal/overview"
     })
+  }).catch(() => undefined);
+  await emailProfile(supabaseRequest, profileId, {
+    subject: title,
+    title,
+    body,
+    actionUrl: "#/portal/overview",
+    actionLabel: "Portali ac"
   }).catch(() => undefined);
 }
 

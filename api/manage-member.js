@@ -39,7 +39,7 @@ const VALID_STATUSES = new Set(["active", "passive", "suspended", "left", "pendi
 const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'-]{1,47}$/u;
 const INITIALS_PATTERN = /^[\p{L}0-9]{1,4}$/u;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function json(response, status, body) {
   return response.status(status).json(body);

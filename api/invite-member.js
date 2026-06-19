@@ -1,3 +1,5 @@
+import { sendPortalEmail } from "./_mail.js";
+
 const MANAGER_ROLES = new Set(["super_admin", "president", "vice_president", "presidential_aide"]);
 const PARTY_ROLES = new Set([
   "president",
@@ -148,7 +150,7 @@ export default async function handler(request, response) {
 
   if (!isTechnicalSuperAdminRoles(actor.roles) && roles.some((role) => role !== "member")) {
     return json(response, 403, {
-      error: "Ilk kayitta ozel rol atamak icin super admin yetkisi gerekir."
+      error: "Ilk kayitta ozel rol atamak icin admin yetkisi gerekir."
     });
   }
 
@@ -192,6 +194,15 @@ export default async function handler(request, response) {
       })
     }
   );
+
+  await sendPortalEmail({
+    to: email,
+    subject: "IHP Portal hesabin hazir",
+    title: "Portal hesabin hazir",
+    body: `Hesabin olusturuldu.\n\nGiris e-postasi: ${email}\nGecici sifre: ${password}\n\nIlk giristen sonra sifreni portal ayarlarindan degistirebilirsin.`,
+    actionUrl: "#/login",
+    actionLabel: "Portala gir"
+  }).catch(() => undefined);
 
   return json(response, 200, {
     ok: true,

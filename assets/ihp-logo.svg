@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">&#304;stiklal H&#252;rriyet Partisi</title>
+  <desc id="desc">K&#305;rm&#305;z&#305; y&#305;ld&#305;z ve hilal, lacivert kanatlar, me&#351;ale ve parti ad&#305;.</desc>
+  <rect width="1024" height="1024" rx="42" fill="#fff"/>
+
+  <path d="M512 52l27 84 88 .2-71 51.5 26.8 84.2L512 219.8l-70.8 52.1 26.8-84.2-71-51.5 88-.2z" fill="#d5101c"/>
+  <path d="M207 279c45 151 161 259 305 259s260-108 305-259c35 92 22 197-32 280-63 98-163 151-273 151S302 657 239 559c-54-83-67-188-32-280z" fill="#d5101c"/>
+  <path d="M256 260c68 87 141 176 193 294-114-57-194-143-241-251 19 3 34-7 48-43z" fill="#081b31"/>
+  <path d="M768 260c-68 87-141 176-193 294 114-57 194-143 241-251-19 3-34-7-48-43z" fill="#081b31"/>
+  <path d="M196 336c82 42 162 105 222 207-126-32-220-94-282-183 29 4 47-1 60-24z" fill="#081b31"/>
+  <path d="M828 336c-82 42-162 105-222 207 126-32 220-94 282-183-29 4-47-1-60-24z" fill="#081b31"/>
+  <path d="M315 202c47 91 89 186 121 301-88-72-139-167-162-282 19 1 31-6 41-19z" fill="#081b31"/>
+  <path d="M709 202c-47 91-89 186-121 301 88-72 139-167 162-282-19 1-31-6-41-19z" fill="#081b31"/>
+  <path d="M512 403c59 0 101 51 101 110 0 81-61 134-101 193-40-59-101-112-101-193 0-59 42-110 101-110z" fill="#081b31"/>
+  <path d="M513 436c14 39-9 59-5 91 8-29 31-52 60-74 6 66-25 106-56 145-31-39-62-79-56-145 29 22 52 45 60 74 4-32-19-52-3-91z" fill="#d5101c"/>
+  <path d="M449 648h126l-21 164h-84zm-22-42h170v48H427z" fill="#081b31"/>
+
+  <path d="M216 847h113" stroke="#d5101c" stroke-width="12" stroke-linecap="round"/>
+  <path d="M695 847h113" stroke="#d5101c" stroke-width="12" stroke-linecap="round"/>
+  <text x="512" y="856" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="86" font-weight="800" letter-spacing="10" fill="#081b31">&#304;ST&#304;KLAL</text>
+  <text x="512" y="925" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="60" font-weight="900" letter-spacing="10" fill="#d5101c">H&#220;RR&#304;YET</text>
+  <text x="512" y="975" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="800" letter-spacing="18" fill="#081b31">PART&#304;S&#304;</text>
+</svg>

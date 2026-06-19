@@ -1,3 +1,5 @@
+import { emailProfile } from "./_mail.js";
+
 const APPEAL_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const VALID_ACTIONS = new Set(["appeal", "accept", "reject"]);
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -66,6 +68,13 @@ async function notify(profileId, actorId, title, body) {
       category: "discipline",
       link: "#/portal/discipline"
     })
+  }).catch(() => undefined);
+  await emailProfile(supabaseRequest, profileId, {
+    subject: title,
+    title,
+    body,
+    actionUrl: "#/portal/discipline",
+    actionLabel: "Disiplin kaydini ac"
   }).catch(() => undefined);
 }
 
@@ -164,7 +173,7 @@ export default async function handler(request, response) {
   }
 
   if (!hasAny(actor.roles, APPEAL_MANAGERS)) {
-    return json(response, 403, { error: "Itiraz kararini yalnizca DK baskani veya super admin verebilir." });
+    return json(response, 403, { error: "Itiraz kararini yalnizca DK baskani veya admin verebilir." });
   }
   if (appealStatus !== "submitted") {
     return json(response, 400, { error: "Karara baglanacak acik itiraz yok." });

@@ -1,3 +1,5 @@
+import { emailProfile } from "./_mail.js";
+
 const VALID_DECISIONS = new Set(["reviewing", "accepted", "rejected"]);
 const REQUESTABLE_ROLES = new Set([
   "spokesperson",
@@ -169,6 +171,13 @@ async function notify(profileId, actorId, title, body) {
       category: "application",
       link: "#/portal/applications"
     })
+  }).catch(() => undefined);
+  await emailProfile(supabaseRequest, profileId, {
+    subject: title,
+    title,
+    body,
+    actionUrl: "#/portal/applications",
+    actionLabel: "Basvurulari ac"
   }).catch(() => undefined);
 }
 

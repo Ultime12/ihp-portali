@@ -1,3 +1,5 @@
+import { emailProfile } from "./_mail.js";
+
 const SANCTION_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
 const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "party_suspension", "passive_member"]);
@@ -136,6 +138,13 @@ async function notify(profileId, actorId, title, body, category = "discipline") 
       link: "#/portal/discipline"
     })
   }).catch(() => undefined);
+  await emailProfile(supabaseRequest, profileId, {
+    subject: title,
+    title,
+    body,
+    actionUrl: "#/portal/discipline",
+    actionLabel: "Disiplin kaydini ac"
+  }).catch(() => undefined);
 }
 
 export default async function handler(request, response) {
@@ -224,11 +233,11 @@ export default async function handler(request, response) {
     !actor.roles.includes("president") &&
     !actor.roles.includes("discipline_chair")
   ) {
-    return json(response, 403, { error: "Odul puanini yalnizca super admin, baskan veya disiplin kurulu baskani verebilir." });
+    return json(response, 403, { error: "Odul puanini yalnizca admin, baskan veya disiplin kurulu baskani verebilir." });
   }
   if (!isReward) {
     if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
-      return json(response, 403, { error: "Baskan, baskan yardimcisi veya super admin yetkisi disiplin kaydindan alinamaz." });
+      return json(response, 403, { error: "Baskan, baskan yardimcisi veya admin yetkisi disiplin kaydindan alinamaz." });
     }
     if (!canAffectTarget(actor.roles, targetRoles)) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });

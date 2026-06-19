@@ -1,3 +1,5 @@
+import { emailProfile } from "./_mail.js";
+
 function json(response, status, body) {
   return response.status(status).json(body);
 }
@@ -42,6 +44,13 @@ async function notify(profileId) {
       category: "discipline",
       link: "#/portal/discipline"
     })
+  }).catch(() => undefined);
+  await emailProfile(supabaseRequest, profileId, {
+    subject: "Uyelik askisi sona erdi",
+    title: "Uyelik askisi sona erdi",
+    body: "Sureli uzaklastirma cezanizin suresi doldu. Uyelik durumunuz tekrar aktif hale getirildi.",
+    actionUrl: "#/portal/discipline",
+    actionLabel: "Disiplin sayfasini ac"
   }).catch(() => undefined);
 }
 
