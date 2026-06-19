@@ -170,6 +170,29 @@ try {
     await context.close();
   }
 
+  const disciplineContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const disciplinePage = await disciplineContext.newPage();
+  const disciplineProfile = {
+    ...baseProfile,
+    id: "discipline-chair-form",
+    email: "discipline-chair@example.test",
+    roles: ["discipline_chair", "member"],
+    role: "discipline_chair",
+    theme_preference: "blue"
+  };
+  await openPortal(disciplinePage, disciplineProfile, "discipline");
+  await disciplinePage.locator('[data-action="open-discipline"]').click();
+  const suspensionField = disciplinePage.locator("[data-discipline-suspension]");
+  assert.equal(await suspensionField.isHidden(), true, "suspension duration should start hidden");
+  await disciplinePage.locator("#discipline-effect").selectOption("party_suspension");
+  assert.equal(await suspensionField.isVisible(), true, "suspension duration should appear for party suspension");
+  assert.equal(await disciplinePage.locator("#discipline-sanction-days").isEnabled(), true);
+  assert.equal(await disciplinePage.locator("#discipline-sanction-days").getAttribute("required"), "");
+  await disciplinePage.locator("#discipline-effect").selectOption("none");
+  assert.equal(await suspensionField.isHidden(), true, "suspension duration should hide for other sanctions");
+  assert.equal(await disciplinePage.locator("#discipline-sanction-days").isDisabled(), true);
+  await disciplineContext.close();
+
   const accessContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const accessPage = await accessContext.newPage();
   const accessProfile = { ...baseProfile, id: "access-account", email: "giris@tfo.k12.tr", display_name: "Geçiş Görevlisi", roles: [], role: "member", member_code: null, is_system_account: true, theme_preference: "blue" };

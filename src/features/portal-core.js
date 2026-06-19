@@ -645,6 +645,18 @@ badgeCountForNav = function patchedBadgeCountForNav(id) {
 };
 
 const baseOpenDiscipline = openDiscipline;
+
+function syncDisciplineSuspensionField(effectSelect = document.getElementById("discipline-effect")) {
+  const field = document.querySelector("[data-discipline-suspension]");
+  const input = document.getElementById("discipline-sanction-days");
+  if (!effectSelect || !field || !input) return;
+  const visible = effectSelect.value === "party_suspension";
+  field.hidden = !visible;
+  input.disabled = !visible;
+  input.required = visible;
+  if (!visible) input.value = "";
+}
+
 openDiscipline = function patchedOpenDiscipline(item = null) {
   baseOpenDiscipline(item);
   const effect = document.getElementById("discipline-effect");
@@ -658,13 +670,24 @@ openDiscipline = function patchedOpenDiscipline(item = null) {
   if (!document.getElementById("discipline-sanction-days")) {
     effect.closest(".form-group")?.insertAdjacentHTML(
       "afterend",
-      `<div class="form-group">
+      `<div class="form-group" data-discipline-suspension hidden>
         <label for="discipline-sanction-days">Partiden uzaklaştırma süresi (gün)</label>
-        <input class="field" id="discipline-sanction-days" name="sanction_days" type="number" min="1" max="365" step="1" value="${esc(item?.sanction_days || "")}" placeholder="Örn: 7" />
+        <input class="field" id="discipline-sanction-days" name="sanction_days" type="number" min="1" max="365" step="1" value="${esc(item?.sanction_days || "")}" placeholder="Örn: 7" disabled />
         <p class="security-note">Sadece süreli partiden uzaklaştırma seçilirse zorunludur. Süre bitince üyelik otomatik aktif olur.</p>
       </div>`
     );
   }
+  syncDisciplineSuspensionField(effect);
+};
+
+const disciplineBaseHandleFilter = handleFilter;
+handleFilter = async function patchedDisciplineHandleFilter(event) {
+  const effectSelect = event.target.closest("#discipline-effect");
+  if (effectSelect) {
+    syncDisciplineSuspensionField(effectSelect);
+    return;
+  }
+  return disciplineBaseHandleFilter(event);
 };
 
 const baseOpenDisciplineDetails = openDisciplineDetails;
