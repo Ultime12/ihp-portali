@@ -19,6 +19,6 @@
     { "source": "/giris", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/credit-cron", "schedule": "15 3 * * *" }
+    { "path": "/api/manage-member", "schedule": "15 3 * * *" }
   ]
 }

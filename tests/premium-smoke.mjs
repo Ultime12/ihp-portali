@@ -76,6 +76,21 @@ async function mockBackend(page, profile) {
   await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
   await page.route("**/api/flappy-session", async (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
+    if (body.module === "game_center") {
+      return route.fulfill({
+        json: {
+          disciplinePoints: profile.discipline_points,
+          attempts: [],
+          adminStats: { flappy: 0, snake: 0, scratch: 0 },
+          memberStatus: [{ id: profile.id, displayName: profile.display_name, disciplinePoints: profile.discipline_points, flappy: false, snake: false, scratch: false }],
+          settings: [
+            { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "weekly" },
+            { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "weekly" },
+            { game_key: "scratch", display_name: "İHP Kazı Kazan", enabled: true, entry_cost: 10, reward_points: 20, target_score: 0, win_probability_basis_points: 800, attempt_period: "weekly" }
+          ]
+        }
+      });
+    }
     if (body.action === "start") {
       return route.fulfill({ json: { session: { id: "game-1", seed: 12345, status: "active", score: 0 }, disciplinePoints: 95 } });
     }
@@ -87,20 +102,7 @@ async function mockBackend(page, profile) {
       }
     });
   });
-  await page.route("**/api/game-center", (route) => route.fulfill({
-    json: {
-      disciplinePoints: profile.discipline_points,
-      attempts: [],
-      adminStats: { flappy: 0, snake: 0, scratch: 0 },
-      memberStatus: [{ id: profile.id, displayName: profile.display_name, disciplinePoints: profile.discipline_points, flappy: false, snake: false, scratch: false }],
-      settings: [
-        { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "weekly" },
-        { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "weekly" },
-        { game_key: "scratch", display_name: "İHP Kazı Kazan", enabled: true, entry_cost: 10, reward_points: 20, target_score: 0, win_probability_basis_points: 800, attempt_period: "weekly" }
-      ]
-    }
-  }));
-  await page.route("**/api/credit-system", (route) => route.fulfill({
+  await page.route("**/api/manage-member", (route) => route.fulfill({
     json: {
       settings: { member_access_enabled: false, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
       accounts: [], profiles: members, loans: [], installments: [], transactions: [], cheques: []

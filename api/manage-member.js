@@ -1,4 +1,5 @@
 import { emailProfile, sendPortalEmail } from "./_mail.js";
+import creditSystemHandler from "../server/credit-system.js";
 
 const MANAGER_ROLES = new Set(["super_admin"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin"]);
@@ -306,6 +307,9 @@ async function notify(profileId, actorId, title, body) {
 }
 
 export default async function handler(request, response) {
+  if (request.method === "GET" || (request.method === "POST" && request.body?.module === "credit")) {
+    return creditSystemHandler(request, response);
+  }
   if (request.method !== "POST") {
     return json(response, 405, { error: "Yalnizca POST istegi kabul edilir." });
   }

@@ -95,7 +95,22 @@ async function openAccount(profileId) {
 }
 
 export default async function handler(request, response) {
-  if (request.method !== "POST") return json(response, 405, { error: "Yalnizca POST istegi kabul edilir." });
+  if (request.method === "GET") {
+    const secret = process.env.CRON_SECRET;
+    if (!secret || request.headers.authorization !== `Bearer ${secret}`) {
+      return json(response, 401, { error: "Cron yetkisi gecersiz." });
+    }
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const cronResponse = await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/process_credit_schedules`, {
+      method: "POST",
+      headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: "{}"
+    });
+    const cronPayload = await cronResponse.json().catch(() => null);
+    if (!cronResponse.ok) return json(response, 500, { error: cronPayload?.message || "Otomatik kredi islemleri tamamlanamadi." });
+    return json(response, 200, cronPayload || { ok: true });
+  }
+  if (request.method !== "POST") return json(response, 405, { error: "Yalnizca POST veya cron GET istegi kabul edilir." });
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return json(response, 500, { error: "Sunucu yapilandirmasi eksik." });
   }

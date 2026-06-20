@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import { FLAPPY_CONFIG, verifyFlappyRun } from "../src/features/flappy-engine.js";
+import gameCenterHandler from "../server/game-center.js";
 
 function json(response, status, body) {
   response.setHeader("Cache-Control", "no-store");
@@ -109,6 +110,9 @@ async function callRpc(name, body) {
 }
 
 export default async function handler(request, response) {
+  if (request.method === "POST" && request.body?.module === "game_center") {
+    return gameCenterHandler(request, response);
+  }
   if (request.method !== "POST") return json(response, 405, { error: "Yalnizca POST istegi kabul edilir." });
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return json(response, 500, { error: "Sunucu yapilandirmasi eksik." });

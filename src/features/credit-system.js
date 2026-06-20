@@ -101,7 +101,7 @@ function openCreditReview(loanId, decision) {
 }
 
 async function exportCreditReport(range) {
-  const report = await portalServerRequest("/api/credit-system", { action: "report", range });
+  const report = await portalServerRequest("/api/manage-member", { module: "credit", action: "report", range });
   const builder = createPdfBuilder("IHP Kredi Sistemi Islem Raporu", state.cache.settings?.logo_url || "", {
     subtitle: range === "7d" ? "Son 7 gun resmi hesap hareketleri" : "Son 24 saat resmi hesap hareketleri",
     footer: "IHP Kredi Sistemi - yalnizca yetkili yonetici kullanimi icindir."
@@ -137,7 +137,7 @@ const creditBaseLoadPage = loadPage;
 loadPage = async function creditLoadPage(page) {
   if (page !== CREDIT_PAGE_ID) return creditBaseLoadPage(page);
   state.loading = true; state.pageError = null; render();
-  try { state.cache.creditSystem = await portalServerRequest("/api/credit-system", { action: "admin_status" }); }
+  try { state.cache.creditSystem = await portalServerRequest("/api/manage-member", { module: "credit", action: "admin_status" }); }
   catch (error) { state.pageError = { page, message: error.message }; }
   finally { state.loading = false; render(); }
 };
@@ -151,7 +151,8 @@ handleClick = async function creditHandleClick(event) {
     try {
       const roleAllowances = {};
       document.querySelectorAll("[data-credit-allowance]").forEach((input) => { roleAllowances[input.dataset.creditAllowance] = Number(input.value); });
-      state.cache.creditSystem = await portalServerRequest("/api/credit-system", {
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
+        module: "credit",
         action: "update_settings",
         transferTaxBasisPoints: Math.round(Number(document.querySelector("[data-credit-tax]").value) * 100),
         loanInterestBasisPoints: Math.round(Number(document.querySelector("[data-credit-interest]").value) * 100),
@@ -169,7 +170,7 @@ handleClick = async function creditHandleClick(event) {
   if (action === "confirm-credit-review") {
     event.preventDefault(); target.disabled = true;
     try {
-      state.cache.creditSystem = await portalServerRequest("/api/credit-system", { action: "review_loan", loanId: target.dataset.id, decision: target.dataset.decision, note: modalRoot.querySelector("#credit-decision-note")?.value || "" });
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", { module: "credit", action: "review_loan", loanId: target.dataset.id, decision: target.dataset.decision, note: modalRoot.querySelector("#credit-decision-note")?.value || "" });
       closeModal(); showToast("Kredi başvurusu sonuçlandırıldı.", "success"); render();
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;

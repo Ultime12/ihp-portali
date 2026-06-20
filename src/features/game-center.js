@@ -169,7 +169,7 @@ async function endSnake(game) {
     return;
   }
   try {
-    const response = await portalServerRequest("/api/game-center", { action: "finish_snake", attemptId: game.attempt.id, directionEvents: game.events, finalTick: game.state.tick });
+    const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "finish_snake", attemptId: game.attempt.id, directionEvents: game.events, finalTick: game.state.tick });
     state.cache.gameCenter = response;
     state.profile.discipline_points = response.disciplinePoints;
     result.innerHTML = `<span>${Number(response.attempt.score || 0).toLocaleString("tr-TR")}</span><h3>${response.attempt.status === "won" ? "Tebrikler!" : "Deneme tamamlandı"}</h3><p>${response.attempt.status === "won" ? `Hesabına ${response.attempt.reward_points} disiplin puanı eklendi.` : "Antrenman modu her zaman ücretsiz."}</p><button class="btn btn-primary btn-sm" type="button" data-action="close-game-result">Tamamla</button>`;
@@ -279,7 +279,7 @@ loadPage = async function gameCenterLoadPage(page) {
   state.loading = true; state.pageError = null; render();
   try {
     const [gameCenter, flappyStatus, notifications] = await Promise.all([
-      portalServerRequest("/api/game-center", { action: "status" }),
+      portalServerRequest("/api/flappy-session", { module: "game_center", action: "status" }),
       portalServerRequest("/api/flappy-session", { action: "status" }),
       loadNotifications().catch(() => state.cache.notifications || [])
     ]);
@@ -299,7 +299,7 @@ handleClick = async function gameCenterHandleClick(event) {
   if (action === "confirm-snake") {
     event.preventDefault(); target.disabled = true;
     try {
-      const response = await portalServerRequest("/api/game-center", { action: "start_snake", acceptedTerms: true });
+      const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "start_snake", acceptedTerms: true });
       state.cache.gameCenter = response; state.profile.discipline_points = response.disciplinePoints;
       gameCenterBaseCloseModal(); launchSnake("ranked", response.attempt);
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
@@ -308,7 +308,7 @@ handleClick = async function gameCenterHandleClick(event) {
   if (action === "confirm-scratch") {
     event.preventDefault(); target.disabled = true;
     try {
-      const response = await portalServerRequest("/api/game-center", { action: "play_scratch", acceptedTerms: true });
+      const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "play_scratch", acceptedTerms: true });
       state.cache.gameCenter = response; state.profile.discipline_points = response.disciplinePoints;
       gameCenterBaseCloseModal(); launchScratch(response.attempt);
       if (response.won) {
@@ -331,7 +331,7 @@ handleClick = async function gameCenterHandleClick(event) {
         rewardPoints: Number(card.querySelector("[data-game-reward]").value),
         winProbabilityBasisPoints: Math.round(Number(card.querySelector("[data-game-probability]")?.value || 0) * 100)
       }));
-      state.cache.gameCenter = await portalServerRequest("/api/game-center", { action: "update_settings", settings });
+      state.cache.gameCenter = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "update_settings", settings });
       showToast("Oyun ayarları güncellendi.", "success"); render();
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;

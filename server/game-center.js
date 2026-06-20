@@ -213,3 +213,4 @@ export default async function handler(request, response) {
     return json(response, error.status || 400, { error: error.message || "Oyun islemi tamamlanamadi." });
   }
 }
+
