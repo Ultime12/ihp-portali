@@ -55,7 +55,8 @@ const baseProfile = {
 
 const members = [
   baseProfile,
-  { ...baseProfile, id: "member-2", email: "deniz@example.test", display_name: "Deniz Çiçek", member_code: "203847", avatar_initials: "DÇ" }
+  { ...baseProfile, id: "member-2", email: "deniz@example.test", display_name: "Deniz Çiçek", member_code: "203847", avatar_initials: "DÇ" },
+  { ...baseProfile, id: "president-1", email: "baskan@example.test", display_name: "Genel Başkan", member_code: "304756", roles: ["president", "member"], role: "president", avatar_initials: "GB" }
 ];
 
 function tablePayload(table, url, profile) {
@@ -82,10 +83,29 @@ async function mockBackend(page, profile) {
       json: {
         session: null,
         disciplinePoints: profile.discipline_points,
-        config: { entryCost: 5, reward: 10, targetScore: 10000, scorePerPipe: 400 }
+        config: { enabled: true, entryCost: 5, reward: 10, targetScore: 10000, scorePerPipe: 400 }
       }
     });
   });
+  await page.route("**/api/game-center", (route) => route.fulfill({
+    json: {
+      disciplinePoints: profile.discipline_points,
+      attempts: [],
+      adminStats: { flappy: 0, snake: 0, scratch: 0 },
+      memberStatus: [{ id: profile.id, displayName: profile.display_name, disciplinePoints: profile.discipline_points, flappy: false, snake: false, scratch: false }],
+      settings: [
+        { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "weekly" },
+        { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "weekly" },
+        { game_key: "scratch", display_name: "İHP Kazı Kazan", enabled: true, entry_cost: 10, reward_points: 20, target_score: 0, win_probability_basis_points: 800, attempt_period: "weekly" }
+      ]
+    }
+  }));
+  await page.route("**/api/credit-system", (route) => route.fulfill({
+    json: {
+      settings: { member_access_enabled: false, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
+      accounts: [], profiles: members, loans: [], installments: [], transactions: [], cheques: []
+    }
+  }));
   await page.route("https://mock.supabase.test/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     const table = url.pathname.split("/").pop();
@@ -152,15 +172,22 @@ try {
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "green", "theme selection should apply");
     await portalPage.locator('[data-action="open-notifications"]').click();
     assert.equal(await portalPage.locator('[role="dialog"]').isVisible(), true, "notifications modal should open");
+    await portalPage.waitForTimeout(75);
     assert.equal(await portalPage.evaluate(() => document.querySelector('[role="dialog"]').contains(document.activeElement)), true, "modal should receive focus");
     await portalPage.keyboard.press("Escape");
     await portalPage.evaluate(() => { location.hash = "#/portal/games"; });
-    await portalPage.waitForSelector(".flappy-mode-grid");
+    await portalPage.waitForSelector(".arcade-grid");
     await portalPage.locator('[data-action="open-ranked-flappy-terms"]').click();
     const rankedConfirm = portalPage.locator('[data-action="confirm-ranked-flappy"]');
     assert.equal(await rankedConfirm.isDisabled(), true, `${viewport.name}: ranked consent must be required`);
     await portalPage.locator("[data-flappy-consent]").check();
     assert.equal(await rankedConfirm.isEnabled(), true, `${viewport.name}: accepted consent should enable entry`);
+    await portalPage.keyboard.press("Escape");
+    await portalPage.locator('[data-action="start-snake-practice"]').click();
+    assert.equal(await portalPage.locator(".snake-board").isVisible(), true, `${viewport.name}: Snake practice should open`);
+    await portalPage.keyboard.press("Escape");
+    await portalPage.locator('[data-action="open-scratch-terms"]').click();
+    assert.equal(await portalPage.locator('[data-action="confirm-scratch"]').isDisabled(), true, `${viewport.name}: scratch consent must be required`);
     await portalPage.keyboard.press("Escape");
     await portalPage.locator('[data-action="start-flappy-practice"]').click();
     assert.equal(await portalPage.locator(".flappy-canvas").isVisible(), true, `${viewport.name}: practice game should open`);
@@ -196,6 +223,13 @@ try {
     await context.close();
   }
 
+  const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const adminPage = await adminContext.newPage();
+  const adminProfile = { ...baseProfile, id: "admin-credit", email: "admin@example.test", roles: ["super_admin"], role: "super_admin", theme_preference: "blue" };
+  await openPortal(adminPage, adminProfile, "credit");
+  assert.equal(await adminPage.locator(".credit-settings-panel").isVisible(), true, "admin should see credit settings");
+  await adminContext.close();
+
   const disciplineContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const disciplinePage = await disciplineContext.newPage();
   const disciplineProfile = {
@@ -217,6 +251,13 @@ try {
   await disciplinePage.locator("#discipline-effect").selectOption("none");
   assert.equal(await suspensionField.isHidden(), true, "suspension duration should hide for other sanctions");
   assert.equal(await disciplinePage.locator("#discipline-sanction-days").isDisabled(), true);
+  await disciplinePage.locator("#discipline-member").selectOption("president-1");
+  await disciplinePage.locator("#discipline-effect").selectOption("points_only");
+  await disciplinePage.locator("#discipline-point-delta").fill("-10");
+  await disciplinePage.locator("#discipline-point-delta").dispatchEvent("input");
+  assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), null, "DK chair point penalty for president should not require investigation");
+  await disciplinePage.locator("#discipline-effect").selectOption("remove_roles");
+  assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), "", "role sanction should still require investigation");
   await disciplineContext.close();
 
   const accessContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

@@ -82,20 +82,21 @@ function flappyPage() {
 }
 
 function openRankedFlappyTerms() {
+  const config = state.cache.flappyStatus?.config || { entryCost: 5 };
   modal({
     title: "Puanlı oyun onayı",
     subtitle: "Bu hafta yalnızca bir puanlı deneme hakkınız bulunur.",
     body: `
       <div class="flappy-terms-box">
         <span class="flappy-terms-icon">${icon("shield")}</span>
-        <div><strong>Puan kullanımı aydınlatma metni</strong><p>Bu haftalık oyun denemesi başlatıldığında 5 disiplin puanı hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya başarısız olsam dahi bu puanın iade edilmeyeceğini ve bu hafta yeniden puanlı giriş yapamayacağımı anladım.</p></div>
+        <div><strong>Puan kullanımı aydınlatma metni</strong><p>Bu haftalık oyun denemesi başlatıldığında ${config.entryCost} disiplin puanı hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya başarısız olsam dahi bu puanın iade edilmeyeceğini ve bu hafta yeniden puanlı giriş yapamayacağımı anladım.</p></div>
       </div>
       <label class="flappy-consent"><input type="checkbox" data-flappy-consent /> <span>Metni okudum, anladım ve kabul ediyorum.</span></label>
     `,
     actions: `
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
-        <button class="btn btn-primary btn-sm" type="button" data-action="confirm-ranked-flappy" disabled>5 puan kullan ve başlat</button>
+        <button class="btn btn-primary btn-sm" type="button" data-action="confirm-ranked-flappy" disabled>${config.entryCost} puan kullan ve başlat</button>
       </div>
     `
   });

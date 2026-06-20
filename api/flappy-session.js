@@ -85,6 +85,15 @@ async function currentSession(profileId) {
   return session || null;
 }
 
+async function flappySettings() {
+  const response = await supabaseRequest(
+    "/rest/v1/game_settings?game_key=eq.flappy&select=*&limit=1"
+  );
+  const [settings] = await response.json().catch(() => []);
+  if (!response.ok || !settings) throw new Error("Flappy ayarlari alinamadi.");
+  return settings;
+}
+
 async function callRpc(name, body) {
   const rpcResponse = await supabaseRequest(`/rest/v1/rpc/${name}`, {
     method: "POST",
@@ -111,12 +120,14 @@ export default async function handler(request, response) {
 
   try {
     if (action === "status") {
+      const settings = await flappySettings();
       return json(response, 200, {
         session: await currentSession(member.profile.id),
         disciplinePoints: await freshPoints(member.profile.id),
         config: {
-          entryCost: 5,
-          reward: 10,
+          enabled: settings.enabled,
+          entryCost: settings.entry_cost,
+          reward: settings.reward_points,
           targetScore: FLAPPY_CONFIG.targetScore,
           scorePerPipe: FLAPPY_CONFIG.scorePerPipe
         }
@@ -129,6 +140,8 @@ export default async function handler(request, response) {
       }
       const existing = await currentSession(member.profile.id);
       if (existing) return json(response, 409, { error: "Bu haftaki puanli oyun hakkiniz kullanildi." });
+      const settings = await flappySettings();
+      if (!settings.enabled) return json(response, 409, { error: "IHP Flappy su anda Admin tarafindan kapatildi." });
 
       const session = await callRpc("start_weekly_flappy", {
         p_profile_id: member.profile.id,

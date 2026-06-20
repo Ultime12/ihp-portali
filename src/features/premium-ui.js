@@ -22,7 +22,7 @@ const premiumNavGroups = [
   ["Portal", new Set(["overview", "members", "positions", "committees", "announcements", "regulation", "youth", "agreements", "games", "access"])],
   ["Yönetim", new Set(["presidency", "applications", "reports"])],
   ["Disiplin", new Set(["discipline-operations", "discipline-council", "discipline", "complaints", "investigations"])],
-  ["Sistem", new Set(["audit", "settings"])]
+  ["Sistem", new Set(["credit", "audit", "settings"])]
 ];
 
 function premiumNavButton(item, page) {

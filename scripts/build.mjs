@@ -17,6 +17,9 @@ const featureFiles = [
   "agreements-runtime.js",
   "flappy-engine.js",
   "flappy-game.js",
+  "snake-engine.js",
+  "game-center.js",
+  "credit-system.js",
   "premium-ui.js"
 ];
 

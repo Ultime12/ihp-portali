@@ -84,7 +84,14 @@ canModerateMember = function patchedCanModerateMember(member) {
 
 const baseCanDisciplineTarget = canDisciplineTarget;
 canDisciplineTarget = function patchedCanDisciplineTarget(member) {
-  return !isSystemProfile(member) && baseCanDisciplineTarget(member);
+  if (isSystemProfile(member)) return false;
+  const targetRoles = rolesOf(member);
+  if (
+    hasRole("discipline_chair") &&
+    !targetRoles.includes("super_admin") &&
+    targetRoles.some((role) => ["president", "vice_president"].includes(role))
+  ) return true;
+  return baseCanDisciplineTarget(member);
 };
 
 const baseCanInvestigateTarget = canInvestigateTarget;
@@ -657,6 +664,34 @@ function syncDisciplineSuspensionField(effectSelect = document.getElementById("d
   if (!visible) input.value = "";
 }
 
+function chairProtectedPointPenaltySelection() {
+  if (!hasRole("discipline_chair")) return false;
+  const memberId = document.getElementById("discipline-member")?.value;
+  const member = (state.cache.disciplineMembers || []).find((item) => item.id === memberId);
+  const memberRoles = rolesOf(member);
+  const effect = document.getElementById("discipline-effect")?.value || "none";
+  const pointDelta = Number(document.getElementById("discipline-point-delta")?.value || 0);
+  return (
+    pointDelta < 0 &&
+    ["none", "points_only"].includes(effect) &&
+    memberRoles.some((role) => ["president", "vice_president"].includes(role)) &&
+    !memberRoles.includes("super_admin")
+  );
+}
+
+function syncDisciplineInvestigationRequirement() {
+  const select = document.getElementById("discipline-investigation");
+  if (!select) return;
+  const optional = chairProtectedPointPenaltySelection();
+  select.required = !optional;
+  const note = select.closest(".form-group")?.querySelector(".security-note");
+  if (note) {
+    note.textContent = optional
+      ? "DK Başkanı, başkan veya başkan yardımcısına yalnızca puan cezası verirken soruşturma seçmeden kararname yazabilir."
+      : "Ceza kararı soruşturma olmadan girilemez. Önce Soruşturmalar bölümünden kayıt açın.";
+  }
+}
+
 openDiscipline = function patchedOpenDiscipline(item = null) {
   baseOpenDiscipline(item);
   const effect = document.getElementById("discipline-effect");
@@ -678,6 +713,7 @@ openDiscipline = function patchedOpenDiscipline(item = null) {
     );
   }
   syncDisciplineSuspensionField(effect);
+  syncDisciplineInvestigationRequirement();
 };
 
 const disciplineBaseHandleFilter = handleFilter;
@@ -685,6 +721,11 @@ handleFilter = async function patchedDisciplineHandleFilter(event) {
   const effectSelect = event.target.closest("#discipline-effect");
   if (effectSelect) {
     syncDisciplineSuspensionField(effectSelect);
+    syncDisciplineInvestigationRequirement();
+    return;
+  }
+  if (event.target.closest("#discipline-member, #discipline-point-delta")) {
+    syncDisciplineInvestigationRequirement();
     return;
   }
   return disciplineBaseHandleFilter(event);
@@ -758,7 +799,7 @@ function jpegSize(bytes) {
   return { width: 320, height: 320 };
 }
 
-function createPdfBuilder(title, logoUrl) {
+function createPdfBuilder(title, logoUrl, options = {}) {
   const width = 595;
   const height = 842;
   const margin = 42;
@@ -813,7 +854,7 @@ function createPdfBuilder(title, logoUrl) {
       text(margin + 8, height - 55, "IHP", 13, "F2", "#0b1b31");
     }
     text(margin + 56, height - 48, title, 16, "F2", "#ffffff");
-    text(margin + 56, height - 66, "Disiplin Kurulu resmi raporu", 9, "F1", "#cbd5e1");
+    text(margin + 56, height - 66, options.subtitle || "Disiplin Kurulu resmi raporu", 9, "F1", "#cbd5e1");
     y = height - 118;
   }
 
@@ -901,7 +942,7 @@ function createPdfBuilder(title, logoUrl) {
     pages.forEach((item, index) => {
       page = item;
       rect(0, 0, width, 46, "#f8fafc");
-      text(margin, 24, "IHP Disiplin Kurulu - gizli ve yetkili kullanim icindir.", 8, "F1", "#64748b");
+      text(margin, 24, options.footer || "IHP Disiplin Kurulu - gizli ve yetkili kullanim icindir.", 8, "F1", "#64748b");
       text(width - margin - 70, 24, `Sayfa ${index + 1}/${pages.length}`, 8, "F1", "#64748b");
     });
     return buildBinaryPdf(pages, images, width, height);
@@ -1183,7 +1224,8 @@ submitForm = async function patchedSubmitForm(event) {
       }
       if (effectiveSanction === "reward_points" || pointDelta > 0) throw new Error("Ödül puanı ayrı Puan Ver ekranından verilir.");
       if (!recordValues.decree_text) throw new Error("Kararname metni zorunludur.");
-      if (!recordValues.investigation_id) throw new Error("Ceza girmek için önce soruşturma seçilmelidir.");
+      const allowWithoutInvestigation = chairProtectedPointPenaltySelection();
+      if (!recordValues.investigation_id && !allowWithoutInvestigation) throw new Error("Ceza girmek için önce soruşturma seçilmelidir.");
 
       const shouldApply = effectiveSanction !== "none" || pointDelta !== 0;
       const payload = {

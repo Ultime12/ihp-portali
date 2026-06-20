@@ -113,11 +113,10 @@ function canAffectTarget(actorRoles, targetRoles) {
   if (actorRoles.includes("super_admin")) return true;
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role) || role === "discipline_chair")) return false;
   if (actorRoles.includes("discipline_chair")) {
-    return targetRoles.some((role) => ["discipline_vice_chair", "discipline_member"].includes(role));
+    return true;
   }
   if (actorRoles.includes("discipline_vice_chair")) {
-    return targetRoles.includes("discipline_member") &&
-      !targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair"].includes(role));
+    return !targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair"].includes(role));
   }
   if (actorRoles.includes("discipline_member")) {
     return !targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role));
@@ -214,10 +213,6 @@ export default async function handler(request, response) {
     }
     disciplineRecord = record;
   }
-  if (!isReward && (!disciplineRecord || !disciplineRecord.investigation_id)) {
-    return json(response, 400, { error: "Ceza yaptirimi icin once sorusturmaya bagli disiplin kaydi gerekir." });
-  }
-
   const profileResponse = await supabaseRequest(
     `/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}&select=id,role,roles,status,discipline_points&limit=1`
   );
@@ -227,6 +222,15 @@ export default async function handler(request, response) {
   }
 
   const targetRoles = rolesOf(target);
+  const isPointPenalty = effect === "points_only" && pointDelta < 0;
+  const chairProtectedPointPenalty =
+    isPointPenalty &&
+    actor.roles.includes("discipline_chair") &&
+    targetRoles.some((role) => ["president", "vice_president"].includes(role)) &&
+    !targetRoles.includes("super_admin");
+  if (!isReward && (!disciplineRecord || !disciplineRecord.investigation_id) && !chairProtectedPointPenalty) {
+    return json(response, 400, { error: "Ceza yaptirimi icin once sorusturmaya bagli disiplin kaydi gerekir." });
+  }
   if (
     isReward &&
     !actor.roles.includes("super_admin") &&
@@ -236,10 +240,10 @@ export default async function handler(request, response) {
     return json(response, 403, { error: "Odul puanini yalnizca admin, baskan veya disiplin kurulu baskani verebilir." });
   }
   if (!isReward) {
-    if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
+    if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES) && !chairProtectedPointPenalty) {
       return json(response, 403, { error: "Baskan, baskan yardimcisi veya admin yetkisi disiplin kaydindan alinamaz." });
     }
-    if (!canAffectTarget(actor.roles, targetRoles)) {
+    if (!chairProtectedPointPenalty && !canAffectTarget(actor.roles, targetRoles)) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
     }
   }

@@ -529,6 +529,100 @@ body.modal-open { overflow: hidden; }
   .flappy-terms-box { flex-direction: column; }
 }
 
+.arcade-head, .credit-head { align-items: center; }
+.arcade-grid { display: grid; gap: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.arcade-card { display: flex; flex-direction: column; min-height: 390px; overflow: hidden; position: relative; }
+.arcade-card::before { background: radial-gradient(circle, color-mix(in srgb, var(--accent) 28%, transparent), transparent 70%); content: ""; height: 220px; pointer-events: none; position: absolute; right: -80px; top: -90px; width: 220px; }
+.arcade-card.arcade-scratch::before { background: radial-gradient(circle, rgba(255, 94, 119, .2), transparent 70%); }
+.arcade-card.arcade-disabled { filter: saturate(.35); opacity: .68; }
+.arcade-card-top { align-items: center; display: grid; gap: .75rem; grid-template-columns: auto 1fr auto; position: relative; }
+.arcade-card-top h3 { margin: .15rem 0 0; }
+.arcade-icon { align-items: center; background: linear-gradient(145deg, rgba(130, 189, 255, .23), rgba(73, 127, 212, .09)); border: 1px solid rgba(160, 207, 255, .2); border-radius: 16px; display: flex; height: 48px; justify-content: center; width: 48px; }
+.arcade-card > p { color: var(--text-soft); line-height: 1.6; min-height: 77px; }
+.arcade-facts { display: flex; flex-wrap: wrap; gap: .45rem; }
+.arcade-facts span { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); border-radius: 999px; color: var(--text-soft); font-size: .76rem; padding: .42rem .65rem; }
+.arcade-facts b { color: var(--text); margin-left: .25rem; }
+.arcade-result { align-items: flex-start; background: rgba(4, 15, 33, .32); border: 1px solid rgba(148, 197, 255, .1); border-radius: 15px; display: flex; flex-direction: column; gap: .32rem; margin-top: .8rem; padding: .75rem; }
+.arcade-result small { color: var(--text-soft); }
+.arcade-actions { display: flex; gap: .55rem; margin-top: auto; padding-top: 1rem; }
+.arcade-integrity { align-items: center; display: flex; gap: 1rem; margin-top: 1rem; }
+.arcade-integrity > span { align-items: center; background: rgba(89, 161, 255, .12); border-radius: 15px; display: flex; flex: 0 0 50px; height: 50px; justify-content: center; }
+.arcade-integrity strong { display: block; }
+.arcade-integrity p { color: var(--text-soft); margin: .3rem 0 0; }
+
+.game-admin-panel { margin-top: 1rem; }
+.game-admin-grid { display: grid; gap: .75rem; grid-template-columns: repeat(3, minmax(0,1fr)); }
+.game-admin-card { background: rgba(5, 20, 42, .34); border: 1px solid rgba(151, 199, 255, .12); border-radius: 17px; display: grid; gap: .65rem; margin: 0; padding: 1rem; }
+.game-admin-card legend { font-weight: 750; padding: 0 .35rem; }
+.game-admin-card label { color: var(--text-soft); display: grid; font-size: .75rem; gap: .35rem; }
+.game-admin-card small { color: var(--accent); }
+.game-member-status { border-top: 1px solid rgba(145, 197, 255, .1); margin-top: 1rem; padding-top: 1rem; }
+.game-member-status .panel-head.compact { margin-bottom: .65rem; }
+.game-member-status h4 { font-size: 1rem; margin: .12rem 0 0; }
+.switch-row { align-items: center !important; display: flex !important; justify-content: space-between; }
+.switch-row input { accent-color: var(--accent); height: 18px; width: 34px; }
+
+.snake-game-modal { max-width: 620px; width: min(620px, calc(100vw - 1rem)); }
+.snake-shell { user-select: none; }
+.snake-topline { align-items: center; display: flex; justify-content: space-between; margin-bottom: .65rem; }
+.snake-topline span, .snake-shell > p { color: var(--text-soft); font-size: .78rem; }
+.snake-board-wrap { aspect-ratio: 5 / 6; border: 1px solid rgba(151, 205, 255, .28); border-radius: 23px; box-shadow: inset 0 1px rgba(255,255,255,.11), 0 24px 65px rgba(0,0,0,.35); margin: auto; max-height: 65vh; overflow: hidden; position: relative; }
+.snake-board { display: block; height: 100%; touch-action: none; width: 100%; }
+.snake-countdown { align-items: center; backdrop-filter: blur(10px); background: rgba(5, 25, 52, .35); display: flex; font-size: 4rem; font-weight: 850; inset: 0; justify-content: center; position: absolute; }
+.snake-countdown[hidden], .snake-result[hidden] { display: none; }
+.snake-result { align-items: center; backdrop-filter: blur(18px); background: rgba(3, 15, 32, .87); display: flex; flex-direction: column; inset: 0; justify-content: center; padding: 1rem; position: absolute; text-align: center; }
+.snake-result > span { color: #88c4ff; font-size: 3.6rem; font-weight: 850; letter-spacing: -.07em; }
+.snake-result h3 { font-size: 1.5rem; margin: .2rem 0; }
+.snake-result p { color: var(--text-soft); }
+.snake-controls { display: none; gap: .45rem; grid-template-columns: repeat(4, 1fr); margin-top: .65rem; }
+.snake-controls button { background: rgba(112, 174, 246, .11); border: 1px solid rgba(142, 196, 255, .2); border-radius: 13px; color: var(--text); font-size: 1.35rem; min-height: 48px; }
+
+.scratch-modal { max-width: 720px; }
+.scratch-stage { text-align: center; }
+.scratch-ticket { aspect-ratio: 2 / 1; border-radius: 24px; box-shadow: 0 28px 80px rgba(0,0,0,.36); margin: auto; max-width: 620px; overflow: hidden; position: relative; }
+.scratch-result { align-items: center; background: radial-gradient(circle at 50% 20%, rgba(113, 185, 255, .28), transparent 55%), linear-gradient(145deg,#082349,#0d4672); display: flex; flex-direction: column; inset: 0; justify-content: center; position: absolute; }
+.scratch-result.won { background: radial-gradient(circle at 50% 20%, rgba(255, 209, 102, .34), transparent 55%), linear-gradient(145deg,#153f63,#0a274a); }
+.scratch-result span { color: #b8dafc; font-size: .85rem; font-weight: 800; letter-spacing: .18em; }
+.scratch-result strong { color: #fff; font-size: clamp(1.8rem, 6vw, 3.5rem); letter-spacing: -.05em; margin: .5rem 0; }
+.scratch-result.won strong { color: #ffd66e; text-shadow: 0 0 35px rgba(255, 205, 82, .45); }
+.scratch-result small { color: rgba(230,242,255,.7); }
+.scratch-canvas { height: 100%; inset: 0; position: absolute; touch-action: none; transition: opacity .7s ease, transform .7s ease; width: 100%; }
+.scratch-canvas.revealed { opacity: 0; pointer-events: none; transform: scale(1.04); }
+.scratch-stage > p { color: var(--text-soft); }
+
+.credit-admin-seal { align-items: center; background: rgba(209, 48, 64, .1); border: 1px solid rgba(255, 99, 114, .22); border-radius: 999px; color: #ff8290; display: flex; font-size: .75rem; font-weight: 750; gap: .45rem; padding: .65rem .85rem; }
+.credit-settings-panel { margin-top: 1rem; }
+.credit-settings-grid { display: grid; gap: .7rem; grid-template-columns: repeat(3, minmax(0,1fr)); }
+.credit-settings-grid > label, .credit-allowance-grid label { color: var(--text-soft); display: grid; font-size: .76rem; gap: .38rem; }
+.credit-allowance-details { background: rgba(5, 20, 43, .3); border: 1px solid rgba(145, 195, 255, .1); border-radius: 17px; margin-top: .85rem; padding: .8rem; }
+.credit-allowance-details summary { cursor: pointer; font-weight: 720; }
+.credit-allowance-grid { display: grid; gap: .65rem; grid-template-columns: repeat(4, minmax(0,1fr)); margin-top: .8rem; }
+.credit-safety-note { color: var(--text-soft); font-size: .76rem; margin: .7rem 0 0; }
+.credit-dashboard-grid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .75fr); margin: 1rem 0; }
+.credit-report-copy { color: var(--text-soft); line-height: 1.6; }
+.credit-report-actions { display: grid; gap: .55rem; }
+
+@media (max-width: 1050px) {
+  .arcade-grid, .game-admin-grid { grid-template-columns: 1fr 1fr; }
+  .arcade-scratch { grid-column: 1 / -1; }
+  .credit-allowance-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
+@media (max-width: 760px) {
+  .arcade-grid, .game-admin-grid, .credit-settings-grid, .credit-dashboard-grid { grid-template-columns: 1fr; }
+  .arcade-scratch { grid-column: auto; }
+  .arcade-card { min-height: 340px; }
+  .snake-controls { display: grid; }
+  .credit-allowance-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 520px) {
+  .arcade-head, .credit-head { align-items: flex-start; }
+  .arcade-card-top { grid-template-columns: auto 1fr; }
+  .arcade-card-top > .badge { grid-column: 1 / -1; width: fit-content; }
+  .snake-game-modal, .scratch-modal { border-radius: 22px 22px 0 0; margin-top: auto; padding: .8rem; }
+  .snake-board-wrap { max-height: 58vh; }
+  .credit-allowance-grid { grid-template-columns: 1fr; }
+}
+
 @media (forced-colors: active) {
   .glass, .sidebar, .topbar, .modal { border: 1px solid CanvasText; }
 }
