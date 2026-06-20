@@ -34,12 +34,18 @@ async function authenticate(request) {
   if (!userResponse.ok) return null;
   const user = await userResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,roles,status,is_system_account&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,roles,status,is_system_account,credit_test_access&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
-  if (!profile || profile.status !== "active" || profile.is_system_account) return null;
+  if (!profile || profile.status !== "active" || (profile.is_system_account && !profile.credit_test_access)) return null;
   const roles = [...new Set([...(profile.roles || []), profile.role].filter(Boolean))];
-  return { user, profile, roles, isAdmin: roles.includes("super_admin") };
+  return {
+    user,
+    profile,
+    roles,
+    isAdmin: roles.includes("super_admin"),
+    isCreditTester: Boolean(profile.credit_test_access)
+  };
 }
 
 async function rpc(name, body) {
@@ -64,13 +70,32 @@ async function adminStatus() {
   const [settingsRows, accounts, profiles, loans, installments, transactions, cheques] = await Promise.all([
     rows("/rest/v1/credit_settings?id=eq.main&select=*&limit=1", "Kredi ayarlari alinamadi."),
     rows("/rest/v1/credit_accounts?select=*&order=opened_at.desc", "Kredi hesaplari alinamadi."),
-    rows("/rest/v1/profiles?is_system_account=eq.false&select=id,display_name,email,member_code,status,role,roles&order=display_name.asc", "Uyeler alinamadi."),
+    rows("/rest/v1/profiles?or=(is_system_account.eq.false,credit_test_access.eq.true)&select=id,display_name,email,member_code,status,role,roles,credit_test_access&order=display_name.asc", "Uyeler alinamadi."),
     rows("/rest/v1/credit_loans?select=*&order=requested_at.desc&limit=150", "Kredi basvurulari alinamadi."),
     rows("/rest/v1/credit_installments?select=*&order=due_at.asc&limit=300", "Taksitler alinamadi."),
     rows("/rest/v1/credit_transactions?select=*&order=created_at.desc&limit=250", "Islem kayitlari alinamadi."),
     rows("/rest/v1/credit_cheques?select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=150", "Cekler alinamadi.")
   ]);
   return { settings: settingsRows[0] || null, accounts, profiles, loans, installments, transactions, cheques };
+}
+
+async function memberStatus(profileId) {
+  const [settingsRows, accountRows] = await Promise.all([
+    rows("/rest/v1/credit_settings?id=eq.main&select=member_access_enabled,transfer_tax_basis_points,loan_interest_basis_points,max_loan_amount,max_term_days,grace_days&limit=1", "Kredi ayarlari alinamadi."),
+    rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&select=*&limit=1`, "Kredi hesabi alinamadi.")
+  ]);
+  const account = accountRows[0] || null;
+  if (!account) return { settings: settingsRows[0] || null, account: null, transactions: [], cheques: [], loans: [], installments: [] };
+  const [transactions, cheques, loans] = await Promise.all([
+    rows(`/rest/v1/credit_transactions?account_id=eq.${encodeURIComponent(account.id)}&select=*&order=created_at.desc&limit=100`, "Hesap hareketleri alinamadi."),
+    rows(`/rest/v1/credit_cheques?or=(issuer_account_id.eq.${account.id},redeemed_by_account_id.eq.${account.id})&select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=50`, "Cekler alinamadi."),
+    rows(`/rest/v1/credit_loans?account_id=eq.${encodeURIComponent(account.id)}&select=*&order=requested_at.desc&limit=50`, "Kredi basvurulari alinamadi.")
+  ]);
+  const loanIds = loans.map((loan) => loan.id);
+  const installments = loanIds.length
+    ? await rows(`/rest/v1/credit_installments?loan_id=in.(${loanIds.join(",")})&select=*&order=due_at.asc`, "Taksitler alinamadi.")
+    : [];
+  return { settings: settingsRows[0] || null, account, transactions, cheques, loans, installments };
 }
 
 function boundedInteger(value, minimum, maximum) {
@@ -119,9 +144,17 @@ export default async function handler(request, response) {
   const action = request.body?.action || "status";
 
   try {
+    if (!actor.isAdmin && !actor.isCreditTester) {
+      return json(response, 403, { error: "Kredi sistemi yalnizca yetkili deneme hesaplarina aciktir." });
+    }
+
     if (action === "admin_status") {
       if (!actor.isAdmin) return json(response, 403, { error: "Kredi paneli su anda yalnizca Admin'e aciktir." });
       return json(response, 200, await adminStatus());
+    }
+
+    if (action === "member_status") {
+      return json(response, 200, await memberStatus(actor.profile.id));
     }
 
     if (action === "update_settings") {
@@ -145,7 +178,7 @@ export default async function handler(request, response) {
         method: "PATCH",
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({
-          member_access_enabled: false,
+          member_access_enabled: true,
           weekly_allowance_enabled: Boolean(request.body?.weeklyAllowanceEnabled),
           transfer_tax_basis_points: transferTax,
           loan_interest_basis_points: interest,
@@ -182,13 +215,22 @@ export default async function handler(request, response) {
       return json(response, 200, { range: hours === 168 ? "7d" : "24h", generatedAt: new Date().toISOString(), ...data });
     }
 
-    if (action === "open_account") return json(response, 200, { account: await openAccount(actor.profile.id) });
-    if (action === "close_account") return json(response, 200, { account: await rpc("close_credit_account", { p_profile_id: actor.profile.id }) });
-    if (action === "transfer") return json(response, 200, await rpc("credit_transfer", {
-      p_profile_id: actor.profile.id,
-      p_recipient_code: String(request.body?.recipientCode || ""),
-      p_amount: Number(request.body?.amount)
-    }));
+    if (action === "open_account") {
+      const result = await openAccount(actor.profile.id);
+      return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
+    }
+    if (action === "close_account") {
+      const result = await rpc("close_credit_account", { p_profile_id: actor.profile.id });
+      return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
+    }
+    if (action === "transfer") {
+      const result = await rpc("credit_transfer", {
+        p_profile_id: actor.profile.id,
+        p_recipient_code: String(request.body?.recipientCode || ""),
+        p_amount: Number(request.body?.amount)
+      });
+      return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
+    }
     if (action === "issue_cheque") {
       const code = Array.from({ length: 24 }, () => randomInt(0, 10)).join("");
       const cheque = await rpc("issue_credit_cheque", {
@@ -197,24 +239,31 @@ export default async function handler(request, response) {
         p_code_last4: code.slice(-4),
         p_amount: Number(request.body?.amount)
       });
-      return json(response, 200, { cheque, code });
+      return json(response, 200, { cheque, code, ...(await memberStatus(actor.profile.id)) });
     }
     if (action === "redeem_cheque") {
       const code = String(request.body?.code || "").replace(/\D/g, "");
       if (code.length !== 24) return json(response, 400, { error: "Cek kodu 24 haneli olmalidir." });
-      return json(response, 200, { cheque: await rpc("redeem_credit_cheque", {
+      const cheque = await rpc("redeem_credit_cheque", {
         p_profile_id: actor.profile.id, p_code_hash: chequeHash(code)
-      }) });
+      });
+      return json(response, 200, { cheque, ...(await memberStatus(actor.profile.id)) });
     }
-    if (action === "request_loan") return json(response, 200, { loan: await rpc("request_credit_loan", {
-      p_profile_id: actor.profile.id,
-      p_amount: Number(request.body?.amount),
-      p_term_days: Number(request.body?.termDays),
-      p_installment_count: Number(request.body?.installmentCount)
-    }) });
-    if (action === "pay_installment") return json(response, 200, { installment: await rpc("pay_credit_installment", {
-      p_profile_id: actor.profile.id, p_installment_id: String(request.body?.installmentId || "")
-    }) });
+    if (action === "request_loan") {
+      const loan = await rpc("request_credit_loan", {
+        p_profile_id: actor.profile.id,
+        p_amount: Number(request.body?.amount),
+        p_term_days: Number(request.body?.termDays),
+        p_installment_count: Number(request.body?.installmentCount)
+      });
+      return json(response, 200, { loan, ...(await memberStatus(actor.profile.id)) });
+    }
+    if (action === "pay_installment") {
+      const installment = await rpc("pay_credit_installment", {
+        p_profile_id: actor.profile.id, p_installment_id: String(request.body?.installmentId || "")
+      });
+      return json(response, 200, { installment, ...(await memberStatus(actor.profile.id)) });
+    }
 
     return json(response, 400, { error: "Bilinmeyen kredi islemi." });
   } catch (error) {

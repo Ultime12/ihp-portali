@@ -25,12 +25,15 @@ function flappyStatusTone(status) {
   return status === "won" ? "green" : status === "active" ? "gold" : status ? "gray" : "blue";
 }
 
-function flappyNextWeekText() {
-  const now = new Date();
-  const day = now.getDay() || 7;
-  const next = new Date(now);
-  next.setDate(now.getDate() + (8 - day));
-  next.setHours(0, 0, 0, 0);
+function flappyNextPeriodText() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit"
+  });
+  const values = Object.fromEntries(formatter.formatToParts(new Date()).map((part) => [part.type, part.value]));
+  const today = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
+  const anchor = Date.UTC(2026, 0, 1);
+  const elapsedDays = Math.floor((today.getTime() - anchor) / 86_400_000);
+  const next = new Date(anchor + (Math.floor(elapsedDays / 2) * 2 + 2) * 86_400_000);
   return new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long" }).format(next);
 }
 
@@ -42,7 +45,7 @@ function flappyPage() {
   const rankedAvailable = !session && points >= config.entryCost;
   return `
     <section class="page-head flappy-page-head">
-      <div><span class="eyebrow">Haftalık meydan okuma</span><h2>İHP Flappy</h2><p>Refleksini antrenmanda geliştir, hazır olduğunda haftalık puanlı denemeye gir.</p></div>
+      <div><span class="eyebrow">2 günde bir meydan okuma</span><h2>İHP Flappy</h2><p>Refleksini antrenmanda geliştir, hazır olduğunda iki günlük puanlı denemeye gir.</p></div>
       <div class="flappy-points-orb"><span>Disiplin puanın</span><strong>${points}</strong></div>
     </section>
     <section class="flappy-mode-grid">
@@ -54,13 +57,13 @@ function flappyPage() {
       </article>
       <article class="panel glass flappy-mode-card flappy-ranked-card">
         <span class="flappy-card-icon">${icon("shield")}</span>
-        <div><span class="panel-kicker">Haftada bir</span><h3>Puanlı deneme</h3><p>Giriş 5 puandır. 10.000 skora ulaşırsan sistem en fazla 10 puan ödül verir.</p></div>
+        <div><span class="panel-kicker">2 günde bir</span><h3>Puanlı deneme</h3><p>Giriş 5 puandır. 10.000 skora ulaşırsan sistem en fazla 10 puan ödül verir.</p></div>
         <div class="flappy-facts"><span>Hedef <b>${Number(config.targetScore).toLocaleString("tr-TR")}</b></span><span>Ödül <b>+${config.reward}</b></span></div>
         ${session ? `
           <div class="flappy-week-result">
             ${badge(flappyStatusLabel(session.status), flappyStatusTone(session.status))}
             <strong>${Number(session.score || 0).toLocaleString("tr-TR")} skor</strong>
-            <small>Yeni hak ${flappyNextWeekText()} tarihinde açılır.</small>
+            <small>Yeni hak ${flappyNextPeriodText()} tarihinde açılır.</small>
           </div>
         ` : `
           <button class="btn btn-primary" type="button" data-action="open-ranked-flappy-terms" ${rankedAvailable ? "" : "disabled"}>
@@ -75,7 +78,7 @@ function flappyPage() {
         <div><b>01</b><span>Her engel 400 skor kazandırır.</span></div>
         <div><b>02</b><span>Hız kademeli artar, geçiş aralığı daralır.</span></div>
         <div><b>03</b><span>Puanlı sonuç sunucuda yeniden hesaplanır.</span></div>
-        <div><b>04</b><span>Haftalık deneme başlatıldıktan sonra iade edilmez.</span></div>
+        <div><b>04</b><span>İki günlük deneme başlatıldıktan sonra iade edilmez.</span></div>
       </div>
     </section>
   `;
@@ -85,11 +88,11 @@ function openRankedFlappyTerms() {
   const config = state.cache.flappyStatus?.config || { entryCost: 5 };
   modal({
     title: "Puanlı oyun onayı",
-    subtitle: "Bu hafta yalnızca bir puanlı deneme hakkınız bulunur.",
+    subtitle: "Bu iki günlük dönemde yalnızca bir puanlı deneme hakkınız bulunur.",
     body: `
       <div class="flappy-terms-box">
         <span class="flappy-terms-icon">${icon("shield")}</span>
-        <div><strong>Puan kullanımı aydınlatma metni</strong><p>Bu haftalık oyun denemesi başlatıldığında ${config.entryCost} disiplin puanı hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya başarısız olsam dahi bu puanın iade edilmeyeceğini ve bu hafta yeniden puanlı giriş yapamayacağımı anladım.</p></div>
+        <div><strong>Puan kullanımı aydınlatma metni</strong><p>Bu iki günlük oyun denemesi başlatıldığında ${config.entryCost} disiplin puanı hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya başarısız olsam dahi bu puanın iade edilmeyeceğini ve aynı dönemde yeniden puanlı giriş yapamayacağımı anladım.</p></div>
       </div>
       <label class="flappy-consent"><input type="checkbox" data-flappy-consent /> <span>Metni okudum, anladım ve kabul ediyorum.</span></label>
     `,
@@ -112,7 +115,7 @@ function flappyGameMarkup(mode) {
   return `
     <div class="flappy-game-shell" data-flappy-game>
       <div class="flappy-game-topline">
-        <span>${mode === "ranked" ? "Haftalık puanlı deneme" : "Sınırsız antrenman"}</span>
+        <span>${mode === "ranked" ? "2 günlük puanlı deneme" : "Sınırsız antrenman"}</span>
         <div><b data-flappy-score>0</b><small>/ 10.000</small></div>
       </div>
       <div class="flappy-canvas-wrap">

@@ -67,9 +67,10 @@ function periodStart() {
   }).formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const date = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
-  const day = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() - day + 1);
-  return date.toISOString().slice(0, 10);
+  const anchor = Date.UTC(2026, 0, 1);
+  const elapsedDays = Math.floor((date.getTime() - anchor) / 86_400_000);
+  const start = new Date(anchor + Math.floor(elapsedDays / 2) * 2 * 86_400_000);
+  return start.toISOString().slice(0, 10);
 }
 
 async function statusFor(member) {
@@ -213,4 +214,3 @@ export default async function handler(request, response) {
     return json(response, error.status || 400, { error: error.message || "Oyun islemi tamamlanamadi." });
   }
 }
-

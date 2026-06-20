@@ -17,8 +17,5 @@
     { "source": "/auth/:path*", "destination": "/index.html" },
     { "source": "/portal/:path*", "destination": "/index.html" },
     { "source": "/giris", "destination": "/index.html" }
-  ],
-  "crons": [
-    { "path": "/api/manage-member", "schedule": "15 3 * * *" }
   ]
 }

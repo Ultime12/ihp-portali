@@ -41,7 +41,7 @@ async function authenticateMember(request) {
   return { authUser, profile };
 }
 
-function istanbulWeekStart(now = new Date()) {
+function istanbulPeriodStart(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Istanbul",
     year: "numeric",
@@ -50,9 +50,10 @@ function istanbulWeekStart(now = new Date()) {
   }).formatToParts(now);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   const date = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
-  const day = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() - day + 1);
-  return date.toISOString().slice(0, 10);
+  const anchor = Date.UTC(2026, 0, 1);
+  const elapsedDays = Math.floor((date.getTime() - anchor) / 86_400_000);
+  const periodStart = new Date(anchor + Math.floor(elapsedDays / 2) * 2 * 86_400_000);
+  return periodStart.toISOString().slice(0, 10);
 }
 
 async function freshPoints(profileId) {
@@ -64,12 +65,12 @@ async function freshPoints(profileId) {
 }
 
 async function currentSession(profileId) {
-  const weekStart = istanbulWeekStart();
+  const weekStart = istanbulPeriodStart();
   const response = await supabaseRequest(
     `/rest/v1/flappy_sessions?profile_id=eq.${encodeURIComponent(profileId)}&week_start=eq.${weekStart}&select=*&limit=1`
   );
   const [session] = await response.json().catch(() => []);
-  if (!response.ok) throw new Error("Haftalik oyun durumu alinamadi.");
+  if (!response.ok) throw new Error("Iki gunluk oyun durumu alinamadi.");
 
   if (session?.status === "active" && new Date(session.expires_at).getTime() < Date.now()) {
     const expireResponse = await supabaseRequest(

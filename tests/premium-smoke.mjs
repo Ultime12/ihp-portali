@@ -49,6 +49,7 @@ const baseProfile = {
   avatar_color: "#31548f",
   theme_preference: "dark",
   is_system_account: false,
+  credit_test_access: false,
   joined_at: "2026-01-10T10:00:00.000Z",
   profile_committees: []
 };
@@ -84,9 +85,9 @@ async function mockBackend(page, profile) {
           adminStats: { flappy: 0, snake: 0, scratch: 0 },
           memberStatus: [{ id: profile.id, displayName: profile.display_name, disciplinePoints: profile.discipline_points, flappy: false, snake: false, scratch: false }],
           settings: [
-            { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "weekly" },
-            { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "weekly" },
-            { game_key: "scratch", display_name: "İHP Kazı Kazan", enabled: true, entry_cost: 10, reward_points: 20, target_score: 0, win_probability_basis_points: 800, attempt_period: "weekly" }
+            { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "two_days" },
+            { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "two_days" },
+            { game_key: "scratch", display_name: "İHP Kazı Kazan", enabled: true, entry_cost: 10, reward_points: 20, target_score: 0, win_probability_basis_points: 800, attempt_period: "two_days" }
           ]
         }
       });
@@ -102,12 +103,20 @@ async function mockBackend(page, profile) {
       }
     });
   });
-  await page.route("**/api/manage-member", (route) => route.fulfill({
-    json: {
-      settings: { member_access_enabled: false, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
-      accounts: [], profiles: members, loans: [], installments: [], transactions: [], cheques: []
+  await page.route("**/api/manage-member", (route) => {
+    const body = JSON.parse(route.request().postData() || "{}");
+    if (body.module === "credit" && body.action === "member_status") {
+      return route.fulfill({ json: {
+        settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
+        account: { id: "credit-test-account", profile_id: profile.id, account_code: "IHP900000001", balance: 0, status: "active" },
+        loans: [], installments: [], transactions: [], cheques: []
+      } });
     }
-  }));
+    return route.fulfill({ json: {
+      settings: { member_access_enabled: true, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
+      accounts: [], profiles: members, loans: [], installments: [], transactions: [], cheques: []
+    } });
+  });
   await page.route("https://mock.supabase.test/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     const table = url.pathname.split("/").pop();
@@ -231,6 +240,29 @@ try {
   await openPortal(adminPage, adminProfile, "credit");
   assert.equal(await adminPage.locator(".credit-settings-panel").isVisible(), true, "admin should see credit settings");
   await adminContext.close();
+
+  const creditTesterContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const creditTesterPage = await creditTesterContext.newPage();
+  const creditTesterProfile = {
+    ...baseProfile,
+    id: "credit-test-user",
+    email: "deneme@tfo.k12.tr",
+    display_name: "Kredi Deneme Bir",
+    is_system_account: true,
+    credit_test_access: true,
+    member_code: null,
+    theme_preference: "blue"
+  };
+  await openPortal(creditTesterPage, creditTesterProfile, "credit");
+  assert.equal(await creditTesterPage.locator(".credit-member-grid").isVisible(), true, "credit test account should see member banking tools");
+  assert.equal(await creditTesterPage.getByText("Kredi Sistemi", { exact: true }).first().isVisible(), true, "credit test account should see credit navigation");
+  await creditTesterContext.close();
+
+  const ordinaryCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const ordinaryCreditPage = await ordinaryCreditContext.newPage();
+  await openPortal(ordinaryCreditPage, baseProfile);
+  assert.equal(await ordinaryCreditPage.getByText("Kredi Sistemi", { exact: true }).count(), 0, "ordinary members must not see credit navigation");
+  await ordinaryCreditContext.close();
 
   const disciplineContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const disciplinePage = await disciplineContext.newPage();
