@@ -164,6 +164,8 @@ try {
     await portalPage.keyboard.press("Escape");
     await portalPage.locator('[data-action="start-flappy-practice"]').click();
     assert.equal(await portalPage.locator(".flappy-canvas").isVisible(), true, `${viewport.name}: practice game should open`);
+    await portalPage.waitForFunction(() => document.querySelector("[data-flappy-countdown]")?.hidden === true);
+    assert.equal(await portalPage.locator("[data-flappy-countdown]").isHidden(), true, `${viewport.name}: countdown overlay should disappear when the game starts`);
     await portalPage.keyboard.press("Escape");
     if (viewport.width <= 860) {
       await portalPage.locator('[data-action="toggle-sidebar"]').click();

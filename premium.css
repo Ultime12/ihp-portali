@@ -491,6 +491,7 @@ body.modal-open { overflow: hidden; }
 
 .flappy-canvas { display: block; height: 100%; touch-action: manipulation; width: 100%; }
 .flappy-countdown { align-items: center; backdrop-filter: blur(12px); background: rgba(5, 22, 46, .36); color: #fff; display: flex; font-size: clamp(3rem, 12vw, 5rem); font-weight: 800; inset: 0; justify-content: center; position: absolute; text-shadow: 0 8px 35px rgba(74, 151, 255, .75); }
+.flappy-countdown[hidden] { display: none; }
 
 .flappy-game-result {
   align-items: center;
