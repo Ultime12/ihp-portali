@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node scripts/build.mjs && node --check dist/src/app.js && node --check dist/src/lib/supabase.js && node --check dist/src/lib/portal-service.js && node --check api/config.js && node --check api/invite-member.js && node --check api/manage-member.js && node --check api/review-application.js && node --check api/review-complaint.js && node --check api/apply-discipline.js && node --check api/manage-investigation.js && node --check api/discipline-appeal.js && node --check api/client-error.js",
+    "check": "node scripts/build.mjs && node --check dist/src/app.js && node --check dist/src/lib/supabase.js && node --check dist/src/lib/portal-service.js && node --check api/config.js && node --check api/invite-member.js && node --check api/manage-member.js && node --check api/review-application.js && node --check api/review-complaint.js && node --check api/apply-discipline.js && node --check api/manage-investigation.js && node --check api/discipline-appeal.js && node --check api/flappy-session.js && node --check api/client-error.js",
+    "test:game": "node tests/flappy-engine.mjs",
     "test:ui": "node tests/premium-smoke.mjs"
   },
   "devDependencies": {

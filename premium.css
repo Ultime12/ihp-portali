@@ -356,6 +356,178 @@ body.modal-open { overflow: hidden; }
   .premium-product-preview { transform: none; }
 }
 
+/* Flappy weekly challenge */
+.flappy-page-head {
+  align-items: center;
+  background:
+    radial-gradient(circle at 82% 22%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 34%),
+    linear-gradient(135deg, rgba(12, 35, 67, .86), rgba(5, 19, 39, .7));
+  border: 1px solid rgba(142, 190, 255, .2);
+  border-radius: 26px;
+  padding: clamp(1.15rem, 2vw, 1.8rem);
+}
+
+.flappy-points-orb {
+  align-items: center;
+  aspect-ratio: 1;
+  background: radial-gradient(circle at 35% 25%, rgba(255, 255, 255, .2), transparent 34%), rgba(38, 93, 159, .22);
+  border: 1px solid rgba(144, 195, 255, .3);
+  border-radius: 50%;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .15), 0 18px 50px rgba(0, 0, 0, .25);
+  display: flex;
+  flex-direction: column;
+  height: 118px;
+  justify-content: center;
+  text-align: center;
+}
+
+.flappy-points-orb span { color: var(--text-soft); font-size: .72rem; }
+.flappy-points-orb strong { font-size: 2.35rem; letter-spacing: -.08em; line-height: 1; margin-top: .25rem; }
+
+.flappy-mode-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.flappy-mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  isolation: isolate;
+  min-height: 380px;
+  overflow: hidden;
+  padding: clamp(1.2rem, 2.2vw, 1.8rem);
+  position: relative;
+}
+
+.flappy-mode-card::after {
+  background: var(--accent);
+  border-radius: 50%;
+  content: "";
+  filter: blur(70px);
+  height: 150px;
+  opacity: .13;
+  position: absolute;
+  right: -45px;
+  top: -45px;
+  width: 150px;
+  z-index: -1;
+}
+
+.flappy-mode-card h3 { font-size: clamp(1.55rem, 3vw, 2.2rem); margin: .25rem 0 .45rem; }
+.flappy-mode-card p { color: var(--text-soft); line-height: 1.65; margin: 0; max-width: 48ch; }
+.flappy-mode-card > .btn, .flappy-week-result { margin-top: auto; }
+
+.flappy-card-icon {
+  align-items: center;
+  background: rgba(111, 171, 255, .12);
+  border: 1px solid rgba(139, 190, 255, .24);
+  border-radius: 18px;
+  display: inline-flex;
+  height: 54px;
+  justify-content: center;
+  width: 54px;
+}
+
+.flappy-card-icon svg { height: 24px; width: 24px; }
+
+.flappy-facts {
+  display: grid;
+  gap: .55rem;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.flappy-facts span {
+  background: rgba(255, 255, 255, .035);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 14px;
+  color: var(--text-soft);
+  display: flex;
+  flex-direction: column;
+  font-size: .76rem;
+  padding: .78rem;
+}
+
+.flappy-facts b { color: var(--text); font-size: 1rem; margin-top: .2rem; }
+.flappy-week-result { align-items: flex-start; display: flex; flex-direction: column; gap: .45rem; }
+.flappy-week-result small { color: var(--text-soft); }
+
+.flappy-rules-panel { margin-top: 1rem; }
+.flappy-rule-grid { display: grid; gap: .7rem; grid-template-columns: repeat(4, 1fr); }
+.flappy-rule-grid div { align-items: flex-start; background: rgba(255, 255, 255, .025); border: 1px solid rgba(255, 255, 255, .07); border-radius: 15px; display: flex; gap: .7rem; min-height: 82px; padding: .85rem; }
+.flappy-rule-grid b { color: var(--accent); font-size: .75rem; letter-spacing: .08em; }
+.flappy-rule-grid span { color: var(--text-soft); font-size: .82rem; line-height: 1.5; }
+
+.flappy-terms-box { background: rgba(74, 131, 204, .08); border: 1px solid rgba(133, 187, 255, .2); border-radius: 18px; display: flex; gap: .9rem; padding: 1rem; }
+.flappy-terms-box strong { display: block; margin-bottom: .45rem; }
+.flappy-terms-box p { color: var(--text-soft); font-size: .88rem; line-height: 1.65; margin: 0; }
+.flappy-terms-icon { align-items: center; background: rgba(99, 161, 245, .14); border-radius: 13px; display: flex; flex: 0 0 42px; height: 42px; justify-content: center; }
+.flappy-consent { align-items: flex-start; cursor: pointer; display: flex; font-size: .88rem; gap: .65rem; line-height: 1.5; margin-top: .9rem; }
+.flappy-consent input { accent-color: var(--accent); height: 18px; margin-top: 2px; width: 18px; }
+
+.flappy-game-modal { max-width: 650px; width: min(650px, calc(100vw - 1rem)); }
+.flappy-game-modal .modal-head { margin-bottom: .7rem; }
+.flappy-game-shell { user-select: none; }
+.flappy-game-topline { align-items: center; display: flex; justify-content: space-between; margin-bottom: .65rem; }
+.flappy-game-topline > span { color: var(--text-soft); font-size: .78rem; }
+.flappy-game-topline div { align-items: baseline; display: flex; gap: .25rem; }
+.flappy-game-topline b { font-size: 1.45rem; letter-spacing: -.05em; }
+.flappy-game-topline small { color: var(--text-soft); }
+
+.flappy-canvas-wrap {
+  aspect-ratio: 7 / 12;
+  background: #061b38;
+  border: 1px solid rgba(139, 193, 255, .28);
+  border-radius: 24px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .12), 0 24px 70px rgba(0, 0, 0, .35);
+  margin: 0 auto;
+  max-height: min(69vh, 720px);
+  max-width: 420px;
+  overflow: hidden;
+  position: relative;
+}
+
+.flappy-canvas { display: block; height: 100%; touch-action: manipulation; width: 100%; }
+.flappy-countdown { align-items: center; backdrop-filter: blur(12px); background: rgba(5, 22, 46, .36); color: #fff; display: flex; font-size: clamp(3rem, 12vw, 5rem); font-weight: 800; inset: 0; justify-content: center; position: absolute; text-shadow: 0 8px 35px rgba(74, 151, 255, .75); }
+
+.flappy-game-result {
+  align-items: center;
+  backdrop-filter: blur(18px) saturate(1.25);
+  background: linear-gradient(180deg, rgba(5, 19, 39, .72), rgba(4, 15, 31, .92));
+  display: flex;
+  flex-direction: column;
+  inset: 0;
+  justify-content: center;
+  padding: 1.25rem;
+  position: absolute;
+  text-align: center;
+}
+
+.flappy-game-result[hidden] { display: none; }
+.flappy-game-result h3 { font-size: 1.65rem; margin: .35rem 0; }
+.flappy-game-result p { color: rgba(225, 237, 252, .75); line-height: 1.55; margin: 0; max-width: 30ch; }
+.flappy-result-score { color: #89c2ff; font-size: clamp(2.6rem, 12vw, 4.4rem); font-weight: 850; letter-spacing: -.08em; line-height: 1; }
+.flappy-result-actions { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: center; margin-top: 1rem; }
+.flappy-controls { color: var(--text-soft); font-size: .76rem; margin: .65rem 0 0; text-align: center; }
+
+@media (max-width: 820px) {
+  .flappy-mode-grid { grid-template-columns: 1fr; }
+  .flappy-rule-grid { grid-template-columns: repeat(2, 1fr); }
+  .flappy-mode-card { min-height: 330px; }
+}
+
+@media (max-width: 520px) {
+  .flappy-page-head { align-items: flex-start; }
+  .flappy-points-orb { aspect-ratio: auto; border-radius: 18px; flex-direction: row; gap: .55rem; height: auto; padding: .7rem 1rem; width: 100%; }
+  .flappy-points-orb strong { font-size: 1.45rem; margin: 0; }
+  .flappy-rule-grid { grid-template-columns: 1fr; }
+  .flappy-game-modal { border-radius: 22px 22px 0 0; margin-top: auto; padding: .8rem; }
+  .flappy-canvas-wrap { border-radius: 19px; max-height: 68vh; }
+  .flappy-terms-box { flex-direction: column; }
+}
+
 @media (forced-colors: active) {
   .glass, .sidebar, .topbar, .modal { border: 1px solid CanvasText; }
 }

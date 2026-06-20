@@ -15,6 +15,8 @@ const featureFiles = [
   "investigation-transfer.js",
   "agreements-ui.js",
   "agreements-runtime.js",
+  "flappy-engine.js",
+  "flappy-game.js",
   "premium-ui.js"
 ];
 

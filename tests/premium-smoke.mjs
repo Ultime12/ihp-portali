@@ -73,6 +73,19 @@ function tablePayload(table, url, profile) {
 async function mockBackend(page, profile) {
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
+  await page.route("**/api/flappy-session", async (route) => {
+    const body = JSON.parse(route.request().postData() || "{}");
+    if (body.action === "start") {
+      return route.fulfill({ json: { session: { id: "game-1", seed: 12345, status: "active", score: 0 }, disciplinePoints: 95 } });
+    }
+    return route.fulfill({
+      json: {
+        session: null,
+        disciplinePoints: profile.discipline_points,
+        config: { entryCost: 5, reward: 10, targetScore: 10000, scorePerPipe: 400 }
+      }
+    });
+  });
   await page.route("https://mock.supabase.test/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     const table = url.pathname.split("/").pop();
@@ -140,6 +153,17 @@ try {
     await portalPage.locator('[data-action="open-notifications"]').click();
     assert.equal(await portalPage.locator('[role="dialog"]').isVisible(), true, "notifications modal should open");
     assert.equal(await portalPage.evaluate(() => document.querySelector('[role="dialog"]').contains(document.activeElement)), true, "modal should receive focus");
+    await portalPage.keyboard.press("Escape");
+    await portalPage.evaluate(() => { location.hash = "#/portal/games"; });
+    await portalPage.waitForSelector(".flappy-mode-grid");
+    await portalPage.locator('[data-action="open-ranked-flappy-terms"]').click();
+    const rankedConfirm = portalPage.locator('[data-action="confirm-ranked-flappy"]');
+    assert.equal(await rankedConfirm.isDisabled(), true, `${viewport.name}: ranked consent must be required`);
+    await portalPage.locator("[data-flappy-consent]").check();
+    assert.equal(await rankedConfirm.isEnabled(), true, `${viewport.name}: accepted consent should enable entry`);
+    await portalPage.keyboard.press("Escape");
+    await portalPage.locator('[data-action="start-flappy-practice"]').click();
+    assert.equal(await portalPage.locator(".flappy-canvas").isVisible(), true, `${viewport.name}: practice game should open`);
     await portalPage.keyboard.press("Escape");
     if (viewport.width <= 860) {
       await portalPage.locator('[data-action="toggle-sidebar"]').click();
