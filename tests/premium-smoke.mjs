@@ -81,6 +81,8 @@ async function mockBackend(page, profile) {
       return route.fulfill({
         json: {
           disciplinePoints: profile.discipline_points,
+          creditAccount: profile.id === "funded-credit" ? { id: "funded-account", account_code: "IHP111222333", balance: 500, status: "active" } : null,
+          gameCreditRequests: [],
           attempts: [],
           adminStats: { flappy: 0, snake: 0, scratch: 0 },
           memberStatus: [{ id: profile.id, displayName: profile.display_name, disciplinePoints: profile.discipline_points, flappy: false, snake: false, scratch: false }],
@@ -106,10 +108,12 @@ async function mockBackend(page, profile) {
   await page.route("**/api/manage-member", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
     if (body.module === "credit" && body.action === "member_status") {
+      const funded = profile.id === "funded-credit";
       return route.fulfill({ json: {
         settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
-        account: null,
-        loans: [], installments: [], transactions: [], cheques: []
+        account: funded ? { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 500, status: "active" } : null,
+        loans: [], installments: [], transactions: [], cheques: [],
+        gameRequests: funded ? [{ id: "game-charge-1", game_key: "snake", credit_amount: 5, status: "pending", requested_at: "2026-06-21T10:00:00.000Z" }] : []
       } });
     }
     return route.fulfill({ json: {
@@ -191,20 +195,14 @@ try {
     await portalPage.keyboard.press("Escape");
     await portalPage.evaluate(() => { location.hash = "#/portal/games"; });
     await portalPage.waitForSelector(".arcade-grid");
-    await portalPage.locator('[data-action="open-ranked-flappy-terms"]').click();
-    const rankedConfirm = portalPage.locator('[data-action="confirm-ranked-flappy"]');
-    assert.equal(await rankedConfirm.isDisabled(), true, `${viewport.name}: ranked consent must be required`);
-    await portalPage.locator("[data-flappy-consent]").check();
-    assert.equal(await rankedConfirm.isEnabled(), true, `${viewport.name}: accepted consent should enable entry`);
-    await portalPage.keyboard.press("Escape");
+    assert.equal(await portalPage.getByRole("button", { name: "Kredi hesabı aç" }).count(), 3, `${viewport.name}: paid games must require a credit account`);
+    assert.match(await portalPage.locator(".arcade-flappy").innerText(), /Can\s+3/);
     await portalPage.locator('[data-action="start-snake-practice"]').click();
     assert.equal(await portalPage.locator(".snake-board").isVisible(), true, `${viewport.name}: Snake practice should open`);
     await portalPage.keyboard.press("Escape");
-    await portalPage.locator('[data-action="open-scratch-terms"]').click();
-    assert.equal(await portalPage.locator('[data-action="confirm-scratch"]').isDisabled(), true, `${viewport.name}: scratch consent must be required`);
-    await portalPage.keyboard.press("Escape");
     await portalPage.locator('[data-action="start-flappy-practice"]').click();
     assert.equal(await portalPage.locator(".flappy-canvas").isVisible(), true, `${viewport.name}: practice game should open`);
+    assert.match(await portalPage.locator("[data-flappy-lives]").innerText(), /3 can/i);
     await portalPage.waitForFunction(() => document.querySelector("[data-flappy-countdown]")?.hidden === true);
     assert.equal(await portalPage.locator("[data-flappy-countdown]").isHidden(), true, `${viewport.name}: countdown overlay should disappear when the game starts`);
     await portalPage.keyboard.press("Escape");
@@ -267,7 +265,7 @@ try {
   assert.equal(await creditTesterPage.getByText("Kredi Sistemi", { exact: true }).first().isVisible(), true, "credit test account should see credit navigation");
   const openCreditAccount = creditTesterPage.locator('[data-action="credit-open-account"]');
   assert.equal(await openCreditAccount.isDisabled(), true, "account opening must require complete information and consent");
-  await creditTesterPage.locator("[data-credit-open-phone]").fill("05551234567");
+  assert.equal(await creditTesterPage.locator("[data-credit-open-phone]").count(), 0, "account opening must not request a phone number");
   await creditTesterPage.locator("[data-credit-open-purpose]").selectOption("general");
   await creditTesterPage.locator("[data-credit-open-consent]").check();
   assert.equal(await openCreditAccount.isEnabled(), true, "complete account opening form should enable confirmation");
@@ -276,8 +274,20 @@ try {
   const ordinaryCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const ordinaryCreditPage = await ordinaryCreditContext.newPage();
   await openPortal(ordinaryCreditPage, baseProfile);
-  assert.equal(await ordinaryCreditPage.getByText("Kredi Sistemi", { exact: true }).count(), 0, "ordinary members must not see credit navigation");
+  assert.equal(await ordinaryCreditPage.getByText("Kredi Sistemi", { exact: true }).first().isVisible(), true, "ordinary members must see credit navigation");
   await ordinaryCreditContext.close();
+
+  const fundedCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const fundedCreditPage = await fundedCreditContext.newPage();
+  await openPortal(fundedCreditPage, { ...baseProfile, id: "funded-credit", email: "funded@example.test" }, "credit");
+  assert.equal(await fundedCreditPage.getByText("İHP Snake", { exact: true }).isVisible(), true, "pending game charge must appear in credit center");
+  await fundedCreditPage.getByText("Kredi transferi", { exact: true }).click();
+  await fundedCreditPage.locator("[data-credit-recipient]").fill("IHP999888777");
+  await fundedCreditPage.locator("[data-credit-transfer-amount]").fill("100");
+  assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Vergi\s+20 kredi/);
+  assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Toplam kesinti\s+120 kredi/);
+  assert.equal(await fundedCreditPage.locator('[data-action="credit-member-transfer"]').isEnabled(), true, "valid transfer with tax preview must be enabled");
+  await fundedCreditContext.close();
 
   const disciplineContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const disciplinePage = await disciplineContext.newPage();

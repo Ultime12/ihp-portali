@@ -7,10 +7,23 @@ import {
   verifyFlappyRun
 } from "../src/features/flappy-engine.js";
 
-const noFlap = verifyFlappyRun(42, [], 5000);
+const noFlap = verifyFlappyRun(42, [], 10000);
 assert.equal(noFlap.valid, true, "A finished crash must verify");
 assert.equal(noFlap.won, false);
 assert.equal(noFlap.score, 0);
+assert.equal(noFlap.crashes, 3, "A ranked run must end only after three collisions");
+assert.equal(noFlap.livesRemaining, 0);
+
+const respawnState = createFlappyState(42);
+advanceFlappy(respawnState, 700, []);
+assert.equal(respawnState.alive, true);
+assert.equal(respawnState.lives, 2);
+assert.equal(respawnState.crashes, 1);
+assert.ok(respawnState.respawningUntilMs > respawnState.timeMs, "A collision must start a three-second respawn");
+const preservedScore = respawnState.score;
+advanceFlappy(respawnState, 3500, []);
+assert.equal(respawnState.score, preservedScore, "Respawn must preserve progress");
+assert.equal(respawnState.lives, 2);
 
 assert.equal(normalizeFlapTimes([0, 67]), null, "Impossible flap rate must be rejected");
 assert.equal(normalizeFlapTimes([0, 68, 136])?.length, 3);

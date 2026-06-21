@@ -19,6 +19,24 @@ function latestGameAttempt(key) {
   return (state.cache.gameCenter?.attempts || []).find((item) => item.game_key === key) || null;
 }
 
+function gameCreditRequest(key) {
+  return (state.cache.gameCenter?.gameCreditRequests || []).find((item) => item.game_key === key) || null;
+}
+
+function paidGameAction(key, attempt, enabled) {
+  if (attempt) return "";
+  const account = state.cache.gameCenter?.creditAccount;
+  const request = gameCreditRequest(key);
+  if (!account) return `<button class="btn btn-primary btn-sm" type="button" data-page="credit">Kredi hesabı aç</button>`;
+  if (request?.status === "pending") return `<button class="btn btn-primary btn-sm" type="button" data-page="credit">Kredi onayını tamamla</button>`;
+  if (request?.status === "approved") {
+    const action = key === "flappy" ? "start-approved-flappy" : key === "snake" ? "start-approved-snake" : "play-approved-scratch";
+    return `<button class="btn btn-primary btn-sm" type="button" data-action="${action}" ${enabled ? "" : "disabled"}>Oyunu başlat</button>`;
+  }
+  if (request?.status === "consumed") return `<button class="btn btn-primary btn-sm" type="button" disabled>Hak kullanıldı</button>`;
+  return `<button class="btn btn-primary btn-sm" type="button" data-action="request-game-credit" data-game-key="${key}" ${enabled ? "" : "disabled"}>Kredi onayı iste</button>`;
+}
+
 function gameAttemptLabel(attempt) {
   if (!attempt) return "Hak kullanılmadı";
   return ({ active: "Başlatıldı", won: "Ödül kazanıldı", lost: "Tamamlandı", expired: "Süresi doldu" })[attempt.status] || attempt.status;
@@ -50,10 +68,10 @@ function adminGameSettingsPanel() {
           return `<fieldset class="game-admin-card" data-game-setting="${key}">
             <legend>${esc(item.display_name || key)}</legend>
             <label class="switch-row"><span>Oyun açık</span><input type="checkbox" data-game-enabled ${item.enabled ? "checked" : ""} /></label>
-            <label>Giriş bedeli<input class="field" data-game-cost type="number" min="0" max="100" value="${item.entry_cost}" /></label>
-            <label>Ödül puanı<input class="field" data-game-reward type="number" min="0" max="100" value="${item.reward_points}" /></label>
+            <label>Kredi giriş bedeli<input class="field" data-game-cost type="number" min="1" max="100000" value="${item.entry_cost}" /></label>
+            <label>Disiplin puanı ödülü<input class="field" data-game-reward type="number" min="0" max="100" value="${item.reward_points}" /></label>
             ${key === "scratch" ? `<label>Kazanma ihtimali (%)<input class="field" data-game-probability type="number" min="0" max="100" step="0.1" value="${Number(item.win_probability_basis_points || 0) / 100}" /></label>` : ""}
-            <small>Bu iki günlük dönemde ${Number(stats[key] || 0)} puanlı kullanım</small>
+            <small>Bu iki günlük dönemde ${Number(stats[key] || 0)} kredili kullanım</small>
           </fieldset>`;
         }).join("")}
       </div>
@@ -68,6 +86,7 @@ function adminGameSettingsPanel() {
 
 function gameCenterPage() {
   const points = Number(state.cache.gameCenter?.disciplinePoints ?? state.cache.flappyStatus?.disciplinePoints ?? disciplinePoints(state.profile));
+  const creditBalance = Number(state.cache.gameCenter?.creditAccount?.balance || 0);
   const flappy = gameCenterSetting("flappy");
   const snake = gameCenterSetting("snake");
   const scratch = gameCenterSetting("scratch");
@@ -76,33 +95,33 @@ function gameCenterPage() {
   const scratchAttempt = latestGameAttempt("scratch");
   return `
     <section class="page-head arcade-head">
-      <div><span class="eyebrow">İHP Oyun Alanı</span><h2>Refleks, strateji ve biraz şans.</h2><p>Antrenman ücretsizdir. Puanlı haklar iki günde bir yenilenir ve sonuçlar sunucuda doğrulanır.</p></div>
-      <div class="flappy-points-orb"><span>Disiplin puanın</span><strong>${points}</strong></div>
+      <div><span class="eyebrow">İHP Oyun Alanı</span><h2>Refleks, strateji ve biraz şans.</h2><p>Antrenman ücretsizdir. Kredili haklar iki günde bir yenilenir; oyun başlamadan önce kesinti Kredi Sistemi'nde onaylanır.</p></div>
+      <div class="flappy-points-orb"><span>Kredi bakiyen</span><strong>${creditBalance}</strong><small>Ödül puanın: ${points}</small></div>
     </section>
     <section class="arcade-grid">
       ${gameCenterCard({
         key: "flappy", title: "İHP Flappy", kicker: "Refleks", iconName: "sparkles",
         description: "Daralan geçitlerde ritmini koru ve 10.000 skora ulaş.",
-        facts: [["Puanlı giriş", `${flappy.entry_cost} puan`], ["Ödül", `+${flappy.reward_points}`]],
+        facts: [["Kredili giriş", `${flappy.entry_cost} kredi`], ["Ödül", `+${flappy.reward_points} disiplin puanı`], ["Can", "3"]],
         attempt: flappySession,
-        actions: `<button class="btn btn-secondary btn-sm" type="button" data-action="start-flappy-practice" ${flappy.enabled ? "" : "disabled"}>Antrenman</button>${flappySession ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-ranked-flappy-terms" ${flappy.enabled && points >= flappy.entry_cost ? "" : "disabled"}>Puanlı oyna</button>`}`
+        actions: `<button class="btn btn-secondary btn-sm" type="button" data-action="start-flappy-practice" ${flappy.enabled ? "" : "disabled"}>Antrenman</button>${paidGameAction("flappy", flappySession, flappy.enabled)}`
       })}
       ${gameCenterCard({
         key: "snake", title: "İHP Snake", kicker: "Strateji", iconName: "activity",
         description: "Hızlanan alanda rotanı planla, büyü ve hedef skora ulaş.",
-        facts: [["Puanlı giriş", `${snake.entry_cost} puan`], ["Hedef", Number(snake.target_score).toLocaleString("tr-TR")], ["Ödül", `+${snake.reward_points}`]],
+        facts: [["Kredili giriş", `${snake.entry_cost} kredi`], ["Hedef", Number(snake.target_score).toLocaleString("tr-TR")], ["Ödül", `+${snake.reward_points} disiplin puanı`]],
         attempt: snakeAttempt,
-        actions: `<button class="btn btn-secondary btn-sm" type="button" data-action="start-snake-practice" ${snake.enabled ? "" : "disabled"}>Antrenman</button>${snakeAttempt ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-ranked-snake-terms" ${snake.enabled && points >= snake.entry_cost ? "" : "disabled"}>Puanlı oyna</button>`}`
+        actions: `<button class="btn btn-secondary btn-sm" type="button" data-action="start-snake-practice" ${snake.enabled ? "" : "disabled"}>Antrenman</button>${paidGameAction("snake", snakeAttempt, snake.enabled)}`
       })}
       ${gameCenterCard({
         key: "scratch", title: "İHP Kazı Kazan", kicker: "Şans", iconName: "gift",
         description: "İki günlük kartını kazı. Sonuç güvenli biçimde sunucuda belirlenir.",
-        facts: [["Kart bedeli", `${scratch.entry_cost} puan`], ["Ödül", `+${scratch.reward_points}`], ["İhtimal", `%${(Number(scratch.win_probability_basis_points) / 100).toLocaleString("tr-TR")}`]],
+        facts: [["Kart bedeli", `${scratch.entry_cost} kredi`], ["Ödül", `+${scratch.reward_points} disiplin puanı`], ["İhtimal", `%${(Number(scratch.win_probability_basis_points) / 100).toLocaleString("tr-TR")}`]],
         attempt: scratchAttempt,
-        actions: scratchAttempt ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-scratch-terms" ${scratch.enabled && points >= scratch.entry_cost ? "" : "disabled"}>Kartı al</button>`
+        actions: paidGameAction("scratch", scratchAttempt, scratch.enabled)
       })}
     </section>
-    <section class="panel glass arcade-integrity"><span>${icon("shield")}</span><div><strong>Adil oyun koruması</strong><p>Puanlı skorlar ve şans sonuçları sunucuda doğrulanır. Bağlantı kesilse bile kullanılan giriş bedeli iade edilmez.</p></div></section>
+    <section class="panel glass arcade-integrity"><span>${icon("shield")}</span><div><strong>Açık kredi onayı</strong><p>Oyun giriş bedeli doğrudan düşmez. Talep Kredi Sistemi'ne gider; tutarı görüp onayladığınızda kesilir ve oyun hakkı açılır.</p></div></section>
     ${adminGameSettingsPanel()}
   `;
 }
@@ -294,23 +313,30 @@ handleClick = async function gameCenterHandleClick(event) {
   const target = event.target.closest("[data-action], [data-snake-direction]");
   const action = target?.dataset.action;
   if (action === "start-snake-practice") { event.preventDefault(); launchSnake("practice"); return; }
-  if (action === "open-ranked-snake-terms") { event.preventDefault(); openGameTerms("snake"); return; }
-  if (action === "open-scratch-terms") { event.preventDefault(); openGameTerms("scratch"); return; }
-  if (action === "confirm-snake") {
+  if (action === "request-game-credit") {
+    event.preventDefault(); target.disabled = true;
+    try {
+      state.cache.gameCenter = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "request_credit", gameKey: target.dataset.gameKey });
+      showToast("Kredi talebi onayınıza gönderildi.", "success");
+      navigate("portal/credit");
+    } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
+  if (action === "start-approved-snake") {
     event.preventDefault(); target.disabled = true;
     try {
       const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "start_snake", acceptedTerms: true });
       state.cache.gameCenter = response; state.profile.discipline_points = response.disciplinePoints;
-      gameCenterBaseCloseModal(); launchSnake("ranked", response.attempt);
+      launchSnake("ranked", response.attempt);
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;
   }
-  if (action === "confirm-scratch") {
+  if (action === "play-approved-scratch") {
     event.preventDefault(); target.disabled = true;
     try {
       const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "play_scratch", acceptedTerms: true });
       state.cache.gameCenter = response; state.profile.discipline_points = response.disciplinePoints;
-      gameCenterBaseCloseModal(); launchScratch(response.attempt);
+      launchScratch(response.attempt);
       if (response.won) {
         state.cache.notifications = await loadNotifications().catch(() => state.cache.notifications || []);
         maybeCelebrateRewards();

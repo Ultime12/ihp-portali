@@ -16,6 +16,8 @@ export const FLAPPY_CONFIG = Object.freeze({
   tickMs: 1000 / 120,
   scorePerPipe: 400,
   targetScore: 10000,
+  lives: 3,
+  respawnDelayMs: 3000,
   maxDurationMs: 180000,
   maxFlaps: 1200,
   minimumFlapIntervalMs: 68
@@ -81,6 +83,9 @@ export function createFlappyState(seed) {
     nextPipeAtMs: FLAPPY_CONFIG.firstPipeAtMs,
     pipesPassed: 0,
     score: 0,
+    lives: FLAPPY_CONFIG.lives,
+    crashes: 0,
+    respawningUntilMs: 0,
     alive: true,
     outcome: "playing",
     flapIndex: 0
@@ -88,12 +93,40 @@ export function createFlappyState(seed) {
 }
 
 function applyFlap(state) {
+  if (state.respawningUntilMs > state.timeMs) return;
   state.velocityY = FLAPPY_CONFIG.flapVelocity;
   state.rotation = -0.45;
 }
 
+function crash(state) {
+  state.crashes += 1;
+  state.lives = Math.max(0, state.lives - 1);
+  if (state.lives === 0) {
+    state.alive = false;
+    state.outcome = "crashed";
+    return;
+  }
+
+  state.birdY = FLAPPY_CONFIG.height * 0.45;
+  state.velocityY = 0;
+  state.rotation = 0;
+  state.respawningUntilMs = state.timeMs + FLAPPY_CONFIG.respawnDelayMs;
+  state.pipes = state.pipes.filter((pipe) => {
+    const birdLeft = FLAPPY_CONFIG.birdX - FLAPPY_CONFIG.birdRadius;
+    const birdRight = FLAPPY_CONFIG.birdX + FLAPPY_CONFIG.birdRadius;
+    return pipe.x + FLAPPY_CONFIG.pipeWidth <= birdLeft || pipe.x >= birdRight;
+  });
+}
+
 function integrate(state, deltaMs) {
   if (!state.alive || deltaMs <= 0) return;
+  if (state.respawningUntilMs > state.timeMs) {
+    const pausedDelta = Math.min(deltaMs, state.respawningUntilMs - state.timeMs);
+    state.timeMs += pausedDelta;
+    state.nextPipeAtMs += pausedDelta;
+    if (state.timeMs + 0.001 >= state.respawningUntilMs) state.respawningUntilMs = 0;
+    return;
+  }
   const deltaSeconds = deltaMs / 1000;
   const { speed } = difficultyFor(state.pipesPassed);
 
@@ -119,8 +152,7 @@ function integrate(state, deltaMs) {
       }
     }
     if (collidesWithPipe(state, pipe)) {
-      state.alive = false;
-      state.outcome = "crashed";
+      crash(state);
       return;
     }
   }
@@ -130,8 +162,7 @@ function integrate(state, deltaMs) {
     state.birdY - FLAPPY_CONFIG.birdRadius <= 0 ||
     state.birdY + FLAPPY_CONFIG.birdRadius >= FLAPPY_CONFIG.groundY
   ) {
-    state.alive = false;
-    state.outcome = "crashed";
+    crash(state);
   }
 }
 
@@ -189,6 +220,8 @@ export function verifyFlappyRun(seed, flapTimes, durationMs) {
     pipesPassed: state.pipesPassed,
     flapCount: normalizedFlaps.length,
     durationMs: Math.round(state.timeMs),
+    livesRemaining: state.lives,
+    crashes: state.crashes,
     won: state.outcome === "won",
     outcome: state.outcome
   };

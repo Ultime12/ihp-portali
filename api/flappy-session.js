@@ -134,17 +134,18 @@ export default async function handler(request, response) {
           entryCost: settings.entry_cost,
           reward: settings.reward_points,
           targetScore: FLAPPY_CONFIG.targetScore,
-          scorePerPipe: FLAPPY_CONFIG.scorePerPipe
+          scorePerPipe: FLAPPY_CONFIG.scorePerPipe,
+          lives: FLAPPY_CONFIG.lives
         }
       });
     }
 
     if (action === "start") {
       if (request.body?.acceptedTerms !== true) {
-        return json(response, 400, { error: "Puanin iade edilmeyecegine dair metni kabul etmelisiniz." });
+        return json(response, 400, { error: "Kredi Sistemi onayi gerekir." });
       }
       const existing = await currentSession(member.profile.id);
-      if (existing) return json(response, 409, { error: "Bu haftaki puanli oyun hakkiniz kullanildi." });
+      if (existing) return json(response, 409, { error: "Bu iki gunluk oyun hakkiniz kullanildi." });
       const settings = await flappySettings();
       if (!settings.enabled) return json(response, 409, { error: "IHP Flappy su anda Admin tarafindan kapatildi." });
 

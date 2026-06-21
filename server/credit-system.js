@@ -80,12 +80,13 @@ async function adminStatus() {
 }
 
 async function memberStatus(profileId) {
-  const [settingsRows, accountRows] = await Promise.all([
+  const [settingsRows, accountRows, gameRequests] = await Promise.all([
     rows("/rest/v1/credit_settings?id=eq.main&select=member_access_enabled,transfer_tax_basis_points,loan_interest_basis_points,max_loan_amount,max_term_days,grace_days&limit=1", "Kredi ayarlari alinamadi."),
-    rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&select=*&limit=1`, "Kredi hesabi alinamadi.")
+    rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&select=*&limit=1`, "Kredi hesabi alinamadi."),
+    rows(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(profileId)}&select=*&order=requested_at.desc&limit=20`, "Oyun kredi talepleri alinamadi.")
   ]);
   const account = accountRows[0] || null;
-  if (!account) return { settings: settingsRows[0] || null, account: null, transactions: [], cheques: [], loans: [], installments: [] };
+  if (!account) return { settings: settingsRows[0] || null, account: null, transactions: [], cheques: [], loans: [], installments: [], gameRequests };
   const [transactions, cheques, loans] = await Promise.all([
     rows(`/rest/v1/credit_transactions?account_id=eq.${encodeURIComponent(account.id)}&select=*&order=created_at.desc&limit=100`, "Hesap hareketleri alinamadi."),
     rows(`/rest/v1/credit_cheques?or=(issuer_account_id.eq.${account.id},redeemed_by_account_id.eq.${account.id})&select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=50`, "Cekler alinamadi."),
@@ -95,7 +96,7 @@ async function memberStatus(profileId) {
   const installments = loanIds.length
     ? await rows(`/rest/v1/credit_installments?loan_id=in.(${loanIds.join(",")})&select=*&order=due_at.asc`, "Taksitler alinamadi.")
     : [];
-  return { settings: settingsRows[0] || null, account, transactions, cheques, loans, installments };
+  return { settings: settingsRows[0] || null, account, transactions, cheques, loans, installments, gameRequests };
 }
 
 function boundedInteger(value, minimum, maximum) {
@@ -107,13 +108,7 @@ function chequeHash(code) {
   return createHash("sha256").update(code).digest("hex");
 }
 
-async function openAccount(profileId, contactPhone, usagePurpose, termsAccepted) {
-  const normalizedPhone = String(contactPhone || "").replace(/[^0-9+]/g, "");
-  if (!/^\+?[0-9]{10,15}$/.test(normalizedPhone)) {
-    const error = new Error("Gecerli bir telefon numarasi girilmelidir.");
-    error.status = 400;
-    throw error;
-  }
+async function openAccount(profileId, usagePurpose, termsAccepted) {
   if (!["general", "transfer", "cheque", "saving"].includes(usagePurpose)) {
     const error = new Error("Hesap kullanim amaci secilmelidir.");
     error.status = 400;
@@ -130,7 +125,6 @@ async function openAccount(profileId, contactPhone, usagePurpose, termsAccepted)
       return await rpc("open_credit_account", {
         p_profile_id: profileId,
         p_account_code: code,
-        p_contact_phone: normalizedPhone,
         p_usage_purpose: usagePurpose,
         p_terms_accepted: true
       });
@@ -166,10 +160,6 @@ export default async function handler(request, response) {
   const action = request.body?.action || "status";
 
   try {
-    if (!actor.isAdmin && !actor.isCreditTester) {
-      return json(response, 403, { error: "Kredi sistemi yalnizca yetkili deneme hesaplarina aciktir." });
-    }
-
     if (action === "admin_status") {
       if (!actor.isAdmin) return json(response, 403, { error: "Kredi paneli su anda yalnizca Admin'e aciktir." });
       return json(response, 200, await adminStatus());
@@ -257,7 +247,6 @@ export default async function handler(request, response) {
     if (action === "open_account") {
       const result = await openAccount(
         actor.profile.id,
-        request.body?.contactPhone,
         String(request.body?.usagePurpose || ""),
         request.body?.termsAccepted === true
       );
@@ -265,6 +254,14 @@ export default async function handler(request, response) {
     }
     if (action === "close_account") {
       const result = await rpc("close_credit_account", { p_profile_id: actor.profile.id });
+      return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
+    }
+    if (action === "decide_game_charge") {
+      const result = await rpc("decide_game_credit_authorization", {
+        p_profile_id: actor.profile.id,
+        p_request_id: String(request.body?.requestId || ""),
+        p_approve: request.body?.approve === true
+      });
       return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
     }
     if (action === "transfer") {

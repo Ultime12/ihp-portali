@@ -75,13 +75,19 @@ function periodStart() {
 
 async function statusFor(member) {
   const settings = await gameSettings();
-  const attemptsResponse = await supabaseRequest(
-    `/rest/v1/game_attempts?profile_id=eq.${encodeURIComponent(member.profile.id)}&select=*&order=created_at.desc&limit=12`
-  );
+  const [attemptsResponse, accountResponse, requestResponse] = await Promise.all([
+    supabaseRequest(`/rest/v1/game_attempts?profile_id=eq.${encodeURIComponent(member.profile.id)}&select=*&order=created_at.desc&limit=12`),
+    supabaseRequest(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(member.profile.id)}&status=eq.active&select=id,account_code,balance,status&limit=1`),
+    supabaseRequest(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(member.profile.id)}&period_key=eq.${periodStart()}&select=*&order=requested_at.desc`)
+  ]);
   const attempts = await attemptsResponse.json().catch(() => []);
+  const [creditAccount] = await accountResponse.json().catch(() => []);
+  const gameCreditRequests = await requestResponse.json().catch(() => []);
   const result = {
     settings,
     attempts: attemptsResponse.ok ? attempts : [],
+    creditAccount: accountResponse.ok ? creditAccount || null : null,
+    gameCreditRequests: requestResponse.ok ? gameCreditRequests : [],
     disciplinePoints: Number(member.profile.discipline_points || 0)
   };
   if (member.isAdmin) {
@@ -128,8 +134,18 @@ export default async function handler(request, response) {
   try {
     if (action === "status") return json(response, 200, await statusFor(member));
 
+    if (action === "request_credit") {
+      const gameKey = String(request.body?.gameKey || "");
+      if (!GAME_KEYS.has(gameKey)) return json(response, 400, { error: "Oyun seçimi geçersiz." });
+      const requestRow = await callRpc("request_game_credit_authorization", {
+        p_profile_id: member.profile.id,
+        p_game_key: gameKey
+      });
+      return json(response, 200, { request: requestRow, ...(await statusFor(member)) });
+    }
+
     if (action === "start_snake") {
-      if (request.body?.acceptedTerms !== true) return json(response, 400, { error: "Puan kullanim metnini kabul etmelisiniz." });
+      if (request.body?.acceptedTerms !== true) return json(response, 400, { error: "Kredi onayı gerekir." });
       const attempt = await callRpc("start_ranked_snake", {
         p_profile_id: member.profile.id,
         p_seed: randomInt(1, 2147483647),
@@ -168,7 +184,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "play_scratch") {
-      if (request.body?.acceptedTerms !== true) return json(response, 400, { error: "Puan kullanim metnini kabul etmelisiniz." });
+      if (request.body?.acceptedTerms !== true) return json(response, 400, { error: "Kredi onayı gerekir." });
       const attempt = await callRpc("play_scratch", {
         p_profile_id: member.profile.id,
         p_random_roll: randomInt(0, 10000),
@@ -188,7 +204,7 @@ export default async function handler(request, response) {
       if (!updates.length || updates.length > 3) return json(response, 400, { error: "Oyun ayarlari gecersiz." });
       for (const update of updates) {
         const gameKey = String(update.gameKey || "");
-        const entryCost = integer(update.entryCost, 0, 100);
+        const entryCost = integer(update.entryCost, 1, 100000);
         const rewardPoints = integer(update.rewardPoints, 0, 100);
         const probability = gameKey === "scratch" ? integer(update.winProbabilityBasisPoints, 0, 10000) : 0;
         if (!GAME_KEYS.has(gameKey) || entryCost === null || rewardPoints === null || probability === null) {

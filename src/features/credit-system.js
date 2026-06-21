@@ -6,7 +6,7 @@ function isCreditTestAccount(profile = state.profile) {
 }
 
 function canAccessCreditSystem() {
-  return hasRole("super_admin") || isCreditTestAccount();
+  return !(typeof isEntryAccessAccount === "function" && isEntryAccessAccount());
 }
 
 if (!navItems.some(([id]) => id === CREDIT_PAGE_ID)) {
@@ -20,7 +20,7 @@ if (!navItems.some(([id]) => id === CREDIT_PAGE_ID)) {
 }
 
 function creditData() {
-  return state.cache.creditSystem || { settings: {}, accounts: [], profiles: [], loans: [], installments: [], transactions: [], cheques: [] };
+  return state.cache.creditSystem || { settings: {}, accounts: [], profiles: [], loans: [], installments: [], transactions: [], cheques: [], gameRequests: [] };
 }
 
 function creditProfileMap(data = creditData()) {
@@ -46,7 +46,8 @@ function creditTransactionLabel(kind) {
     transfer_out: "Giden transfer", transfer_in: "Gelen transfer", transfer_tax: "Transfer vergisi",
     weekly_allowance: "Haftalık ödeme", cheque_issue: "Çek oluşturuldu", cheque_redeem: "Çek bozduruldu",
     loan_disbursement: "Kredi kullandırıldı", loan_repayment: "Kredi ödemesi",
-    balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Admin düzeltmesi"
+    balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Admin düzeltmesi",
+    game_entry: "Oyun giriş bedeli"
   })[kind] || kind;
 }
 
@@ -55,7 +56,7 @@ function creditTransactionDirection(item = {}) {
     return item.metadata?.direction === "credit" ? "incoming" : "outgoing";
   }
   if (["transfer_in", "weekly_allowance", "cheque_redeem", "loan_disbursement"].includes(item.kind)) return "incoming";
-  if (["transfer_out", "transfer_tax", "cheque_issue", "loan_repayment", "balance_forfeit"].includes(item.kind)) return "outgoing";
+  if (["transfer_out", "transfer_tax", "cheque_issue", "loan_repayment", "balance_forfeit", "game_entry"].includes(item.kind)) return "outgoing";
   return "neutral";
 }
 
@@ -74,7 +75,7 @@ function creditSettingsForm(settings) {
   const allowances = settings.role_allowances || {};
   return `
     <section class="panel glass credit-settings-panel">
-      <div class="panel-head"><div><span class="panel-kicker">Admin ayarları</span><h3>Ekonomi kuralları</h3></div>${badge("Üyelere kapalı", "coral")}</div>
+      <div class="panel-head"><div><span class="panel-kicker">Admin ayarları</span><h3>Ekonomi kuralları</h3></div>${badge("Tüm üyelere açık", "green")}</div>
       <div class="credit-settings-grid">
         <label>Transfer vergisi (%)<input class="field" data-credit-tax type="number" min="0" max="50" step="0.1" value="${Number(settings.transfer_tax_basis_points || 0) / 100}" /></label>
         <label>Kredi faizi (%)<input class="field" data-credit-interest type="number" min="0" max="100" step="0.1" value="${Number(settings.loan_interest_basis_points || 0) / 100}" /></label>
@@ -85,13 +86,35 @@ function creditSettingsForm(settings) {
       </div>
       <details class="credit-allowance-details"><summary>Rütbeye göre haftalık kredi</summary><div class="credit-allowance-grid">${ROLE_OPTIONS.map(([role, label]) => `<label>${esc(label)}<input class="field" data-credit-allowance="${role}" type="number" min="0" max="1000000" value="${Number(allowances[role] || 0)}" /></label>`).join("")}</div></details>
       <div class="panel-actions"><button class="btn btn-primary btn-sm" type="button" data-action="save-credit-settings">Kredi ayarlarını kaydet</button></div>
-      <p class="credit-safety-note">Kredi sistemi pilot erişimdedir. Yetkili deneme hesapları kendi bilgilerini onaylamadan hesap ve hesap numarası oluşturamaz.</p>
+      <p class="credit-safety-note">Üyeler hesap açılış sözleşmesini onayladıktan sonra kişisel hesap numarası oluşturabilir.</p>
     </section>
   `;
 }
 
 function creditLoanLabel(status) {
   return ({ pending: "Admin kararı bekliyor", approved: "Aktif kredi", rejected: "Reddedildi", paid: "Tamamlandı", delinquent: "Gecikmede" })[status] || status;
+}
+
+function creditGameName(key) {
+  return ({ flappy: "İHP Flappy", snake: "İHP Snake", scratch: "İHP Kazı Kazan" })[key] || "Oyun Alanı";
+}
+
+function gameCreditRequestsPanel(data) {
+  const requests = (data.gameRequests || []).filter((item) => ["pending", "approved"].includes(item.status));
+  if (!requests.length) return "";
+  return `
+    <section class="panel glass credit-game-requests">
+      <div class="panel-head"><div><span class="panel-kicker">Oyun ödemeleri</span><h3>Kredi onay merkezi</h3></div>${badge(String(requests.length), "gold")}</div>
+      <div class="credit-game-request-list">
+        ${requests.map((item) => `<article>
+          <span class="credit-operation-icon">${icon("sparkles")}</span>
+          <div><strong>${esc(creditGameName(item.game_key))}</strong><p>${item.status === "pending" ? `${Number(item.credit_amount).toLocaleString("tr-TR")} kredi çekmek istiyor.` : `${Number(item.credit_amount).toLocaleString("tr-TR")} kredi onaylandı; oyun başlatılabilir.`}</p></div>
+          ${item.status === "pending" ? `<div class="table-actions"><button class="table-action success" type="button" data-action="approve-game-charge" data-id="${esc(item.id)}">Onayla</button><button class="table-action danger" type="button" data-action="reject-game-charge" data-id="${esc(item.id)}">Reddet</button></div>` : `<button class="btn btn-primary btn-sm" type="button" data-page="games">Oyuna dön</button>`}
+        </article>`).join("")}
+      </div>
+      <p class="credit-safety-note">Onay verdiğiniz anda tutar bakiyenizden kesilir. Oyun başlatıldıktan sonra giriş bedeli iade edilmez.</p>
+    </section>
+  `;
 }
 
 function creditMemberPage() {
@@ -108,7 +131,6 @@ function creditMemberPage() {
             <label>Ad soyad<input class="field" value="${esc(state.profile?.display_name || "")}" readonly /></label>
             <label>Portal e-postası<input class="field" value="${esc(state.profile?.email || "")}" readonly /></label>
           </div>
-          <label>İletişim telefonu<input class="field" data-credit-open-phone type="tel" inputmode="tel" maxlength="18" autocomplete="tel" placeholder="05XX XXX XX XX" /></label>
           <label>Hesabı kullanma amacı<select class="field" data-credit-open-purpose><option value="">Seçiniz</option><option value="general">Genel kullanım</option><option value="transfer">Kredi transferleri</option><option value="cheque">Çek işlemleri</option><option value="saving">Bakiye biriktirme</option></select></label>
           <label class="credit-opening-consent"><input type="checkbox" data-credit-open-consent /><span>Hesap bilgilerimin doğru olduğunu; transferlerin geri alınamayacağını, kredi ve çek işlemlerinin portal kurallarına tabi olduğunu okudum ve kabul ediyorum.</span></label>
           <button class="btn btn-primary" type="button" data-action="credit-open-account" disabled>Bilgileri onayla ve hesabı aç ${icon("arrow")}</button>
@@ -144,14 +166,16 @@ function creditMemberPage() {
         <div><span>Açık taksit</span><strong>${dueInstallments.length}</strong><small>${activeLoan ? creditLoanLabel(activeLoan.status) : "Aktif kredi yok"}</small></div>
       </div>
     </section>
+    ${gameCreditRequestsPanel(data)}
     <section class="credit-operation-grid">
       <details class="credit-operation-card glass">
         <summary><span class="credit-operation-icon">${icon("arrow")}</span><span><small>Hesaba gönder</small><strong>Kredi transferi</strong></span><em>${icon("chevron")}</em></summary>
         <div class="credit-operation-content">
           <label>Alıcı hesap kodu<input class="field" data-credit-recipient maxlength="12" placeholder="IHP900000002" autocomplete="off" /></label>
           <label>Alıcıya gidecek tutar<input class="field" data-credit-transfer-amount type="number" min="1" max="1000000" placeholder="100" /></label>
-          <p class="credit-card-note">Vergi ayrıca bakiyenizden kesilir. Yanlış hesaba yapılan transfer geri alınamaz.</p>
-          <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-transfer">Transferi tamamla</button>
+          <div class="credit-transfer-preview" data-credit-transfer-preview><span>Alıcıya <b>0 kredi</b></span><span>Vergi <b>0 kredi</b></span><strong>Toplam kesinti <b>0 kredi</b></strong></div>
+          <p class="credit-card-note">Yanlış hesaba yapılan transfer geri alınamaz.</p>
+          <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-transfer" disabled>Transferi tamamla</button>
         </div>
       </details>
       <details class="credit-operation-card glass">
@@ -190,6 +214,19 @@ function showCreditChequeCode(code, amount) {
     body: `<div class="credit-cheque-reveal"><span>İHP KREDİ ÇEKİ</span><strong>${esc(grouped)}</strong><b>${creditAmount(amount)}</b></div>`,
     actions: `<div class="modal-actions"><button class="btn btn-primary btn-sm" type="button" data-action="close-modal">Tamam</button></div>`
   });
+}
+
+function updateCreditTransferPreview() {
+  const data = creditData();
+  const amount = Math.max(0, Math.trunc(Number(document.querySelector("[data-credit-transfer-amount]")?.value) || 0));
+  const basisPoints = Number(data.settings?.transfer_tax_basis_points || 0);
+  const tax = amount > 0 ? Math.ceil(amount * basisPoints / 10000) : 0;
+  const total = amount + tax;
+  const preview = document.querySelector("[data-credit-transfer-preview]");
+  if (preview) preview.innerHTML = `<span>Alıcıya <b>${amount.toLocaleString("tr-TR")} kredi</b></span><span>Vergi <b>${tax.toLocaleString("tr-TR")} kredi</b></span><strong>Toplam kesinti <b>${total.toLocaleString("tr-TR")} kredi</b></strong>`;
+  const recipient = document.querySelector("[data-credit-recipient]")?.value.trim().toUpperCase() || "";
+  const button = document.querySelector('[data-action="credit-member-transfer"]');
+  if (button) button.disabled = !(/^IHP[0-9]{9}$/.test(recipient) && amount > 0 && total <= Number(data.account?.balance || 0));
 }
 
 function creditAccountsPanel(data) {
@@ -306,17 +343,29 @@ handleClick = async function creditHandleClick(event) {
   if (action === "credit-open-account") {
     event.preventDefault(); target.disabled = true;
     try {
-      const contactPhone = document.querySelector("[data-credit-open-phone]")?.value || "";
       const usagePurpose = document.querySelector("[data-credit-open-purpose]")?.value || "";
       const termsAccepted = Boolean(document.querySelector("[data-credit-open-consent]")?.checked);
       state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
         module: "credit",
         action: "open_account",
-        contactPhone,
         usagePurpose,
         termsAccepted
       });
       showToast("Kredi hesabınız oluşturuldu.", "success"); render();
+    } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
+  if (action === "approve-game-charge" || action === "reject-game-charge") {
+    event.preventDefault(); target.disabled = true;
+    try {
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
+        module: "credit",
+        action: "decide_game_charge",
+        requestId: target.dataset.id,
+        approve: action === "approve-game-charge"
+      });
+      showToast(action === "approve-game-charge" ? "Oyun kredisi onaylandı." : "Oyun kredi talebi reddedildi.", "success");
+      render();
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;
   }
@@ -429,12 +478,15 @@ handleClick = async function creditHandleClick(event) {
 
 const creditBaseHandleFilter = handleFilter;
 handleFilter = async function creditHandleFilter(event) {
-  if (event.target.matches("[data-credit-open-phone], [data-credit-open-purpose], [data-credit-open-consent]")) {
-    const phone = document.querySelector("[data-credit-open-phone]")?.value.replace(/[^0-9+]/g, "") || "";
+  if (event.target.matches("[data-credit-open-purpose], [data-credit-open-consent]")) {
     const purpose = document.querySelector("[data-credit-open-purpose]")?.value || "";
     const accepted = Boolean(document.querySelector("[data-credit-open-consent]")?.checked);
     const button = document.querySelector('[data-action="credit-open-account"]');
-    if (button) button.disabled = !(/^\+?[0-9]{10,15}$/.test(phone) && purpose && accepted);
+    if (button) button.disabled = !(purpose && accepted);
+    return;
+  }
+  if (event.target.matches("[data-credit-transfer-amount], [data-credit-recipient]")) {
+    updateCreditTransferPreview();
     return;
   }
   return creditBaseHandleFilter(event);

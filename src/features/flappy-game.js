@@ -115,8 +115,8 @@ function flappyGameMarkup(mode) {
   return `
     <div class="flappy-game-shell" data-flappy-game>
       <div class="flappy-game-topline">
-        <span>${mode === "ranked" ? "2 günlük puanlı deneme" : "Sınırsız antrenman"}</span>
-        <div><b data-flappy-score>0</b><small>/ 10.000</small></div>
+        <span>${mode === "ranked" ? "2 günlük kredili deneme" : "Sınırsız antrenman"}</span>
+        <div><span class="flappy-lives" data-flappy-lives>3 can</span><b data-flappy-score>0</b><small>/ 10.000</small></div>
       </div>
       <div class="flappy-canvas-wrap">
         <canvas class="flappy-canvas" width="840" height="1440" aria-label="İHP Flappy oyun alanı"></canvas>
@@ -284,8 +284,8 @@ function launchFlappyGame(mode, session = null) {
   stopActiveFlappyGame();
   const seed = Number(session?.seed || randomPracticeSeed());
   modal({
-    title: mode === "ranked" ? "Haftalık puanlı deneme" : "Antrenman modu",
-    subtitle: mode === "ranked" ? "Bu oyun kaydedilir ve sunucuda doğrulanır." : "Sınırsız, puansız ve aynı zorlukta.",
+    title: mode === "ranked" ? "İki günlük kredili deneme" : "Antrenman modu",
+    subtitle: mode === "ranked" ? "Kredi onaylandı. Oyun kaydedilir ve sunucuda doğrulanır." : "Sınırsız, ücretsiz ve aynı zorlukta.",
     body: flappyGameMarkup(mode)
   });
   const root = modalRoot.querySelector("[data-flappy-game]");
@@ -362,6 +362,15 @@ function launchFlappyGame(mode, session = null) {
     renderFlappyCanvas(game);
     const score = root.querySelector("[data-flappy-score]");
     if (score) score.textContent = game.state.score.toLocaleString("tr-TR");
+    const lives = root.querySelector("[data-flappy-lives]");
+    if (lives) lives.textContent = `${game.state.lives} can`;
+    const respawnRemaining = Math.max(0, game.state.respawningUntilMs - game.state.timeMs);
+    if (countdown && respawnRemaining > 0) {
+      countdown.hidden = false;
+      countdown.textContent = String(Math.max(1, Math.ceil(respawnRemaining / 1000)));
+    } else if (countdown) {
+      countdown.hidden = true;
+    }
 
     if (!game.state.alive && !game.ended) {
       game.ended = true;
@@ -375,7 +384,7 @@ function launchFlappyGame(mode, session = null) {
 }
 
 function flap(game) {
-  if (!game?.started || game.ended || game.pausedAt) return;
+  if (!game?.started || game.ended || game.pausedAt || game.state.respawningUntilMs > game.state.timeMs) return;
   const time = Math.max(0, Math.round(performance.now() - game.startedAt));
   const previous = game.flapTimes.at(-1) ?? -Infinity;
   if (time - previous < FLAPPY_CONFIG.minimumFlapIntervalMs) return;
@@ -445,6 +454,20 @@ handleClick = async function flappyHandleClick(event) {
       state.profile.discipline_points = result.disciplinePoints;
       state.cache.flappyStatus = { ...(state.cache.flappyStatus || {}), session: result.session, disciplinePoints: result.disciplinePoints };
       flappyBaseCloseModal();
+      launchFlappyGame("ranked", result.session);
+    } catch (error) {
+      showToast(error.message, "error");
+      target.disabled = false;
+    }
+    return;
+  }
+  if (action === "start-approved-flappy") {
+    event.preventDefault();
+    target.disabled = true;
+    try {
+      const result = await portalServerRequest("/api/flappy-session", { action: "start", acceptedTerms: true });
+      state.profile.discipline_points = result.disciplinePoints;
+      state.cache.flappyStatus = { ...(state.cache.flappyStatus || {}), session: result.session, disciplinePoints: result.disciplinePoints };
       launchFlappyGame("ranked", result.session);
     } catch (error) {
       showToast(error.message, "error");

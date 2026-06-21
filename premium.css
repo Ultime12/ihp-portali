@@ -673,6 +673,16 @@ body.modal-open { overflow: hidden; }
 .credit-cheque-reveal strong { color: #f2f8ff; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: clamp(1rem, 4vw, 1.55rem); letter-spacing: .08em; overflow-wrap: anywhere; }
 .credit-cheque-reveal b { color: #8ec5ff; font-size: 1.3rem; }
 
+.credit-transfer-preview { background: rgba(7, 28, 55, .58); border: 1px solid rgba(143, 198, 255, .16); border-radius: 16px; display: grid; gap: .55rem; padding: .85rem 1rem; }
+.credit-transfer-preview span, .credit-transfer-preview strong { align-items: center; color: var(--text-soft); display: flex; font-size: .82rem; justify-content: space-between; }
+.credit-transfer-preview strong { border-top: 1px solid rgba(143, 198, 255, .12); color: var(--text); padding-top: .6rem; }
+.credit-transfer-preview b { color: #b9dcff; }
+.credit-game-requests { margin-bottom: 1rem; }
+.credit-game-request-list { display: grid; gap: .7rem; }
+.credit-game-request-list article { align-items: center; background: rgba(7, 28, 55, .5); border: 1px solid rgba(143, 198, 255, .14); border-radius: 18px; display: grid; gap: .85rem; grid-template-columns: auto 1fr auto; padding: .9rem 1rem; }
+.credit-game-request-list p { color: var(--text-soft); margin: .2rem 0 0; }
+.flappy-lives { color: #ffb8c3; font-size: .75rem; font-weight: 800; letter-spacing: .06em; margin-right: .7rem; text-transform: uppercase; }
+
 .regulation-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; color: var(--text-soft); }
 .regulation-editor { min-height: 55vh; resize: vertical; white-space: pre-wrap; line-height: 1.65; }
 .regulation-modal { width: min(920px, calc(100vw - 2rem)); }
@@ -691,6 +701,8 @@ body.modal-open { overflow: hidden; }
   .credit-installment-list > div { grid-template-columns: 1fr; }
   .credit-identity-grid { grid-template-columns: 1fr; }
   .credit-operation-grid { grid-template-columns: 1fr; }
+  .credit-game-request-list article { grid-template-columns: auto 1fr; }
+  .credit-game-request-list article > :last-child { grid-column: 1 / -1; }
   .arcade-scratch { grid-column: auto; }
   .arcade-card { min-height: 340px; }
   .snake-controls { display: grid; }
