@@ -77,6 +77,7 @@ function tablePayload(table, url, profile) {
 async function mockBackend(page, profile) {
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
+  await page.route("https://mock.supabase.test/auth/v1/logout", (route) => route.fulfill({ status: 204, body: "" }));
   await page.route("**/api/flappy-session", async (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
     if (body.module === "game_center") {
@@ -89,9 +90,9 @@ async function mockBackend(page, profile) {
           adminStats: { flappy: 0, snake: 0, scratch: 0 },
           memberStatus: [{ id: profile.id, displayName: profile.display_name, creditBalance: 500, flappy: false, snake: false, scratch: false }],
           settings: [
-            { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "two_days" },
-            { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "two_days" },
-            { game_key: "scratch", display_name: "İHP Kazı Kazan", enabled: true, entry_cost: 10, reward_points: 20, target_score: 0, win_probability_basis_points: 800, attempt_period: "two_days" }
+            { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "unlimited" },
+            { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "unlimited" },
+            { game_key: "scratch", display_name: "İHP Kazı Kazan", enabled: true, entry_cost: 10, reward_points: 20, target_score: 0, win_probability_basis_points: 800, attempt_period: "unlimited" }
           ]
         }
       });
@@ -109,6 +110,14 @@ async function mockBackend(page, profile) {
   });
   await page.route("**/api/manage-member", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
+    if (body.module === "credit" && body.action === "issue_cheque") {
+      return route.fulfill({ json: {
+        code: "123456789012345678901234",
+        settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
+        account: { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 400, status: "active" },
+        loans: [], installments: [], transactions: [], cheques: [], gameRequests: []
+      } });
+    }
     if (body.module === "credit" && body.action === "member_status") {
       const funded = profile.id === "funded-credit";
       return route.fulfill({ json: {
@@ -190,6 +199,10 @@ try {
     portalPage.on("pageerror", (error) => errors.push(error.message));
     await openPortal(portalPage, baseProfile);
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "blue", "legacy theme should map to blue");
+    await portalPage.locator("[data-theme-select]").selectOption("light");
+    assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "light", "light theme should apply");
+    assert.equal(await portalPage.evaluate(() => getComputedStyle(document.documentElement).colorScheme), "light", "light theme must use a light color scheme");
+    await portalPage.screenshot({ path: join(output, `${viewport.name}-portal-light.png`), fullPage: true });
     assert.equal(await portalPage.locator(".premium-metrics .metric-card").first().locator("strong").innerText(), "03", "dashboard member count must exclude test and technical admin accounts");
     await portalPage.locator("[data-theme-select]").selectOption("green");
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "green", "theme selection should apply");
@@ -202,6 +215,7 @@ try {
     await portalPage.waitForSelector(".arcade-grid");
     assert.equal(await portalPage.getByRole("button", { name: "Kredi hesabı aç" }).count(), 3, `${viewport.name}: paid games must require a credit account`);
     assert.match(await portalPage.locator(".arcade-flappy").innerText(), /Can\s+3/);
+    assert.match(await portalPage.locator(".arcade-head").innerText(), /Kredili oyunlar sınırsızdır/);
     await portalPage.locator('[data-action="start-snake-practice"]').click();
     assert.equal(await portalPage.locator(".snake-board").isVisible(), true, `${viewport.name}: Snake practice should open`);
     await portalPage.keyboard.press("Escape");
@@ -221,6 +235,20 @@ try {
     assert.deepEqual(errors, [], `${viewport.name}: page errors`);
     await portalContext.close();
   }
+
+  const deletionContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const deletionPage = await deletionContext.newPage();
+  await openPortal(deletionPage, baseProfile, "settings");
+  await deletionPage.getByRole("button", { name: "Hesabımı sil", exact: true }).click();
+  const deleteSubmit = deletionPage.locator("[data-delete-account-submit]");
+  assert.equal(await deleteSubmit.isDisabled(), true, "account deletion must be locked initially");
+  await deletionPage.locator("[data-account-delete-consent]").check();
+  await deletionPage.locator("[data-account-delete-text]").fill("HESABIMI SİL");
+  assert.equal(await deleteSubmit.isEnabled(), true, "account deletion requires consent and exact phrase");
+  await deleteSubmit.click();
+  await deletionPage.waitForSelector(".premium-public");
+  assert.equal(await deletionPage.evaluate(() => localStorage.getItem("ihp-auth-session")), null, "deleted account session must be cleared");
+  await deletionContext.close();
 
   const roleCases = [
     { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null },
@@ -265,29 +293,6 @@ try {
   assert.equal(await creditOfficerPage.getByRole("button", { name: "Onayla" }).first().isVisible(), true, "credit officer should review credit applications");
   await creditOfficerContext.close();
 
-  const creditTesterContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const creditTesterPage = await creditTesterContext.newPage();
-  const creditTesterProfile = {
-    ...baseProfile,
-    id: "credit-test-user",
-    email: "deneme@tfo.k12.tr",
-    display_name: "Kredi Deneme Bir",
-    is_system_account: true,
-    credit_test_access: true,
-    member_code: null,
-    theme_preference: "blue"
-  };
-  await openPortal(creditTesterPage, creditTesterProfile, "credit");
-  assert.equal(await creditTesterPage.locator(".credit-onboarding-layout").isVisible(), true, "credit test account without an account should see onboarding");
-  assert.equal(await creditTesterPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "credit test account should see credit navigation");
-  const openCreditAccount = creditTesterPage.locator('[data-action="credit-open-account"]');
-  assert.equal(await openCreditAccount.isDisabled(), true, "account opening must require complete information and consent");
-  assert.equal(await creditTesterPage.locator("[data-credit-open-phone]").count(), 0, "account opening must not request a phone number");
-  await creditTesterPage.locator("[data-credit-open-purpose]").selectOption("general");
-  await creditTesterPage.locator("[data-credit-open-consent]").check();
-  assert.equal(await openCreditAccount.isEnabled(), true, "complete account opening form should enable confirmation");
-  await creditTesterContext.close();
-
   const ordinaryCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const ordinaryCreditPage = await ordinaryCreditContext.newPage();
   await openPortal(ordinaryCreditPage, baseProfile);
@@ -304,6 +309,13 @@ try {
   assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Vergi\s+20 kredi/);
   assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Toplam kesinti\s+120 kredi/);
   assert.equal(await fundedCreditPage.locator('[data-action="credit-member-transfer"]').isEnabled(), true, "valid transfer with tax preview must be enabled");
+  await fundedCreditPage.getByText("Çek işlemleri", { exact: true }).click();
+  await fundedCreditPage.locator("[data-credit-cheque-amount]").fill("100");
+  await fundedCreditPage.locator('[data-action="credit-member-issue-cheque"]').click();
+  assert.equal(await fundedCreditPage.locator('[data-action="download-credit-cheque"]').isVisible(), true, "created cheque should offer a PDF document");
+  const chequeDownload = fundedCreditPage.waitForEvent("download");
+  await fundedCreditPage.locator('[data-action="download-credit-cheque"]').click();
+  assert.match((await chequeDownload).suggestedFilename(), /^IHP-Kredi-Ceki-1234\.pdf$/);
   await fundedCreditContext.close();
 
   const disciplineContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

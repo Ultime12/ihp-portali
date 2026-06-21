@@ -2,10 +2,6 @@ const IHP_CREDIT_ADMIN_V1 = true;
 const CREDIT_PAGE_ID = "credit";
 const CREDIT_MANAGEMENT_PAGE_ID = "credit-management";
 
-function isCreditTestAccount(profile = state.profile) {
-  return Boolean(profile?.credit_test_access);
-}
-
 function canAccessCreditSystem() {
   return !(typeof isEntryAccessAccount === "function" && isEntryAccessAccount());
 }
@@ -227,8 +223,30 @@ function showCreditChequeCode(code, amount) {
     title: "Çek oluşturuldu",
     subtitle: "Bu kod yalnızca bir kez gösterilir. Kodu teslim edeceğiniz kişi tutarı hesabına aktarabilir.",
     body: `<div class="credit-cheque-reveal"><span>İHP KREDİ ÇEKİ</span><strong>${esc(grouped)}</strong><b>${creditAmount(amount)}</b></div>`,
-    actions: `<div class="modal-actions"><button class="btn btn-primary btn-sm" type="button" data-action="close-modal">Tamam</button></div>`
+    actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="download-credit-cheque" data-code="${esc(code)}" data-amount="${Number(amount)}">PDF belgeyi indir</button><button class="btn btn-primary btn-sm" type="button" data-action="close-modal">Tamam</button></div>`
   });
+}
+
+function downloadCreditChequePdf(code, amount) {
+  const data = creditData();
+  const account = data.account || {};
+  const grouped = String(code || "").match(/.{1,4}/g)?.join(" ") || "";
+  const builder = createPdfBuilder("IHP Kredi Ceki", state.cache.settings?.logo_url || "", {
+    subtitle: "Tek kullanimlik resmi kredi ceki",
+    footer: "IHP Kredi Sistemi - bu belge uzerindeki kod tek kullanimliktir."
+  });
+  builder.section("Cek Bilgileri");
+  builder.keyValueRows([
+    ["Olusturma tarihi", new Date().toLocaleString("tr-TR")],
+    ["Ceki olusturan", state.profile?.display_name || "Portal uyesi"],
+    ["Kaynak hesap", account.account_code || "Belirtilmedi"],
+    ["Cek tutari", creditAmount(amount)],
+    ["24 haneli cek kodu", grouped]
+  ]);
+  builder.section("Kullanim");
+  builder.paragraph("Talimat", "Bu kod Kredi Hesabim ekranindaki Ceki hesaba aktar alanina girildiginde tutar bir kez hesaba aktarilir. Kodu yalnizca teslim edeceginiz kisiyle paylasin.");
+  downloadBlob(builder.finish(), `IHP-Kredi-Ceki-${String(code).slice(-4)}.pdf`);
+  showToast("Çek PDF belgesi indirildi.", "success");
 }
 
 function updateCreditTransferPreview() {
@@ -356,6 +374,11 @@ const creditBaseHandleClick = handleClick;
 handleClick = async function creditHandleClick(event) {
   const target = event.target.closest("[data-action]");
   const action = target?.dataset.action;
+  if (action === "download-credit-cheque") {
+    event.preventDefault();
+    downloadCreditChequePdf(target.dataset.code || "", Number(target.dataset.amount || 0));
+    return;
+  }
   if (action === "credit-open-account") {
     event.preventDefault(); target.disabled = true;
     try {

@@ -35,18 +35,17 @@ async function authenticate(request) {
   if (!userResponse.ok) return null;
   const user = await userResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,roles,status,is_system_account,credit_test_access&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,roles,status,is_system_account&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
-  if (!profile || profile.status !== "active" || (profile.is_system_account && !profile.credit_test_access)) return null;
+  if (!profile || profile.status !== "active" || profile.is_system_account) return null;
   const roles = [...new Set([...(profile.roles || []), profile.role].filter(Boolean))];
   return {
     user,
     profile,
     roles,
     isAdmin: roles.includes("super_admin"),
-    isCreditManager: roles.includes("super_admin") || roles.includes("credit_officer"),
-    isCreditTester: Boolean(profile.credit_test_access)
+    isCreditManager: roles.includes("super_admin") || roles.includes("credit_officer")
   };
 }
 
@@ -72,7 +71,7 @@ async function adminStatus() {
   const [settingsRows, accounts, profiles, loans, installments, transactions, cheques] = await Promise.all([
     rows("/rest/v1/credit_settings?id=eq.main&select=*&limit=1", "Kredi ayarlari alinamadi."),
     rows("/rest/v1/credit_accounts?select=*&order=opened_at.desc", "Kredi hesaplari alinamadi."),
-    rows("/rest/v1/profiles?or=(is_system_account.eq.false,credit_test_access.eq.true)&select=id,display_name,email,member_code,status,role,roles,credit_test_access&order=display_name.asc", "Uyeler alinamadi."),
+    rows("/rest/v1/profiles?is_system_account=eq.false&select=id,display_name,email,member_code,status,role,roles&order=display_name.asc", "Uyeler alinamadi."),
     rows("/rest/v1/credit_loans?select=*&order=requested_at.desc&limit=150", "Kredi basvurulari alinamadi."),
     rows("/rest/v1/credit_installments?select=*&order=due_at.asc&limit=300", "Taksitler alinamadi."),
     rows("/rest/v1/credit_transactions?select=*&order=created_at.desc&limit=250", "Islem kayitlari alinamadi."),

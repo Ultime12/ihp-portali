@@ -36,6 +36,7 @@ import {
   manageInvestigation,
   reviewComplaint,
   reviewApplication,
+  deleteOwnAccount,
   updateRecord
 } from "./lib/portal-service.js";
 import { icon } from "./ui/icons.js";
@@ -65,6 +66,7 @@ const ROLE_OPTIONS = Object.entries(ROLE_LABELS);
 
 const THEME_OPTIONS = [
   ["blue", "Mavi"],
+  ["light", "Aydınlık"],
   ["green", "Yeşil"],
   ["pink", "Pembe"],
   ["red", "Kırmızı"]
@@ -486,7 +488,7 @@ function statusLabel(status) {
 
 function activeTheme() {
   const current = document.documentElement.dataset.theme || state.profile?.theme_preference || "blue";
-  const normalized = ["dark", "light"].includes(current) ? "blue" : current;
+  const normalized = current === "dark" ? "blue" : current;
   return THEME_OPTIONS.some(([value]) => value === normalized) ? normalized : "blue";
 }
 
@@ -495,7 +497,7 @@ function themeLabel(theme = activeTheme()) {
 }
 
 function setTheme(theme, rerender = true) {
-  const normalized = ["dark", "light"].includes(theme) ? "blue" : theme;
+  const normalized = theme === "dark" ? "blue" : theme;
   const next = THEME_OPTIONS.some(([value]) => value === normalized) ? normalized : "blue";
   document.documentElement.dataset.theme = next;
   if (state.profile) state.profile.theme_preference = next;
@@ -2344,7 +2346,42 @@ function settingsPage() {
       <div class="privacy-strip">${icon("lock")}<span>Disiplin kayıtları herkese açık değildir. Üyeler yalnızca kendilerine açık kayıtları görebilir.</span></div>
       <div class="privacy-strip">${icon("history")}<span>Kritik değişiklikler işlem geçmişine kaydedilir. Kalıcı silme yerine arşivleme tercih edilir.</span></div>
     </section>
+    ${
+      typeof isSystemProfile === "function" && isSystemProfile(profile)
+        ? ""
+        : `<section class="panel glass account-danger-zone" style="margin-top:.85rem">
+            <div><span class="panel-kicker">Tehlikeli işlem</span><h3>Portal hesabını kalıcı olarak sil</h3><p>Üyeliğiniz, kredi bakiyeniz, gelirleriniz, çekleriniz ve kişisel kayıtlarınız geri getirilemez biçimde kaldırılır.</p></div>
+            <button class="btn btn-danger btn-sm" type="button" data-action="open-delete-account">Hesabımı sil</button>
+          </section>`
+    }
   `;
+}
+
+function openDeleteAccount() {
+  modal({
+    title: "Hesabınızı kalıcı olarak silin",
+    subtitle: "Bu işlem geri alınamaz.",
+    body: `
+      <form class="form-stack account-delete-form" id="delete-account-form" data-form="delete-account">
+        <div class="account-delete-warning" role="alert">
+          <strong>Tüm üyelik ve finans verileriniz silinecek</strong>
+          <ul>
+            <li>Kredi bakiyesi, haftalık gelirler, çekler ve kredi geçmişi kaybolur.</li>
+            <li>Disiplin kayıtları, başvurular, bildirimler ve profiliniz kaldırılır.</li>
+            <li>Aynı hesap daha sonra otomatik olarak geri açılamaz.</li>
+          </ul>
+        </div>
+        <label class="account-delete-consent"><input type="checkbox" name="acceptDataLoss" data-account-delete-consent /><span>Yukarıdaki verilerin ve bütün gelirlerimin kalıcı olarak kaybolacağını okudum ve kabul ediyorum.</span></label>
+        <div class="form-group"><label for="delete-account-confirmation">Onaylamak için <strong>HESABIMI SİL</strong> yazın</label><input class="field" id="delete-account-confirmation" name="confirmation" autocomplete="off" data-account-delete-text required /></div>
+      </form>
+    `,
+    actions: `
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
+        <button class="btn btn-danger btn-sm" type="submit" form="delete-account-form" data-delete-account-submit disabled>Hesabımı kalıcı olarak sil</button>
+      </div>
+    `
+  });
 }
 
 function renderPortalPage(page) {
@@ -3025,7 +3062,8 @@ async function submitForm(event) {
   if (!form) return;
   event.preventDefault();
   const values = formData(form);
-  const submit = form.querySelector('[type="submit"]');
+  const submit = form.querySelector('[type="submit"]') || (form.id ? document.querySelector(`[type="submit"][form="${form.id}"]`) : null);
+  if (!submit) return;
   submit.disabled = true;
 
   try {
@@ -3077,6 +3115,20 @@ async function submitForm(event) {
       form.reset();
       state.profile = await getProfile();
       await loadPage("settings");
+    }
+
+    if (form.dataset.form === "delete-account") {
+      await deleteOwnAccount({
+        confirmation: values.confirmation,
+        acceptDataLoss: values.acceptDataLoss === "on"
+      });
+      await signOut();
+      state.profile = null;
+      state.cache = {};
+      closeModal();
+      navigate("home");
+      showToast("Portal hesabınız ve ilişkili verileriniz kalıcı olarak silindi.");
+      return;
     }
 
     if (form.dataset.form === "announcement") {
@@ -3344,6 +3396,7 @@ async function handleClick(event) {
   if (action === "open-complaint") openComplaint();
   if (action === "open-investigation") openInvestigation();
   if (action === "open-notifications") openNotifications();
+  if (action === "open-delete-account") openDeleteAccount();
   if (action === "open-regulation") openRegulation();
   if (action === "open-youth") openYouth();
   if (action === "close-modal") closeModal();
@@ -3713,6 +3766,15 @@ async function handleFilter(event) {
     if (state.profile) {
       await updateRecord("profiles", state.profile.id, { theme_preference: themeInput.value }).catch(() => {});
     }
+    return;
+  }
+  const deleteAccountInput = event.target.closest("[data-account-delete-consent], [data-account-delete-text]");
+  if (deleteAccountInput) {
+    const form = deleteAccountInput.closest("form");
+    const consent = form?.querySelector("[data-account-delete-consent]")?.checked === true;
+    const phrase = form?.querySelector("[data-account-delete-text]")?.value.trim();
+    const submit = document.querySelector("[data-delete-account-submit]");
+    if (submit) submit.disabled = !(consent && phrase === "HESABIMI SİL");
     return;
   }
   const input = event.target.closest("[data-filter]");

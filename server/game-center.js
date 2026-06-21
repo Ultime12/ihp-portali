@@ -60,25 +60,12 @@ async function gameSettings() {
   return rows;
 }
 
-function periodStart() {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit"
-  }).formatToParts(now);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const date = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
-  const anchor = Date.UTC(2026, 0, 1);
-  const elapsedDays = Math.floor((date.getTime() - anchor) / 86_400_000);
-  const start = new Date(anchor + Math.floor(elapsedDays / 2) * 2 * 86_400_000);
-  return start.toISOString().slice(0, 10);
-}
-
 async function statusFor(member) {
   const settings = await gameSettings();
   const [attemptsResponse, accountResponse, requestResponse] = await Promise.all([
     supabaseRequest(`/rest/v1/game_attempts?profile_id=eq.${encodeURIComponent(member.profile.id)}&select=*&order=created_at.desc&limit=12`),
     supabaseRequest(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(member.profile.id)}&status=eq.active&select=id,account_code,balance,status&limit=1`),
-    supabaseRequest(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(member.profile.id)}&period_key=eq.${periodStart()}&select=*&order=requested_at.desc`)
+    supabaseRequest(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(member.profile.id)}&status=in.(pending,approved)&select=*&order=requested_at.desc&limit=3`)
   ]);
   const attempts = await attemptsResponse.json().catch(() => []);
   const [creditAccount] = await accountResponse.json().catch(() => []);
@@ -91,10 +78,9 @@ async function statusFor(member) {
     creditBalance: Number(creditAccount?.balance || 0)
   };
   if (member.isAdmin) {
-    const since = `${periodStart()}T00:00:00.000Z`;
     const [gameResponse, flappyResponse, profilesResponse, accountsResponse] = await Promise.all([
-      supabaseRequest(`/rest/v1/game_attempts?created_at=gte.${encodeURIComponent(since)}&select=id,profile_id,game_key,status`),
-      supabaseRequest(`/rest/v1/flappy_sessions?started_at=gte.${encodeURIComponent(since)}&select=id,profile_id,status`),
+      supabaseRequest("/rest/v1/game_attempts?select=id,profile_id,game_key,status"),
+      supabaseRequest("/rest/v1/flappy_sessions?select=id,profile_id,status"),
       supabaseRequest("/rest/v1/profiles?status=eq.active&is_system_account=eq.false&select=id,display_name&order=display_name.asc"),
       supabaseRequest("/rest/v1/credit_accounts?status=eq.active&select=profile_id,balance")
     ]);
@@ -112,9 +98,9 @@ async function statusFor(member) {
       id: profile.id,
       displayName: profile.display_name,
       creditBalance: balances.get(profile.id) || 0,
-      flappy: flappyRows.some((item) => item.profile_id === profile.id),
-      snake: gameRows.some((item) => item.profile_id === profile.id && item.game_key === "snake"),
-      scratch: gameRows.some((item) => item.profile_id === profile.id && item.game_key === "scratch")
+      flappy: flappyRows.filter((item) => item.profile_id === profile.id).length,
+      snake: gameRows.filter((item) => item.profile_id === profile.id && item.game_key === "snake").length,
+      scratch: gameRows.filter((item) => item.profile_id === profile.id && item.game_key === "scratch").length
     }));
   }
   return result;

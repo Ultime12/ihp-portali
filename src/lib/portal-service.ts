@@ -159,6 +159,13 @@ export async function manageMember(payload: Record<string, any>) {
   });
 }
 
+export async function deleteOwnAccount(payload: Record<string, any>) {
+  return serverRequest("/api/delete-account", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function reviewApplication(payload: Record<string, any>) {
   return serverRequest("/api/review-application", {
     method: "POST",

@@ -11,7 +11,7 @@ function gameCenterSetting(key) {
     reward_points: key === "scratch" ? 20 : 10,
     target_score: key === "snake" ? 1000 : 10000,
     win_probability_basis_points: key === "scratch" ? 800 : 0,
-    attempt_period: "two_days"
+    attempt_period: "unlimited"
   };
 }
 
@@ -24,7 +24,7 @@ function gameCreditRequest(key) {
 }
 
 function paidGameAction(key, attempt, enabled) {
-  if (attempt) return "";
+  if (attempt?.status === "active") return `<button class="btn btn-primary btn-sm" type="button" disabled>Oyun devam ediyor</button>`;
   const account = state.cache.gameCenter?.creditAccount;
   const request = gameCreditRequest(key);
   if (!account) return `<button class="btn btn-primary btn-sm" type="button" data-page="credit">Kredi hesabı aç</button>`;
@@ -33,7 +33,6 @@ function paidGameAction(key, attempt, enabled) {
     const action = key === "flappy" ? "start-approved-flappy" : key === "snake" ? "start-approved-snake" : "play-approved-scratch";
     return `<button class="btn btn-primary btn-sm" type="button" data-action="${action}" ${enabled ? "" : "disabled"}>Oyunu başlat</button>`;
   }
-  if (request?.status === "consumed") return `<button class="btn btn-primary btn-sm" type="button" disabled>Hak kullanıldı</button>`;
   return `<button class="btn btn-primary btn-sm" type="button" data-action="request-game-credit" data-game-key="${key}" ${enabled ? "" : "disabled"}>Kredi onayı iste</button>`;
 }
 
@@ -49,7 +48,7 @@ function gameCenterCard({ key, title, kicker, description, iconName, facts, acti
       <div class="arcade-card-top"><span class="arcade-icon">${icon(iconName)}</span><div><span class="panel-kicker">${esc(kicker)}</span><h3>${esc(title)}</h3></div>${badge(settings.enabled ? "Açık" : "Kapalı", settings.enabled ? "green" : "gray")}</div>
       <p>${esc(description)}</p>
       <div class="arcade-facts">${facts.map(([label, value]) => `<span>${esc(label)} <b>${esc(value)}</b></span>`).join("")}</div>
-      ${attempt ? `<div class="arcade-result">${badge(gameAttemptLabel(attempt), attempt.status === "won" ? "green" : "gray")}<strong>${Number(attempt.score || 0).toLocaleString("tr-TR")} skor</strong><small>Yeni hak ${flappyNextPeriodText()} tarihinde açılır.</small></div>` : ""}
+      ${attempt ? `<div class="arcade-result">${badge(gameAttemptLabel(attempt), attempt.status === "won" ? "green" : "gray")}<strong>${Number(attempt.score || 0).toLocaleString("tr-TR")} skor</strong><small>Yeni kredi onayıyla tekrar oynayabilirsiniz.</small></div>` : ""}
       <div class="arcade-actions">${actions}</div>
     </article>
   `;
@@ -61,7 +60,7 @@ function adminGameSettingsPanel() {
   const members = state.cache.gameCenter?.memberStatus || [];
   return `
     <section class="panel glass game-admin-panel">
-      <div class="panel-head"><div><span class="panel-kicker">Admin kontrol merkezi</span><h3>Oyun kuralları</h3></div>${badge("Bu dönemdeki oyunlar: ${(stats.flappy || 0) + (stats.snake || 0) + (stats.scratch || 0)}", "blue")}</div>
+      <div class="panel-head"><div><span class="panel-kicker">Admin kontrol merkezi</span><h3>Oyun kuralları</h3></div>${badge("Toplam kredili oyun: ${(stats.flappy || 0) + (stats.snake || 0) + (stats.scratch || 0)}", "blue")}</div>
       <div class="game-admin-grid">
         ${["flappy", "snake", "scratch"].map((key) => {
           const item = gameCenterSetting(key);
@@ -71,13 +70,13 @@ function adminGameSettingsPanel() {
             <label>Kredi giriş bedeli<input class="field" data-game-cost type="number" min="1" max="100000" value="${item.entry_cost}" /></label>
             <label>Kredi ödülü<input class="field" data-game-reward type="number" min="0" max="100000" value="${item.reward_points}" /></label>
             ${key === "scratch" ? `<label>Kazanma ihtimali (%)<input class="field" data-game-probability type="number" min="0" max="100" step="0.1" value="${Number(item.win_probability_basis_points || 0) / 100}" /></label>` : ""}
-            <small>Bu iki günlük dönemde ${Number(stats[key] || 0)} kredili kullanım</small>
+            <small>Toplam ${Number(stats[key] || 0)} kredili kullanım</small>
           </fieldset>`;
         }).join("")}
       </div>
       <div class="game-member-status">
-        <div class="panel-head compact"><div><span class="panel-kicker">2 günlük durum</span><h4>Üye oyun hakları</h4></div>${badge(`${members.length} üye`, "blue")}</div>
-        ${members.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Üye</th><th>Kredi</th><th>Flappy</th><th>Snake</th><th>Kazı Kazan</th></tr></thead><tbody>${members.map((member) => `<tr><td><strong>${esc(member.displayName)}</strong></td><td>${Number(member.creditBalance || 0).toLocaleString("tr-TR")}</td><td>${badge(member.flappy ? "Kullandı" : "Hazır", member.flappy ? "gray" : "green")}</td><td>${badge(member.snake ? "Kullandı" : "Hazır", member.snake ? "gray" : "green")}</td><td>${badge(member.scratch ? "Kullandı" : "Hazır", member.scratch ? "gray" : "green")}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Aktif üye yok", "Üye oyun durumları burada görünür.")}
+        <div class="panel-head compact"><div><span class="panel-kicker">Sınırsız kullanım</span><h4>Üye oyun sayıları</h4></div>${badge(`${members.length} üye`, "blue")}</div>
+        ${members.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Üye</th><th>Kredi</th><th>Flappy</th><th>Snake</th><th>Kazı Kazan</th></tr></thead><tbody>${members.map((member) => `<tr><td><strong>${esc(member.displayName)}</strong></td><td>${Number(member.creditBalance || 0).toLocaleString("tr-TR")}</td><td>${badge(`${Number(member.flappy || 0)} kez`, "blue")}</td><td>${badge(`${Number(member.snake || 0)} kez`, "blue")}</td><td>${badge(`${Number(member.scratch || 0)} kez`, "blue")}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Aktif üye yok", "Üye oyun durumları burada görünür.")}
       </div>
       <div class="panel-actions"><button class="btn btn-primary btn-sm" type="button" data-action="save-game-settings">Oyun ayarlarını kaydet</button></div>
     </section>
@@ -94,7 +93,7 @@ function gameCenterPage() {
   const scratchAttempt = latestGameAttempt("scratch");
   return `
     <section class="page-head arcade-head">
-      <div><span class="eyebrow">İHP Oyun Alanı</span><h2>Refleks, strateji ve biraz şans.</h2><p>Antrenman ücretsizdir. Kredili haklar iki günde bir yenilenir; oyun başlamadan önce kesinti Kredi Sistemi'nde onaylanır.</p></div>
+      <div><span class="eyebrow">İHP Oyun Alanı</span><h2>Refleks, strateji ve biraz şans.</h2><p>Antrenman ücretsizdir. Kredili oyunlar sınırsızdır; her oyun başlamadan önce kesinti Kredi Sistemi'nde ayrı olarak onaylanır.</p></div>
       <div class="flappy-points-orb"><span>Kredi bakiyen</span><strong>${creditBalance}</strong><small>Oyun ödülleri bu hesaba eklenir.</small></div>
     </section>
     <section class="arcade-grid">
@@ -130,7 +129,7 @@ function openGameTerms(kind) {
   const name = kind === "snake" ? "İHP Snake" : "İHP Kazı Kazan";
   modal({
     title: `${name} kredili hak`,
-    subtitle: "Bu işlem iki günlük oyun hakkınızı kullanır.",
+    subtitle: "Bu işlem onayladığınız oyun giriş kredisini kullanır.",
     body: `<div class="flappy-terms-box"><span class="flappy-terms-icon">${icon("shield")}</span><div><strong>Kredi kullanım onayı</strong><p>${settings.entry_cost} kredi hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya kazanamasam bile kredinin iade edilmeyeceğini anladım.</p></div></div><label class="flappy-consent"><input type="checkbox" data-game-consent="${kind}" /> <span>Metni okudum, anladım ve kabul ediyorum.</span></label>`,
     actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="button" data-action="confirm-${kind}" disabled>${settings.entry_cost} kredi kullan</button></div>`
   });
@@ -144,7 +143,7 @@ function stopSnakeGame() {
 }
 
 function snakeMarkup(mode, target) {
-  return `<div class="snake-shell" data-snake-game><div class="snake-topline"><span>${mode === "ranked" ? "2 günlük kredili deneme" : "Sınırsız antrenman"}</span><strong><b data-snake-score>0</b> / ${Number(target).toLocaleString("tr-TR")}</strong></div><div class="snake-board-wrap"><canvas class="snake-board" width="500" height="600" aria-label="İHP Snake oyun alanı"></canvas><div class="snake-countdown" data-snake-countdown>3</div><div class="snake-result" data-snake-result hidden></div></div><div class="snake-controls" aria-label="Yön kontrolleri"><button type="button" data-snake-direction="up">↑</button><button type="button" data-snake-direction="left">←</button><button type="button" data-snake-direction="down">↓</button><button type="button" data-snake-direction="right">→</button></div><p>Yön tuşları veya WASD ile oyna.</p></div>`;
+  return `<div class="snake-shell" data-snake-game><div class="snake-topline"><span>${mode === "ranked" ? "Sınırsız kredili oyun" : "Sınırsız antrenman"}</span><strong><b data-snake-score>0</b> / ${Number(target).toLocaleString("tr-TR")}</strong></div><div class="snake-board-wrap"><canvas class="snake-board" width="500" height="600" aria-label="İHP Snake oyun alanı"></canvas><div class="snake-countdown" data-snake-countdown>3</div><div class="snake-result" data-snake-result hidden></div></div><div class="snake-controls" aria-label="Yön kontrolleri"><button type="button" data-snake-direction="up">↑</button><button type="button" data-snake-direction="left">←</button><button type="button" data-snake-direction="down">↓</button><button type="button" data-snake-direction="right">→</button></div><p>Yön tuşları veya WASD ile oyna.</p></div>`;
 }
 
 function drawSnake(game) {

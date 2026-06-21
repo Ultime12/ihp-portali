@@ -41,21 +41,6 @@ async function authenticateMember(request) {
   return { authUser, profile };
 }
 
-function istanbulPeriodStart(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Istanbul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(now);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const date = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
-  const anchor = Date.UTC(2026, 0, 1);
-  const elapsedDays = Math.floor((date.getTime() - anchor) / 86_400_000);
-  const periodStart = new Date(anchor + Math.floor(elapsedDays / 2) * 2 * 86_400_000);
-  return periodStart.toISOString().slice(0, 10);
-}
-
 async function freshCreditBalance(profileId) {
   const response = await supabaseRequest(
     `/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=balance&limit=1`
@@ -65,12 +50,11 @@ async function freshCreditBalance(profileId) {
 }
 
 async function currentSession(profileId) {
-  const weekStart = istanbulPeriodStart();
   const response = await supabaseRequest(
-    `/rest/v1/flappy_sessions?profile_id=eq.${encodeURIComponent(profileId)}&week_start=eq.${weekStart}&select=*&limit=1`
+    `/rest/v1/flappy_sessions?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=*&order=started_at.desc&limit=1`
   );
   const [session] = await response.json().catch(() => []);
-  if (!response.ok) throw new Error("Iki gunluk oyun durumu alinamadi.");
+  if (!response.ok) throw new Error("Aktif oyun durumu alinamadi.");
 
   if (session?.status === "active" && new Date(session.expires_at).getTime() < Date.now()) {
     const expireResponse = await supabaseRequest(
@@ -82,7 +66,7 @@ async function currentSession(profileId) {
       }
     );
     const [expired] = await expireResponse.json().catch(() => []);
-    return expired || { ...session, status: "expired" };
+    return null;
   }
   return session || null;
 }
@@ -145,7 +129,7 @@ export default async function handler(request, response) {
         return json(response, 400, { error: "Kredi Sistemi onayi gerekir." });
       }
       const existing = await currentSession(member.profile.id);
-      if (existing) return json(response, 409, { error: "Bu iki gunluk oyun hakkiniz kullanildi." });
+      if (existing) return json(response, 409, { error: "Devam eden Flappy oyununuzu tamamlamalisiniz." });
       const settings = await flappySettings();
       if (!settings.enabled) return json(response, 409, { error: "IHP Flappy su anda Admin tarafindan kapatildi." });
 
