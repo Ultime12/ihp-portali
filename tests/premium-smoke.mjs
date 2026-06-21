@@ -108,13 +108,16 @@ async function mockBackend(page, profile) {
     if (body.module === "credit" && body.action === "member_status") {
       return route.fulfill({ json: {
         settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
-        account: { id: "credit-test-account", profile_id: profile.id, account_code: "IHP900000001", balance: 0, status: "active" },
+        account: null,
         loans: [], installments: [], transactions: [], cheques: []
       } });
     }
     return route.fulfill({ json: {
       settings: { member_access_enabled: true, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
-      accounts: [], profiles: members, loans: [], installments: [], transactions: [], cheques: []
+      accounts: [{ id: "admin-test-account", profile_id: "member-1", account_code: "IHP123456789", balance: 250, status: "active" }], profiles: members, loans: [], installments: [], transactions: [
+        { id: "tx-in", account_id: "admin-test-account", kind: "transfer_in", amount: 100, balance_after: 250, created_at: "2026-06-20T12:00:00.000Z", metadata: {} },
+        { id: "tx-out", account_id: "admin-test-account", kind: "transfer_out", amount: 50, balance_after: 150, created_at: "2026-06-20T11:00:00.000Z", metadata: {} }
+      ], cheques: []
     } });
   });
   await page.route("https://mock.supabase.test/rest/v1/**", (route) => {
@@ -239,6 +242,12 @@ try {
   const adminProfile = { ...baseProfile, id: "admin-credit", email: "admin@example.test", roles: ["super_admin"], role: "super_admin", theme_preference: "blue" };
   await openPortal(adminPage, adminProfile, "credit");
   assert.equal(await adminPage.locator(".credit-settings-panel").isVisible(), true, "admin should see credit settings");
+  assert.equal(await adminPage.locator(".credit-transaction-amount.incoming").count(), 1, "incoming credit should have positive styling");
+  assert.equal(await adminPage.locator(".credit-transaction-amount.outgoing").count(), 1, "outgoing credit should have negative styling");
+  assert.equal(await adminPage.locator('[data-action="open-credit-adjustment"]').isVisible(), true, "admin should see balance adjustment action");
+  await adminPage.locator('[data-action="open-credit-adjustment"]').click();
+  assert.equal(await adminPage.locator("#credit-adjust-amount").isVisible(), true, "admin balance adjustment modal should open");
+  await adminPage.keyboard.press("Escape");
   await adminContext.close();
 
   const creditTesterContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -254,8 +263,14 @@ try {
     theme_preference: "blue"
   };
   await openPortal(creditTesterPage, creditTesterProfile, "credit");
-  assert.equal(await creditTesterPage.locator(".credit-member-grid").isVisible(), true, "credit test account should see member banking tools");
+  assert.equal(await creditTesterPage.locator(".credit-onboarding-layout").isVisible(), true, "credit test account without an account should see onboarding");
   assert.equal(await creditTesterPage.getByText("Kredi Sistemi", { exact: true }).first().isVisible(), true, "credit test account should see credit navigation");
+  const openCreditAccount = creditTesterPage.locator('[data-action="credit-open-account"]');
+  assert.equal(await openCreditAccount.isDisabled(), true, "account opening must require complete information and consent");
+  await creditTesterPage.locator("[data-credit-open-phone]").fill("05551234567");
+  await creditTesterPage.locator("[data-credit-open-purpose]").selectOption("general");
+  await creditTesterPage.locator("[data-credit-open-consent]").check();
+  assert.equal(await openCreditAccount.isEnabled(), true, "complete account opening form should enable confirmation");
   await creditTesterContext.close();
 
   const ordinaryCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

@@ -602,7 +602,60 @@ body.modal-open { overflow: hidden; }
 .credit-report-copy { color: var(--text-soft); line-height: 1.6; }
 .credit-report-actions { display: grid; gap: .55rem; }
 .credit-account-chip { align-items: center; background: rgba(90, 160, 255, .12); border: 1px solid rgba(145, 195, 255, .22); border-radius: 999px; color: #b9dbff; display: inline-flex; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .82rem; font-weight: 760; gap: .5rem; letter-spacing: .07em; padding: .7rem .95rem; }
+.credit-account-chip.pending { color: var(--text-soft); font-family: inherit; letter-spacing: 0; }
+.credit-onboarding-layout { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); margin-top: 1rem; }
+.credit-onboarding-card { display: grid; gap: .9rem; }
+.credit-onboarding-card > label, .credit-identity-grid label { color: var(--text-soft); display: grid; font-size: .78rem; gap: .4rem; }
+.credit-identity-grid { display: grid; gap: .75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.credit-identity-grid .field[readonly] { background: rgba(5, 20, 43, .22); color: var(--text-soft); cursor: default; }
+.credit-opening-consent { align-items: start; background: rgba(85, 157, 242, .08); border: 1px solid rgba(145, 195, 255, .13); border-radius: 16px; cursor: pointer; display: grid !important; font-size: .76rem !important; grid-template-columns: auto 1fr; line-height: 1.55; padding: .85rem; }
+.credit-opening-consent input { accent-color: var(--accent); margin-top: .18rem; }
+.credit-opening-summary { align-content: start; display: grid; gap: 1rem; overflow: hidden; position: relative; }
+.credit-opening-summary::after { background: var(--accent); border-radius: 999px; content: ""; filter: blur(70px); height: 160px; opacity: .13; position: absolute; right: -70px; top: -70px; width: 160px; }
+.credit-opening-summary p { color: var(--text-soft); line-height: 1.65; }
+.credit-opening-summary ul { color: var(--text-soft); display: grid; gap: .65rem; line-height: 1.5; margin: 0; padding-left: 1.1rem; }
+.credit-opening-orb { align-items: center; background: linear-gradient(145deg, rgba(111, 176, 255, .22), rgba(42, 103, 174, .12)); border: 1px solid rgba(145, 195, 255, .2); border-radius: 22px; color: #b9dbff; display: flex; height: 64px; justify-content: center; width: 64px; }
+.credit-opening-orb .icon { height: 28px; width: 28px; }
 .credit-member-grid { display: grid; gap: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 1rem 0; }
+.credit-balance-stage { align-items: stretch; display: grid; gap: 1rem; grid-template-columns: minmax(320px, 1.2fr) minmax(260px, .8fr); margin: 1rem 0; }
+.credit-balance-card { align-content: center; background: linear-gradient(145deg, rgba(23, 78, 137, .55), rgba(5, 24, 50, .82)); border: 1px solid rgba(151, 204, 255, .24); border-radius: 30px; display: grid; justify-items: center; min-height: 250px; overflow: hidden; padding: 2rem; position: relative; text-align: center; }
+.credit-balance-card::before { background: radial-gradient(circle, rgba(100, 178, 255, .26), transparent 68%); content: ""; height: 280px; inset: 50% auto auto 50%; position: absolute; transform: translate(-50%, -50%); width: 420px; }
+.credit-balance-card > * { position: relative; z-index: 1; }
+.credit-balance-card span { color: #b7d7fa; font-size: .78rem; font-weight: 760; letter-spacing: .12em; text-transform: uppercase; }
+.credit-balance-card strong { color: #fff; font-size: clamp(3.6rem, 9vw, 6.5rem); letter-spacing: -.07em; line-height: .95; margin-top: .7rem; text-shadow: 0 16px 45px rgba(80, 164, 255, .25); }
+.credit-balance-card small { color: #8fc6ff; font-size: .72rem; font-weight: 820; letter-spacing: .2em; margin-top: .55rem; }
+.credit-balance-card em { background: rgba(3, 17, 36, .38); border: 1px solid rgba(157, 207, 255, .14); border-radius: 999px; color: #cce6ff; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .75rem; font-style: normal; letter-spacing: .08em; margin-top: 1.15rem; padding: .55rem .8rem; }
+.credit-balance-insights { display: grid; gap: .65rem; }
+.credit-balance-insights > div { align-content: center; background: rgba(8, 29, 58, .5); border: 1px solid rgba(145, 195, 255, .11); border-radius: 20px; display: grid; grid-template-columns: 1fr auto; padding: 1rem; }
+.credit-balance-insights span, .credit-balance-insights small { color: var(--text-soft); font-size: .75rem; }
+.credit-balance-insights strong { color: var(--text); font-size: 1.25rem; }
+.credit-balance-insights small { grid-column: 1 / -1; margin-top: .25rem; }
+.credit-operation-grid { display: grid; gap: .75rem; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 1rem 0; }
+.credit-operation-card { border-radius: 21px; overflow: hidden; transition: border-color .25s ease, transform .25s ease; }
+.credit-operation-card[open] { border-color: rgba(145, 195, 255, .24); grid-column: span 1; transform: translateY(-2px); }
+.credit-operation-card summary { align-items: center; cursor: pointer; display: grid; gap: .75rem; grid-template-columns: auto 1fr auto; list-style: none; min-height: 90px; padding: .85rem; }
+.credit-operation-card summary::-webkit-details-marker { display: none; }
+.credit-operation-card summary > span:nth-child(2) { display: grid; gap: .18rem; }
+.credit-operation-card summary small { color: var(--text-soft); font-size: .68rem; }
+.credit-operation-card summary strong { color: var(--text); font-size: .9rem; }
+.credit-operation-card summary > em { color: var(--text-soft); display: flex; transition: transform .25s ease; }
+.credit-operation-card[open] summary > em { transform: rotate(90deg); }
+.credit-operation-icon { align-items: center; background: rgba(92, 161, 245, .12); border: 1px solid rgba(145, 195, 255, .14); border-radius: 15px; color: #9dcdff; display: flex; height: 44px; justify-content: center; width: 44px; }
+.credit-operation-content { border-top: 1px solid rgba(145, 195, 255, .1); display: grid; gap: .75rem; padding: .9rem; }
+.credit-operation-content > label, .credit-operation-content .form-grid label { color: var(--text-soft); display: grid; font-size: .76rem; gap: .38rem; }
+.credit-account-admin-panel { margin: 1rem 0; }
+.table-subtitle { color: var(--text-soft); display: block; font-size: .7rem; margin-top: .18rem; }
+.credit-transaction-kind { align-items: center; display: inline-flex; gap: .55rem; }
+.credit-transaction-kind i { align-items: center; background: rgba(145, 195, 255, .08); border-radius: 999px; display: inline-flex; height: 30px; justify-content: center; width: 30px; }
+.credit-transaction-kind i .icon { height: 14px; transition: transform .2s ease; width: 14px; }
+.credit-transaction-kind.incoming i { background: rgba(44, 190, 125, .12); color: #65dca5; }
+.credit-transaction-kind.incoming i .icon { transform: rotate(135deg); }
+.credit-transaction-kind.outgoing i { background: rgba(255, 93, 112, .11); color: #ff8290; }
+.credit-transaction-kind.outgoing i .icon { transform: rotate(-45deg); }
+.credit-transaction-amount { white-space: nowrap; }
+.credit-transaction-amount.incoming { color: #61d99f; }
+.credit-transaction-amount.outgoing { color: #ff8290; }
+.credit-transaction-amount.neutral { color: var(--text); }
 .credit-action-card { align-content: start; display: grid; gap: .75rem; }
 .credit-action-card > label { color: var(--text-soft); display: grid; font-size: .78rem; gap: .4rem; }
 .credit-card-note { color: var(--text-soft); font-size: .75rem; line-height: 1.55; margin: 0; }
@@ -630,10 +683,14 @@ body.modal-open { overflow: hidden; }
   .arcade-scratch { grid-column: 1 / -1; }
   .credit-allowance-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .credit-member-grid { grid-template-columns: 1fr 1fr; }
+  .credit-onboarding-layout { grid-template-columns: 1fr; }
+  .credit-balance-stage { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .arcade-grid, .game-admin-grid, .credit-settings-grid, .credit-dashboard-grid, .credit-member-grid { grid-template-columns: 1fr; }
   .credit-installment-list > div { grid-template-columns: 1fr; }
+  .credit-identity-grid { grid-template-columns: 1fr; }
+  .credit-operation-grid { grid-template-columns: 1fr; }
   .arcade-scratch { grid-column: auto; }
   .arcade-card { min-height: 340px; }
   .snake-controls { display: grid; }

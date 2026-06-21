@@ -107,11 +107,33 @@ function chequeHash(code) {
   return createHash("sha256").update(code).digest("hex");
 }
 
-async function openAccount(profileId) {
+async function openAccount(profileId, contactPhone, usagePurpose, termsAccepted) {
+  const normalizedPhone = String(contactPhone || "").replace(/[^0-9+]/g, "");
+  if (!/^\+?[0-9]{10,15}$/.test(normalizedPhone)) {
+    const error = new Error("Gecerli bir telefon numarasi girilmelidir.");
+    error.status = 400;
+    throw error;
+  }
+  if (!["general", "transfer", "cheque", "saving"].includes(usagePurpose)) {
+    const error = new Error("Hesap kullanim amaci secilmelidir.");
+    error.status = 400;
+    throw error;
+  }
+  if (termsAccepted !== true) {
+    const error = new Error("Hesap acilis sozlesmesi kabul edilmelidir.");
+    error.status = 400;
+    throw error;
+  }
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const code = `IHP${String(randomInt(0, 1_000_000_000)).padStart(9, "0")}`;
     try {
-      return await rpc("open_credit_account", { p_profile_id: profileId, p_account_code: code });
+      return await rpc("open_credit_account", {
+        p_profile_id: profileId,
+        p_account_code: code,
+        p_contact_phone: normalizedPhone,
+        p_usage_purpose: usagePurpose,
+        p_terms_accepted: true
+      });
     } catch (error) {
       if (!/unique|duplicate/i.test(error.message)) throw error;
     }
@@ -206,6 +228,23 @@ export default async function handler(request, response) {
       return json(response, 200, await adminStatus());
     }
 
+    if (action === "adjust_balance") {
+      if (!actor.isAdmin) return json(response, 403, { error: "Admin yetkisi gerekir." });
+      const amount = boundedInteger(request.body?.amount, 1, 1_000_000);
+      const direction = String(request.body?.direction || "");
+      const reason = String(request.body?.reason || "").trim();
+      if (amount === null || !["credit", "debit"].includes(direction) || reason.length < 5 || reason.length > 300) {
+        return json(response, 400, { error: "Bakiye islemi bilgileri gecersiz." });
+      }
+      await rpc("admin_adjust_credit_balance", {
+        p_admin_profile_id: actor.profile.id,
+        p_account_id: String(request.body?.accountId || ""),
+        p_delta: direction === "credit" ? amount : -amount,
+        p_reason: reason
+      });
+      return json(response, 200, await adminStatus());
+    }
+
     if (action === "report") {
       if (!actor.isAdmin) return json(response, 403, { error: "Admin yetkisi gerekir." });
       const hours = request.body?.range === "7d" ? 168 : 24;
@@ -216,7 +255,12 @@ export default async function handler(request, response) {
     }
 
     if (action === "open_account") {
-      const result = await openAccount(actor.profile.id);
+      const result = await openAccount(
+        actor.profile.id,
+        request.body?.contactPhone,
+        String(request.body?.usagePurpose || ""),
+        request.body?.termsAccepted === true
+      );
       return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
     }
     if (action === "close_account") {

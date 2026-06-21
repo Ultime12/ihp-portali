@@ -50,6 +50,26 @@ function creditTransactionLabel(kind) {
   })[kind] || kind;
 }
 
+function creditTransactionDirection(item = {}) {
+  if (item.kind === "admin_adjustment") {
+    return item.metadata?.direction === "credit" ? "incoming" : "outgoing";
+  }
+  if (["transfer_in", "weekly_allowance", "cheque_redeem", "loan_disbursement"].includes(item.kind)) return "incoming";
+  if (["transfer_out", "transfer_tax", "cheque_issue", "loan_repayment", "balance_forfeit"].includes(item.kind)) return "outgoing";
+  return "neutral";
+}
+
+function creditTransactionKindMarkup(item = {}) {
+  const direction = creditTransactionDirection(item);
+  return `<span class="credit-transaction-kind ${direction}"><i>${icon("arrow")}</i><span>${esc(creditTransactionLabel(item.kind))}</span></span>`;
+}
+
+function creditTransactionAmountMarkup(item = {}) {
+  const direction = creditTransactionDirection(item);
+  const sign = direction === "incoming" ? "+" : direction === "outgoing" ? "−" : "";
+  return `<strong class="credit-transaction-amount ${direction}">${sign}${creditAmount(item.amount)}</strong>`;
+}
+
 function creditSettingsForm(settings) {
   const allowances = settings.role_allowances || {};
   return `
@@ -65,7 +85,7 @@ function creditSettingsForm(settings) {
       </div>
       <details class="credit-allowance-details"><summary>Rütbeye göre haftalık kredi</summary><div class="credit-allowance-grid">${ROLE_OPTIONS.map(([role, label]) => `<label>${esc(label)}<input class="field" data-credit-allowance="${role}" type="number" min="0" max="1000000" value="${Number(allowances[role] || 0)}" /></label>`).join("")}</div></details>
       <div class="panel-actions"><button class="btn btn-primary btn-sm" type="button" data-action="save-credit-settings">Kredi ayarlarını kaydet</button></div>
-      <p class="credit-safety-note">Üye ekranı bu aşamada kapalıdır. Hesap ve işlem altyapısı hazır tutulur; Admin dışında hiç kimse bu bölümü göremez.</p>
+      <p class="credit-safety-note">Kredi sistemi pilot erişimdedir. Yetkili deneme hesapları kendi bilgilerini onaylamadan hesap ve hesap numarası oluşturamaz.</p>
     </section>
   `;
 }
@@ -80,8 +100,25 @@ function creditMemberPage() {
   const settings = data.settings || {};
   if (!account) {
     return `
-      <section class="page-head credit-head"><div><span class="eyebrow">İHP Kredi Sistemi</span><h2>Deneme hesabı hazırlanıyor.</h2><p>Kredi hesabı bulunamadı. Bu durum Admin tarafından düzeltilmelidir.</p></div></section>
-      ${emptyCard("Kredi hesabı bulunamadı", "Lütfen Admin ile iletişime geçin.")}
+      <section class="page-head credit-head"><div><span class="eyebrow">İHP Kredi Sistemi</span><h2>Kredi hesabını oluştur.</h2><p>Hesap numaranız henüz yok. Bilgilerinizi kontrol edip hesap açılış sözleşmesini onayladığınızda hesabınız anında açılır.</p></div><span class="credit-account-chip pending">${icon("wallet")} Hesap açılmadı</span></section>
+      <section class="credit-onboarding-layout">
+        <article class="panel glass credit-onboarding-card">
+          <div class="panel-head"><div><span class="panel-kicker">Hesap sahibi bilgileri</span><h3>Başvuru formu</h3></div>${icon("userPlus")}</div>
+          <div class="credit-identity-grid">
+            <label>Ad soyad<input class="field" value="${esc(state.profile?.display_name || "")}" readonly /></label>
+            <label>Portal e-postası<input class="field" value="${esc(state.profile?.email || "")}" readonly /></label>
+          </div>
+          <label>İletişim telefonu<input class="field" data-credit-open-phone type="tel" inputmode="tel" maxlength="18" autocomplete="tel" placeholder="05XX XXX XX XX" /></label>
+          <label>Hesabı kullanma amacı<select class="field" data-credit-open-purpose><option value="">Seçiniz</option><option value="general">Genel kullanım</option><option value="transfer">Kredi transferleri</option><option value="cheque">Çek işlemleri</option><option value="saving">Bakiye biriktirme</option></select></label>
+          <label class="credit-opening-consent"><input type="checkbox" data-credit-open-consent /><span>Hesap bilgilerimin doğru olduğunu; transferlerin geri alınamayacağını, kredi ve çek işlemlerinin portal kurallarına tabi olduğunu okudum ve kabul ediyorum.</span></label>
+          <button class="btn btn-primary" type="button" data-action="credit-open-account" disabled>Bilgileri onayla ve hesabı aç ${icon("arrow")}</button>
+        </article>
+        <aside class="panel glass credit-opening-summary">
+          <span class="credit-opening-orb">${icon("wallet")}</span>
+          <div><span class="panel-kicker">Açılış sonrası</span><h3>Kişisel hesap numarası</h3><p>Onaydan sonra size benzersiz bir <strong>IHP</strong> hesap kodu verilir. Bakiye, transfer, çek ve kredi işlemleriniz bu kodla yönetilir.</p></div>
+          <ul><li>Başlangıç bakiyesi 0 kredidir.</li><li>Her üye yalnızca bir hesap açabilir.</li><li>Bilgiler yalnızca yetkili sistem tarafından kullanılır.</li></ul>
+        </aside>
+      </section>
     `;
   }
   const pendingLoan = (data.loans || []).find((item) => item.status === "pending");
@@ -94,40 +131,53 @@ function creditMemberPage() {
       <div><span class="eyebrow">İHP Kredi Sistemi</span><h2>Kişisel kredi merkezi.</h2><p>Transfer, çek ve kredi işlemleri sunucuda kaydedilir. Onaydan önce hesap kodunu ve tutarı dikkatle kontrol edin.</p></div>
       <span class="credit-account-chip">${icon("wallet")} ${esc(account.account_code)}</span>
     </section>
-    <section class="metrics-grid credit-metrics">
-      ${metric("Kullanılabilir bakiye", Number(account.balance || 0).toLocaleString("tr-TR"), "İHP kredi", "wallet")}
-      ${metric("Transfer vergisi", `%${taxRate.toLocaleString("tr-TR")}`, "Alıcı tutarına eklenir", "chart")}
-      ${metric("Kredi faizi", `%${interestRate.toLocaleString("tr-TR")}`, `En fazla ${Number(settings.max_term_days || 30)} gün`, "briefcase")}
-      ${metric("Açık taksit", dueInstallments.length, activeLoan ? creditLoanLabel(activeLoan.status) : "Aktif kredi yok", "inbox")}
+    <section class="credit-balance-stage">
+      <article class="credit-balance-card glass">
+        <span>Kullanılabilir bakiye</span>
+        <strong>${Number(account.balance || 0).toLocaleString("tr-TR")}</strong>
+        <small>İHP KREDİ</small>
+        <em>${esc(account.account_code)}</em>
+      </article>
+      <div class="credit-balance-insights">
+        <div><span>Transfer vergisi</span><strong>%${taxRate.toLocaleString("tr-TR")}</strong></div>
+        <div><span>Kredi faizi</span><strong>%${interestRate.toLocaleString("tr-TR")}</strong></div>
+        <div><span>Açık taksit</span><strong>${dueInstallments.length}</strong><small>${activeLoan ? creditLoanLabel(activeLoan.status) : "Aktif kredi yok"}</small></div>
+      </div>
     </section>
-    <section class="credit-member-grid">
-      <article class="panel glass credit-action-card">
-        <div class="panel-head"><div><span class="panel-kicker">Hesaba gönder</span><h3>Kredi transferi</h3></div>${icon("arrow")}</div>
-        <label>Alıcı hesap kodu<input class="field" data-credit-recipient maxlength="12" placeholder="IHP900000002" autocomplete="off" /></label>
-        <label>Alıcıya gidecek tutar<input class="field" data-credit-transfer-amount type="number" min="1" max="1000000" placeholder="100" /></label>
-        <p class="credit-card-note">Vergi ayrıca bakiyenizden kesilir. Yanlış hesaba yapılan transfer geri alınamaz.</p>
-        <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-transfer">Transferi tamamla</button>
-      </article>
-      <article class="panel glass credit-action-card">
-        <div class="panel-head"><div><span class="panel-kicker">24 haneli güvence</span><h3>Çek işlemleri</h3></div>${icon("clipboard")}</div>
-        <label>Çek tutarı<input class="field" data-credit-cheque-amount type="number" min="1" max="1000000" placeholder="100" /></label>
-        <button class="btn btn-secondary btn-sm" type="button" data-action="credit-member-issue-cheque">Çek oluştur</button>
-        <div class="credit-form-divider"><span>veya</span></div>
-        <label>Çek kodu<input class="field" data-credit-cheque-code inputmode="numeric" maxlength="24" placeholder="24 haneli kod" autocomplete="off" /></label>
-        <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-redeem-cheque">Çeki hesaba aktar</button>
-      </article>
-      <article class="panel glass credit-action-card">
-        <div class="panel-head"><div><span class="panel-kicker">Admin onaylı</span><h3>Kredi başvurusu</h3></div>${icon("briefcase")}</div>
-        ${pendingLoan ? `<div class="credit-loan-banner">${badge("Bekliyor", "gold")}<strong>${creditAmount(pendingLoan.principal)}</strong><span>Başvuru Admin kararı bekliyor.</span></div>` : `
-          <label>Talep edilen tutar<input class="field" data-credit-loan-amount type="number" min="1" max="${Number(settings.max_loan_amount || 5000)}" placeholder="500" /></label>
-          <div class="form-grid"><label>Vade (gün)<input class="field" data-credit-loan-term type="number" min="1" max="${Number(settings.max_term_days || 30)}" value="30" /></label><label>Taksit sayısı<select class="field" data-credit-loan-installments><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label></div>
-          <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-request-loan">Başvuruyu gönder</button>
-        `}
-      </article>
+    <section class="credit-operation-grid">
+      <details class="credit-operation-card glass">
+        <summary><span class="credit-operation-icon">${icon("arrow")}</span><span><small>Hesaba gönder</small><strong>Kredi transferi</strong></span><em>${icon("chevron")}</em></summary>
+        <div class="credit-operation-content">
+          <label>Alıcı hesap kodu<input class="field" data-credit-recipient maxlength="12" placeholder="IHP900000002" autocomplete="off" /></label>
+          <label>Alıcıya gidecek tutar<input class="field" data-credit-transfer-amount type="number" min="1" max="1000000" placeholder="100" /></label>
+          <p class="credit-card-note">Vergi ayrıca bakiyenizden kesilir. Yanlış hesaba yapılan transfer geri alınamaz.</p>
+          <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-transfer">Transferi tamamla</button>
+        </div>
+      </details>
+      <details class="credit-operation-card glass">
+        <summary><span class="credit-operation-icon">${icon("clipboard")}</span><span><small>24 haneli güvence</small><strong>Çek işlemleri</strong></span><em>${icon("chevron")}</em></summary>
+        <div class="credit-operation-content">
+          <label>Çek tutarı<input class="field" data-credit-cheque-amount type="number" min="1" max="1000000" placeholder="100" /></label>
+          <button class="btn btn-secondary btn-sm" type="button" data-action="credit-member-issue-cheque">Çek oluştur</button>
+          <div class="credit-form-divider"><span>veya</span></div>
+          <label>Çek kodu<input class="field" data-credit-cheque-code inputmode="numeric" maxlength="24" placeholder="24 haneli kod" autocomplete="off" /></label>
+          <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-redeem-cheque">Çeki hesaba aktar</button>
+        </div>
+      </details>
+      <details class="credit-operation-card glass">
+        <summary><span class="credit-operation-icon">${icon("briefcase")}</span><span><small>Admin onaylı</small><strong>Kredi başvurusu</strong></span><em>${icon("chevron")}</em></summary>
+        <div class="credit-operation-content">
+          ${pendingLoan ? `<div class="credit-loan-banner">${badge("Bekliyor", "gold")}<strong>${creditAmount(pendingLoan.principal)}</strong><span>Başvuru Admin kararı bekliyor.</span></div>` : `
+            <label>Talep edilen tutar<input class="field" data-credit-loan-amount type="number" min="1" max="${Number(settings.max_loan_amount || 5000)}" placeholder="500" /></label>
+            <div class="form-grid"><label>Vade (gün)<input class="field" data-credit-loan-term type="number" min="1" max="${Number(settings.max_term_days || 30)}" value="30" /></label><label>Taksit sayısı<select class="field" data-credit-loan-installments><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label></div>
+            <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-request-loan">Başvuruyu gönder</button>
+          `}
+        </div>
+      </details>
     </section>
     ${dueInstallments.length ? `<section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Ödeme planı</span><h3>Bekleyen taksitler</h3></div>${badge(String(dueInstallments.length), "gold")}</div><div class="credit-installment-list">${dueInstallments.map((item) => `<div><span><strong>${item.installment_no}. taksit</strong><small>Son tarih ${formatDate(item.due_at)}</small></span><b>${creditAmount(item.amount)}</b><button class="btn btn-secondary btn-sm" type="button" data-action="credit-member-pay-installment" data-id="${esc(item.id)}">Taksidi öde</button></div>`).join("")}</div></section>` : ""}
     <section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Hesap defteri</span><h3>Son hareketler</h3></div>${badge(`${(data.transactions || []).length} kayıt`, "blue")}</div>
-      ${(data.transactions || []).length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.map((item) => `<tr><td>${formatDate(item.created_at, true)}</td><td>${esc(creditTransactionLabel(item.kind))}</td><td>${creditAmount(item.amount)}</td><td>${creditAmount(item.balance_after)}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Henüz hareket yok", "Kredi işlemleri burada listelenecek.")}
+      ${(data.transactions || []).length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.map((item) => `<tr><td>${formatDate(item.created_at, true)}</td><td>${creditTransactionKindMarkup(item)}</td><td>${creditTransactionAmountMarkup(item)}</td><td>${creditAmount(item.balance_after)}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Henüz hareket yok", "Kredi işlemleri burada listelenecek.")}
     </section>
   `;
 }
@@ -139,6 +189,26 @@ function showCreditChequeCode(code, amount) {
     subtitle: "Bu kod yalnızca bir kez gösterilir. Kodu teslim edeceğiniz kişi tutarı hesabına aktarabilir.",
     body: `<div class="credit-cheque-reveal"><span>İHP KREDİ ÇEKİ</span><strong>${esc(grouped)}</strong><b>${creditAmount(amount)}</b></div>`,
     actions: `<div class="modal-actions"><button class="btn btn-primary btn-sm" type="button" data-action="close-modal">Tamam</button></div>`
+  });
+}
+
+function creditAccountsPanel(data) {
+  const accounts = (data.accounts || []).filter((item) => item.status === "active");
+  const profiles = creditProfileMap(data);
+  return `
+    <section class="panel glass credit-account-admin-panel">
+      <div class="panel-head"><div><span class="panel-kicker">Admin bakiye merkezi</span><h3>Hesaplara kredi ekle veya çek</h3></div>${badge(`${accounts.length} aktif hesap`, "blue")}</div>
+      ${accounts.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Hesap sahibi</th><th>Hesap kodu</th><th>Bakiye</th><th>İşlem</th></tr></thead><tbody>${accounts.map((account) => { const member = profiles.get(account.profile_id); return `<tr><td><strong>${esc(member?.display_name || "Bilinmeyen hesap")}</strong><small class="table-subtitle">${esc(member?.email || "")}</small></td><td><code>${esc(account.account_code)}</code></td><td><strong>${creditAmount(account.balance)}</strong></td><td><button class="table-action" type="button" data-action="open-credit-adjustment" data-id="${esc(account.id)}" data-name="${esc(member?.display_name || account.account_code)}" data-balance="${Number(account.balance || 0)}">Bakiye düzenle</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyCard("Henüz açılmış hesap yok", "Kullanıcılar bilgilerini onaylayıp hesap açtığında burada görünür.")}
+    </section>
+  `;
+}
+
+function openCreditAdjustment(accountId, memberName, balance) {
+  modal({
+    title: `${memberName} bakiyesini düzenle`,
+    subtitle: `Güncel bakiye: ${creditAmount(balance)}. Her işlem hesap defterine ve üyenin bildirimlerine kaydedilir.`,
+    body: `<div class="form-grid"><div class="form-group"><label for="credit-adjust-direction">İşlem</label><select class="field" id="credit-adjust-direction"><option value="credit">Kredi ekle</option><option value="debit">Kredi çek</option></select></div><div class="form-group"><label for="credit-adjust-amount">Tutar</label><input class="field" id="credit-adjust-amount" type="number" min="1" max="1000000" placeholder="100" /></div></div><div class="form-group"><label for="credit-adjust-reason">Gerekçe</label><textarea class="field textarea" id="credit-adjust-reason" minlength="5" maxlength="300" placeholder="Bakiye değişikliğinin gerekçesini yazın"></textarea></div>`,
+    actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="button" data-action="confirm-credit-adjustment" data-id="${esc(accountId)}">Bakiyeyi güncelle</button></div>`
   });
 }
 
@@ -157,6 +227,7 @@ function creditPage() {
       ${metric("Geciken taksit", delinquent.length, "Disiplin akışına gider", "shield")}
     </section>
     ${creditSettingsForm(data.settings || {})}
+    ${creditAccountsPanel(data)}
     <section class="credit-dashboard-grid">
       <article class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Onay merkezi</span><h3>Bekleyen kredi başvuruları</h3></div>${badge(String(pendingLoans.length), pendingLoans.length ? "gold" : "gray")}</div>
         ${pendingLoans.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Üye</th><th>Tutar</th><th>Geri ödeme</th><th>Vade</th><th>İşlem</th></tr></thead><tbody>${pendingLoans.map((loan) => {
@@ -167,7 +238,7 @@ function creditPage() {
       <article class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Rapor merkezi</span><h3>İşlem dökümleri</h3></div>${icon("download")}</div><p class="credit-report-copy">Hesap hareketlerini resmi, sayfalı PDF raporu olarak dışarı aktarın.</p><div class="credit-report-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="credit-report" data-range="24h">Son 24 saat PDF</button><button class="btn btn-primary btn-sm" type="button" data-action="credit-report" data-range="7d">Son 7 gün PDF</button></div></article>
     </section>
     <section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Değiştirilemez kayıt</span><h3>Son işlemler</h3></div>${badge(`${data.transactions.length} kayıt`, "blue")}</div>
-      ${data.transactions.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>Hesap sahibi</th><th>İşlem</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.slice(0, 80).map((item) => { const member = creditMemberForAccount(item.account_id, data); return `<tr><td>${formatDate(item.created_at, true)}</td><td>${esc(member?.display_name || "Sistem hesabı")}</td><td>${esc(creditTransactionLabel(item.kind))}</td><td>${creditAmount(item.amount)}</td><td>${creditAmount(item.balance_after)}</td></tr>`; }).join("")}</tbody></table></div>` : emptyCard("İşlem kaydı yok", "Kredi sistemi açıldığında hareketler burada görünür.")}
+      ${data.transactions.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>Hesap sahibi</th><th>İşlem</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.slice(0, 80).map((item) => { const member = creditMemberForAccount(item.account_id, data); return `<tr><td>${formatDate(item.created_at, true)}</td><td>${esc(member?.display_name || "Sistem hesabı")}</td><td>${creditTransactionKindMarkup(item)}</td><td>${creditTransactionAmountMarkup(item)}</td><td>${creditAmount(item.balance_after)}</td></tr>`; }).join("")}</tbody></table></div>` : emptyCard("İşlem kaydı yok", "Kredi sistemi açıldığında hareketler burada görünür.")}
     </section>
   `;
 }
@@ -232,6 +303,23 @@ const creditBaseHandleClick = handleClick;
 handleClick = async function creditHandleClick(event) {
   const target = event.target.closest("[data-action]");
   const action = target?.dataset.action;
+  if (action === "credit-open-account") {
+    event.preventDefault(); target.disabled = true;
+    try {
+      const contactPhone = document.querySelector("[data-credit-open-phone]")?.value || "";
+      const usagePurpose = document.querySelector("[data-credit-open-purpose]")?.value || "";
+      const termsAccepted = Boolean(document.querySelector("[data-credit-open-consent]")?.checked);
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
+        module: "credit",
+        action: "open_account",
+        contactPhone,
+        usagePurpose,
+        termsAccepted
+      });
+      showToast("Kredi hesabınız oluşturuldu.", "success"); render();
+    } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
   if (action === "credit-member-transfer") {
     event.preventDefault(); target.disabled = true;
     try {
@@ -280,6 +368,26 @@ handleClick = async function creditHandleClick(event) {
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;
   }
+  if (action === "open-credit-adjustment") {
+    event.preventDefault();
+    openCreditAdjustment(target.dataset.id, target.dataset.name, Number(target.dataset.balance || 0));
+    return;
+  }
+  if (action === "confirm-credit-adjustment") {
+    event.preventDefault(); target.disabled = true;
+    try {
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
+        module: "credit",
+        action: "adjust_balance",
+        accountId: target.dataset.id,
+        direction: modalRoot.querySelector("#credit-adjust-direction")?.value,
+        amount: Number(modalRoot.querySelector("#credit-adjust-amount")?.value),
+        reason: modalRoot.querySelector("#credit-adjust-reason")?.value || ""
+      });
+      closeModal(); showToast("Hesap bakiyesi güncellendi.", "success"); render();
+    } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
   if (action === "save-credit-settings") {
     event.preventDefault(); target.disabled = true;
     try {
@@ -317,4 +425,17 @@ handleClick = async function creditHandleClick(event) {
     return;
   }
   return creditBaseHandleClick(event);
+};
+
+const creditBaseHandleFilter = handleFilter;
+handleFilter = async function creditHandleFilter(event) {
+  if (event.target.matches("[data-credit-open-phone], [data-credit-open-purpose], [data-credit-open-consent]")) {
+    const phone = document.querySelector("[data-credit-open-phone]")?.value.replace(/[^0-9+]/g, "") || "";
+    const purpose = document.querySelector("[data-credit-open-purpose]")?.value || "";
+    const accepted = Boolean(document.querySelector("[data-credit-open-consent]")?.checked);
+    const button = document.querySelector('[data-action="credit-open-account"]');
+    if (button) button.disabled = !(/^\+?[0-9]{10,15}$/.test(phone) && purpose && accepted);
+    return;
+  }
+  return creditBaseHandleFilter(event);
 };
