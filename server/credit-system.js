@@ -2,6 +2,7 @@ import { createHash, randomInt } from "node:crypto";
 
 const ROLE_KEYS = new Set([
   "super_admin", "president", "vice_president", "presidential_aide", "spokesperson",
+  "credit_officer",
   "discipline_chair", "discipline_vice_chair", "discipline_member", "youth_chair",
   "youth_member", "chief_representative", "representative", "member"
 ]);
@@ -44,6 +45,7 @@ async function authenticate(request) {
     profile,
     roles,
     isAdmin: roles.includes("super_admin"),
+    isCreditManager: roles.includes("super_admin") || roles.includes("credit_officer"),
     isCreditTester: Boolean(profile.credit_test_access)
   };
 }
@@ -161,7 +163,7 @@ export default async function handler(request, response) {
 
   try {
     if (action === "admin_status") {
-      if (!actor.isAdmin) return json(response, 403, { error: "Kredi paneli su anda yalnizca Admin'e aciktir." });
+      if (!actor.isCreditManager) return json(response, 403, { error: "Kredi yonetimi yetkisi gerekir." });
       return json(response, 200, await adminStatus());
     }
 
@@ -206,7 +208,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "review_loan") {
-      if (!actor.isAdmin) return json(response, 403, { error: "Admin yetkisi gerekir." });
+      if (!actor.isCreditManager) return json(response, 403, { error: "Kredi yonetimi yetkisi gerekir." });
       const decision = String(request.body?.decision || "");
       if (!["approved", "rejected"].includes(decision)) return json(response, 400, { error: "Kredi karari gecersiz." });
       await rpc("review_credit_loan", {
@@ -219,7 +221,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "adjust_balance") {
-      if (!actor.isAdmin) return json(response, 403, { error: "Admin yetkisi gerekir." });
+      if (!actor.isCreditManager) return json(response, 403, { error: "Kredi yonetimi yetkisi gerekir." });
       const amount = boundedInteger(request.body?.amount, 1, 1_000_000);
       const direction = String(request.body?.direction || "");
       const reason = String(request.body?.reason || "").trim();
@@ -236,7 +238,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "report") {
-      if (!actor.isAdmin) return json(response, 403, { error: "Admin yetkisi gerekir." });
+      if (!actor.isCreditManager) return json(response, 403, { error: "Kredi yonetimi yetkisi gerekir." });
       const hours = request.body?.range === "7d" ? 168 : 24;
       const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
       const data = await adminStatus();

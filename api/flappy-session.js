@@ -34,7 +34,7 @@ async function authenticateMember(request) {
 
   const authUser = await authResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,status,discipline_points,is_system_account&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,status,is_system_account&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
   if (!profile || profile.status !== "active" || profile.is_system_account) return null;
@@ -56,12 +56,12 @@ function istanbulPeriodStart(now = new Date()) {
   return periodStart.toISOString().slice(0, 10);
 }
 
-async function freshPoints(profileId) {
+async function freshCreditBalance(profileId) {
   const response = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(profileId)}&select=discipline_points&limit=1`
+    `/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=balance&limit=1`
   );
-  const [profile] = await response.json().catch(() => []);
-  return Number(profile?.discipline_points ?? 0);
+  const [account] = await response.json().catch(() => []);
+  return Number(account?.balance ?? 0);
 }
 
 async function currentSession(profileId) {
@@ -128,7 +128,7 @@ export default async function handler(request, response) {
       const settings = await flappySettings();
       return json(response, 200, {
         session: await currentSession(member.profile.id),
-        disciplinePoints: await freshPoints(member.profile.id),
+        creditBalance: await freshCreditBalance(member.profile.id),
         config: {
           enabled: settings.enabled,
           entryCost: settings.entry_cost,
@@ -156,7 +156,7 @@ export default async function handler(request, response) {
       });
       return json(response, 200, {
         session,
-        disciplinePoints: await freshPoints(member.profile.id)
+        creditBalance: await freshCreditBalance(member.profile.id)
       });
     }
 
@@ -170,7 +170,7 @@ export default async function handler(request, response) {
       if (session.status !== "active") {
         return json(response, 200, {
           session,
-          disciplinePoints: await freshPoints(member.profile.id),
+          creditBalance: await freshCreditBalance(member.profile.id),
           alreadyFinished: true
         });
       }
@@ -200,7 +200,7 @@ export default async function handler(request, response) {
       return json(response, 200, {
         session: finished,
         verified,
-        disciplinePoints: await freshPoints(member.profile.id)
+        creditBalance: await freshCreditBalance(member.profile.id)
       });
     }
 

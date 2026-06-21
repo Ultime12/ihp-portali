@@ -20,7 +20,7 @@ brand = premiumBrand;
 
 const premiumNavGroups = [
   ["Portal", new Set(["overview", "members", "positions", "committees", "announcements", "regulation", "youth", "agreements", "games", "credit", "access"])],
-  ["Yönetim", new Set(["presidency", "applications", "reports"])],
+  ["Yönetim", new Set(["presidency", "applications", "reports", "credit-management"])],
   ["Disiplin", new Set(["discipline-operations", "discipline-council", "discipline", "complaints", "investigations"])],
   ["Sistem", new Set(["audit", "settings"])]
 ];
@@ -182,7 +182,9 @@ loginPage = function premiumLoginPage() {
 
 dashboardPage = function premiumDashboardPage() {
   const data = state.cache.overview || {};
-  const profiles = visibleProfiles(data.profiles || []);
+  const profiles = visibleProfiles(data.profiles || []).filter(
+    (profile) => !profile.credit_test_access && !rolesOf(profile).includes("super_admin")
+  );
   const announcements = (data.announcements || []).filter((item) => item.status === "published");
   const disciplines = data.disciplines || [];
   const committees = data.committees || [];

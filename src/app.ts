@@ -50,6 +50,7 @@ const ROLE_LABELS = {
   vice_president: "Başkan Yardımcısı",
   presidential_aide: "Başkan Yaveri",
   spokesperson: "Parti Sözcüsü",
+  credit_officer: "Kredi İşleri Sorumlusu",
   discipline_chair: "Disiplin Kurulu Başkanı",
   discipline_vice_chair: "Disiplin Kurulu Başkan Yardımcısı",
   discipline_member: "Disiplin Kurulu Üyesi",
@@ -153,6 +154,7 @@ const PARTY_ROLES = new Set([
   "vice_president",
   "presidential_aide",
   "spokesperson",
+  "credit_officer",
   "discipline_chair",
   "discipline_vice_chair",
   "discipline_member",
@@ -2598,7 +2600,7 @@ function openMemberEditor(member) {
     : ROLE_OPTIONS.filter(([value]) =>
         hasRole("president")
           ? !["super_admin", "president"].includes(value)
-          : !["super_admin", "president", "vice_president"].includes(value)
+          : !["super_admin", "president", "vice_president", "credit_officer"].includes(value)
       );
   modal({
     title: fullAdmin ? "Üyeyi düzenle" : "Rol ve durum yönet",
@@ -2879,7 +2881,7 @@ function syncApplicationCommittee(roleSelect) {
 function openApplication() {
   const committees = (state.cache.committees || []).filter((committee) => committee.status === "active");
   const requestableRoles = ROLE_OPTIONS.filter(
-    ([value]) => !["super_admin", "president", "vice_president", "presidential_aide", "discipline_chair", "youth_chair"].includes(value)
+    ([value]) => !["super_admin", "president", "vice_president", "presidential_aide", "discipline_chair", "youth_chair", "credit_officer"].includes(value)
   );
   modal({
     title: "Başvuru yap",

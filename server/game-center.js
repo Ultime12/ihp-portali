@@ -31,7 +31,7 @@ async function authenticate(request) {
   if (!authResponse.ok) return null;
   const user = await authResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,roles,status,discipline_points,is_system_account&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,roles,status,is_system_account&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
   if (!profile || profile.status !== "active" || profile.is_system_account) return null;
@@ -88,18 +88,21 @@ async function statusFor(member) {
     attempts: attemptsResponse.ok ? attempts : [],
     creditAccount: accountResponse.ok ? creditAccount || null : null,
     gameCreditRequests: requestResponse.ok ? gameCreditRequests : [],
-    disciplinePoints: Number(member.profile.discipline_points || 0)
+    creditBalance: Number(creditAccount?.balance || 0)
   };
   if (member.isAdmin) {
     const since = `${periodStart()}T00:00:00.000Z`;
-    const [gameResponse, flappyResponse, profilesResponse] = await Promise.all([
+    const [gameResponse, flappyResponse, profilesResponse, accountsResponse] = await Promise.all([
       supabaseRequest(`/rest/v1/game_attempts?created_at=gte.${encodeURIComponent(since)}&select=id,profile_id,game_key,status`),
       supabaseRequest(`/rest/v1/flappy_sessions?started_at=gte.${encodeURIComponent(since)}&select=id,profile_id,status`),
-      supabaseRequest("/rest/v1/profiles?status=eq.active&is_system_account=eq.false&select=id,display_name,discipline_points&order=display_name.asc")
+      supabaseRequest("/rest/v1/profiles?status=eq.active&is_system_account=eq.false&select=id,display_name&order=display_name.asc"),
+      supabaseRequest("/rest/v1/credit_accounts?status=eq.active&select=profile_id,balance")
     ]);
     const gameRows = await gameResponse.json().catch(() => []);
     const flappyRows = await flappyResponse.json().catch(() => []);
     const profiles = await profilesResponse.json().catch(() => []);
+    const accounts = await accountsResponse.json().catch(() => []);
+    const balances = new Map(accounts.map((account) => [account.profile_id, Number(account.balance || 0)]));
     result.adminStats = {
       flappy: flappyRows.length,
       snake: gameRows.filter((item) => item.game_key === "snake").length,
@@ -108,7 +111,7 @@ async function statusFor(member) {
     result.memberStatus = profiles.map((profile) => ({
       id: profile.id,
       displayName: profile.display_name,
-      disciplinePoints: Number(profile.discipline_points || 0),
+      creditBalance: balances.get(profile.id) || 0,
       flappy: flappyRows.some((item) => item.profile_id === profile.id),
       snake: gameRows.some((item) => item.profile_id === profile.id && item.game_key === "snake"),
       scratch: gameRows.some((item) => item.profile_id === profile.id && item.game_key === "scratch")
@@ -205,7 +208,7 @@ export default async function handler(request, response) {
       for (const update of updates) {
         const gameKey = String(update.gameKey || "");
         const entryCost = integer(update.entryCost, 1, 100000);
-        const rewardPoints = integer(update.rewardPoints, 0, 100);
+        const rewardPoints = integer(update.rewardPoints, 0, 100000);
         const probability = gameKey === "scratch" ? integer(update.winProbabilityBasisPoints, 0, 10000) : 0;
         if (!GAME_KEYS.has(gameKey) || entryCost === null || rewardPoints === null || probability === null) {
           return json(response, 400, { error: "Oyun ayarlarindan biri gecersiz." });

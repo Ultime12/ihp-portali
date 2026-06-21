@@ -69,7 +69,7 @@ function adminGameSettingsPanel() {
             <legend>${esc(item.display_name || key)}</legend>
             <label class="switch-row"><span>Oyun açık</span><input type="checkbox" data-game-enabled ${item.enabled ? "checked" : ""} /></label>
             <label>Kredi giriş bedeli<input class="field" data-game-cost type="number" min="1" max="100000" value="${item.entry_cost}" /></label>
-            <label>Disiplin puanı ödülü<input class="field" data-game-reward type="number" min="0" max="100" value="${item.reward_points}" /></label>
+            <label>Kredi ödülü<input class="field" data-game-reward type="number" min="0" max="100000" value="${item.reward_points}" /></label>
             ${key === "scratch" ? `<label>Kazanma ihtimali (%)<input class="field" data-game-probability type="number" min="0" max="100" step="0.1" value="${Number(item.win_probability_basis_points || 0) / 100}" /></label>` : ""}
             <small>Bu iki günlük dönemde ${Number(stats[key] || 0)} kredili kullanım</small>
           </fieldset>`;
@@ -77,7 +77,7 @@ function adminGameSettingsPanel() {
       </div>
       <div class="game-member-status">
         <div class="panel-head compact"><div><span class="panel-kicker">2 günlük durum</span><h4>Üye oyun hakları</h4></div>${badge(`${members.length} üye`, "blue")}</div>
-        ${members.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Üye</th><th>Puan</th><th>Flappy</th><th>Snake</th><th>Kazı Kazan</th></tr></thead><tbody>${members.map((member) => `<tr><td><strong>${esc(member.displayName)}</strong></td><td>${member.disciplinePoints}</td><td>${badge(member.flappy ? "Kullandı" : "Hazır", member.flappy ? "gray" : "green")}</td><td>${badge(member.snake ? "Kullandı" : "Hazır", member.snake ? "gray" : "green")}</td><td>${badge(member.scratch ? "Kullandı" : "Hazır", member.scratch ? "gray" : "green")}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Aktif üye yok", "Üye oyun durumları burada görünür.")}
+        ${members.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Üye</th><th>Kredi</th><th>Flappy</th><th>Snake</th><th>Kazı Kazan</th></tr></thead><tbody>${members.map((member) => `<tr><td><strong>${esc(member.displayName)}</strong></td><td>${Number(member.creditBalance || 0).toLocaleString("tr-TR")}</td><td>${badge(member.flappy ? "Kullandı" : "Hazır", member.flappy ? "gray" : "green")}</td><td>${badge(member.snake ? "Kullandı" : "Hazır", member.snake ? "gray" : "green")}</td><td>${badge(member.scratch ? "Kullandı" : "Hazır", member.scratch ? "gray" : "green")}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Aktif üye yok", "Üye oyun durumları burada görünür.")}
       </div>
       <div class="panel-actions"><button class="btn btn-primary btn-sm" type="button" data-action="save-game-settings">Oyun ayarlarını kaydet</button></div>
     </section>
@@ -85,7 +85,6 @@ function adminGameSettingsPanel() {
 }
 
 function gameCenterPage() {
-  const points = Number(state.cache.gameCenter?.disciplinePoints ?? state.cache.flappyStatus?.disciplinePoints ?? disciplinePoints(state.profile));
   const creditBalance = Number(state.cache.gameCenter?.creditAccount?.balance || 0);
   const flappy = gameCenterSetting("flappy");
   const snake = gameCenterSetting("snake");
@@ -96,27 +95,27 @@ function gameCenterPage() {
   return `
     <section class="page-head arcade-head">
       <div><span class="eyebrow">İHP Oyun Alanı</span><h2>Refleks, strateji ve biraz şans.</h2><p>Antrenman ücretsizdir. Kredili haklar iki günde bir yenilenir; oyun başlamadan önce kesinti Kredi Sistemi'nde onaylanır.</p></div>
-      <div class="flappy-points-orb"><span>Kredi bakiyen</span><strong>${creditBalance}</strong><small>Ödül puanın: ${points}</small></div>
+      <div class="flappy-points-orb"><span>Kredi bakiyen</span><strong>${creditBalance}</strong><small>Oyun ödülleri bu hesaba eklenir.</small></div>
     </section>
     <section class="arcade-grid">
       ${gameCenterCard({
         key: "flappy", title: "İHP Flappy", kicker: "Refleks", iconName: "sparkles",
         description: "Daralan geçitlerde ritmini koru ve 10.000 skora ulaş.",
-        facts: [["Kredili giriş", `${flappy.entry_cost} kredi`], ["Ödül", `+${flappy.reward_points} disiplin puanı`], ["Can", "3"]],
+        facts: [["Kredili giriş", `${flappy.entry_cost} kredi`], ["Ödül", `+${flappy.reward_points} kredi`], ["Can", "3"]],
         attempt: flappySession,
         actions: `<button class="btn btn-secondary btn-sm" type="button" data-action="start-flappy-practice" ${flappy.enabled ? "" : "disabled"}>Antrenman</button>${paidGameAction("flappy", flappySession, flappy.enabled)}`
       })}
       ${gameCenterCard({
         key: "snake", title: "İHP Snake", kicker: "Strateji", iconName: "activity",
         description: "Hızlanan alanda rotanı planla, büyü ve hedef skora ulaş.",
-        facts: [["Kredili giriş", `${snake.entry_cost} kredi`], ["Hedef", Number(snake.target_score).toLocaleString("tr-TR")], ["Ödül", `+${snake.reward_points} disiplin puanı`]],
+        facts: [["Kredili giriş", `${snake.entry_cost} kredi`], ["Hedef", Number(snake.target_score).toLocaleString("tr-TR")], ["Ödül", `+${snake.reward_points} kredi`]],
         attempt: snakeAttempt,
         actions: `<button class="btn btn-secondary btn-sm" type="button" data-action="start-snake-practice" ${snake.enabled ? "" : "disabled"}>Antrenman</button>${paidGameAction("snake", snakeAttempt, snake.enabled)}`
       })}
       ${gameCenterCard({
         key: "scratch", title: "İHP Kazı Kazan", kicker: "Şans", iconName: "gift",
         description: "İki günlük kartını kazı. Sonuç güvenli biçimde sunucuda belirlenir.",
-        facts: [["Kart bedeli", `${scratch.entry_cost} kredi`], ["Ödül", `+${scratch.reward_points} disiplin puanı`], ["İhtimal", `%${(Number(scratch.win_probability_basis_points) / 100).toLocaleString("tr-TR")}`]],
+        facts: [["Kart bedeli", `${scratch.entry_cost} kredi`], ["Ödül", `+${scratch.reward_points} kredi`], ["İhtimal", `%${(Number(scratch.win_probability_basis_points) / 100).toLocaleString("tr-TR")}`]],
         attempt: scratchAttempt,
         actions: paidGameAction("scratch", scratchAttempt, scratch.enabled)
       })}
@@ -130,10 +129,10 @@ function openGameTerms(kind) {
   const settings = gameCenterSetting(kind);
   const name = kind === "snake" ? "İHP Snake" : "İHP Kazı Kazan";
   modal({
-    title: `${name} puanlı hak`,
+    title: `${name} kredili hak`,
     subtitle: "Bu işlem iki günlük oyun hakkınızı kullanır.",
-    body: `<div class="flappy-terms-box"><span class="flappy-terms-icon">${icon("shield")}</span><div><strong>Puan kullanım onayı</strong><p>${settings.entry_cost} disiplin puanı hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya kazanamasam bile puanın iade edilmeyeceğini ve bu dönem yeniden giriş yapamayacağımı anladım.</p></div></div><label class="flappy-consent"><input type="checkbox" data-game-consent="${kind}" /> <span>Metni okudum, anladım ve kabul ediyorum.</span></label>`,
-    actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="button" data-action="confirm-${kind}" disabled>${settings.entry_cost} puan kullan</button></div>`
+    body: `<div class="flappy-terms-box"><span class="flappy-terms-icon">${icon("shield")}</span><div><strong>Kredi kullanım onayı</strong><p>${settings.entry_cost} kredi hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya kazanamasam bile kredinin iade edilmeyeceğini anladım.</p></div></div><label class="flappy-consent"><input type="checkbox" data-game-consent="${kind}" /> <span>Metni okudum, anladım ve kabul ediyorum.</span></label>`,
+    actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="button" data-action="confirm-${kind}" disabled>${settings.entry_cost} kredi kullan</button></div>`
   });
 }
 
@@ -145,7 +144,7 @@ function stopSnakeGame() {
 }
 
 function snakeMarkup(mode, target) {
-  return `<div class="snake-shell" data-snake-game><div class="snake-topline"><span>${mode === "ranked" ? "2 günlük puanlı deneme" : "Sınırsız antrenman"}</span><strong><b data-snake-score>0</b> / ${Number(target).toLocaleString("tr-TR")}</strong></div><div class="snake-board-wrap"><canvas class="snake-board" width="500" height="600" aria-label="İHP Snake oyun alanı"></canvas><div class="snake-countdown" data-snake-countdown>3</div><div class="snake-result" data-snake-result hidden></div></div><div class="snake-controls" aria-label="Yön kontrolleri"><button type="button" data-snake-direction="up">↑</button><button type="button" data-snake-direction="left">←</button><button type="button" data-snake-direction="down">↓</button><button type="button" data-snake-direction="right">→</button></div><p>Yön tuşları veya WASD ile oyna.</p></div>`;
+  return `<div class="snake-shell" data-snake-game><div class="snake-topline"><span>${mode === "ranked" ? "2 günlük kredili deneme" : "Sınırsız antrenman"}</span><strong><b data-snake-score>0</b> / ${Number(target).toLocaleString("tr-TR")}</strong></div><div class="snake-board-wrap"><canvas class="snake-board" width="500" height="600" aria-label="İHP Snake oyun alanı"></canvas><div class="snake-countdown" data-snake-countdown>3</div><div class="snake-result" data-snake-result hidden></div></div><div class="snake-controls" aria-label="Yön kontrolleri"><button type="button" data-snake-direction="up">↑</button><button type="button" data-snake-direction="left">←</button><button type="button" data-snake-direction="down">↓</button><button type="button" data-snake-direction="right">→</button></div><p>Yön tuşları veya WASD ile oyna.</p></div>`;
 }
 
 function drawSnake(game) {
@@ -190,8 +189,7 @@ async function endSnake(game) {
   try {
     const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "finish_snake", attemptId: game.attempt.id, directionEvents: game.events, finalTick: game.state.tick });
     state.cache.gameCenter = response;
-    state.profile.discipline_points = response.disciplinePoints;
-    result.innerHTML = `<span>${Number(response.attempt.score || 0).toLocaleString("tr-TR")}</span><h3>${response.attempt.status === "won" ? "Tebrikler!" : "Deneme tamamlandı"}</h3><p>${response.attempt.status === "won" ? `Hesabına ${response.attempt.reward_points} disiplin puanı eklendi.` : "Antrenman modu her zaman ücretsiz."}</p><button class="btn btn-primary btn-sm" type="button" data-action="close-game-result">Tamamla</button>`;
+    result.innerHTML = `<span>${Number(response.attempt.score || 0).toLocaleString("tr-TR")}</span><h3>${response.attempt.status === "won" ? "Tebrikler!" : "Deneme tamamlandı"}</h3><p>${response.attempt.status === "won" ? `Kredi hesabına ${response.attempt.reward_points} kredi eklendi.` : "Antrenman modu her zaman ücretsiz."}</p><button class="btn btn-primary btn-sm" type="button" data-action="close-game-result">Tamamla</button>`;
     if (response.attempt.status === "won") {
       state.cache.notifications = await loadNotifications().catch(() => state.cache.notifications || []);
       maybeCelebrateRewards();
@@ -241,7 +239,7 @@ function launchSnake(mode, attempt = null) {
 
 function scratchCardMarkup(attempt) {
   const won = attempt.status === "won";
-  return `<div class="scratch-stage" data-scratch-stage><div class="scratch-ticket"><div class="scratch-result ${won ? "won" : "lost"}"><span>${won ? "TEBRİKLER" : "BU KEZ OLMADI"}</span><strong>${won ? `+${attempt.reward_points} PUAN` : "YENİ DÖNEM, YENİ ŞANS"}</strong><small>İHP Kazı Kazan</small></div><canvas class="scratch-canvas" width="760" height="380" aria-label="Kazı Kazan kartı"></canvas></div><p>Kartın üzerini parmağınla veya farenle kazı.</p><button class="btn btn-primary btn-sm" type="button" data-action="finish-scratch" hidden>Kartı tamamla</button></div>`;
+  return `<div class="scratch-stage" data-scratch-stage><div class="scratch-ticket"><div class="scratch-result ${won ? "won" : "lost"}"><span>${won ? "TEBRİKLER" : "BU KEZ OLMADI"}</span><strong>${won ? `+${attempt.reward_points} KREDİ` : "YENİ DÖNEM, YENİ ŞANS"}</strong><small>İHP Kazı Kazan</small></div><canvas class="scratch-canvas" width="760" height="380" aria-label="Kazı Kazan kartı"></canvas></div><p>Kartın üzerini parmağınla veya farenle kazı.</p><button class="btn btn-primary btn-sm" type="button" data-action="finish-scratch" hidden>Kartı tamamla</button></div>`;
 }
 
 function launchScratch(attempt) {
@@ -303,7 +301,6 @@ loadPage = async function gameCenterLoadPage(page) {
       loadNotifications().catch(() => state.cache.notifications || [])
     ]);
     state.cache.gameCenter = gameCenter; state.cache.flappyStatus = flappyStatus; state.cache.notifications = notifications;
-    state.profile.discipline_points = gameCenter.disciplinePoints;
   } catch (error) { state.pageError = { page, message: error.message }; }
   finally { state.loading = false; render(); }
 };
@@ -326,7 +323,7 @@ handleClick = async function gameCenterHandleClick(event) {
     event.preventDefault(); target.disabled = true;
     try {
       const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "start_snake", acceptedTerms: true });
-      state.cache.gameCenter = response; state.profile.discipline_points = response.disciplinePoints;
+      state.cache.gameCenter = response;
       launchSnake("ranked", response.attempt);
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;
@@ -335,7 +332,7 @@ handleClick = async function gameCenterHandleClick(event) {
     event.preventDefault(); target.disabled = true;
     try {
       const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "play_scratch", acceptedTerms: true });
-      state.cache.gameCenter = response; state.profile.discipline_points = response.disciplinePoints;
+      state.cache.gameCenter = response;
       launchScratch(response.attempt);
       if (response.won) {
         state.cache.notifications = await loadNotifications().catch(() => state.cache.notifications || []);

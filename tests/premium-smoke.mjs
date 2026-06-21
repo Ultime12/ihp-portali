@@ -57,7 +57,9 @@ const baseProfile = {
 const members = [
   baseProfile,
   { ...baseProfile, id: "member-2", email: "deniz@example.test", display_name: "Deniz Çiçek", member_code: "203847", avatar_initials: "DÇ" },
-  { ...baseProfile, id: "president-1", email: "baskan@example.test", display_name: "Genel Başkan", member_code: "304756", roles: ["president", "member"], role: "president", avatar_initials: "GB" }
+  { ...baseProfile, id: "president-1", email: "baskan@example.test", display_name: "Genel Başkan", member_code: "304756", roles: ["president", "member"], role: "president", avatar_initials: "GB" },
+  { ...baseProfile, id: "system-test", email: "deneme@example.test", display_name: "Kredi Deneme", member_code: null, is_system_account: true, credit_test_access: true },
+  { ...baseProfile, id: "admin-hidden", email: "admin.hidden@example.test", display_name: "ADMIN", member_code: null, roles: ["super_admin"], role: "super_admin" }
 ];
 
 function tablePayload(table, url, profile) {
@@ -80,12 +82,12 @@ async function mockBackend(page, profile) {
     if (body.module === "game_center") {
       return route.fulfill({
         json: {
-          disciplinePoints: profile.discipline_points,
+          creditBalance: 500,
           creditAccount: profile.id === "funded-credit" ? { id: "funded-account", account_code: "IHP111222333", balance: 500, status: "active" } : null,
           gameCreditRequests: [],
           attempts: [],
           adminStats: { flappy: 0, snake: 0, scratch: 0 },
-          memberStatus: [{ id: profile.id, displayName: profile.display_name, disciplinePoints: profile.discipline_points, flappy: false, snake: false, scratch: false }],
+          memberStatus: [{ id: profile.id, displayName: profile.display_name, creditBalance: 500, flappy: false, snake: false, scratch: false }],
           settings: [
             { game_key: "flappy", display_name: "İHP Flappy", enabled: true, entry_cost: 5, reward_points: 10, target_score: 10000, win_probability_basis_points: 0, attempt_period: "two_days" },
             { game_key: "snake", display_name: "İHP Snake", enabled: true, entry_cost: 5, reward_points: 10, target_score: 1000, win_probability_basis_points: 0, attempt_period: "two_days" },
@@ -95,12 +97,12 @@ async function mockBackend(page, profile) {
       });
     }
     if (body.action === "start") {
-      return route.fulfill({ json: { session: { id: "game-1", seed: 12345, status: "active", score: 0 }, disciplinePoints: 95 } });
+      return route.fulfill({ json: { session: { id: "game-1", seed: 12345, status: "active", score: 0 }, creditBalance: 495 } });
     }
     return route.fulfill({
       json: {
         session: null,
-        disciplinePoints: profile.discipline_points,
+        creditBalance: 500,
         config: { enabled: true, entryCost: 5, reward: 10, targetScore: 10000, scorePerPipe: 400 }
       }
     });
@@ -118,7 +120,9 @@ async function mockBackend(page, profile) {
     }
     return route.fulfill({ json: {
       settings: { member_access_enabled: true, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
-      accounts: [{ id: "admin-test-account", profile_id: "member-1", account_code: "IHP123456789", balance: 250, status: "active" }], profiles: members, loans: [], installments: [], transactions: [
+      accounts: [{ id: "admin-test-account", profile_id: "member-1", account_code: "IHP123456789", balance: 250, status: "active" }], profiles: members,
+      loans: profile.roles.includes("credit_officer") ? [{ id: "loan-pending", account_id: "admin-test-account", principal: 500, total_due: 550, term_days: 30, installment_count: 2, status: "pending" }] : [],
+      installments: [], transactions: [
         { id: "tx-in", account_id: "admin-test-account", kind: "transfer_in", amount: 100, balance_after: 250, created_at: "2026-06-20T12:00:00.000Z", metadata: {} },
         { id: "tx-out", account_id: "admin-test-account", kind: "transfer_out", amount: 50, balance_after: 150, created_at: "2026-06-20T11:00:00.000Z", metadata: {} }
       ], cheques: []
@@ -186,6 +190,7 @@ try {
     portalPage.on("pageerror", (error) => errors.push(error.message));
     await openPortal(portalPage, baseProfile);
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "blue", "legacy theme should map to blue");
+    assert.equal(await portalPage.locator(".premium-metrics .metric-card").first().locator("strong").innerText(), "03", "dashboard member count must exclude test and technical admin accounts");
     await portalPage.locator("[data-theme-select]").selectOption("green");
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "green", "theme selection should apply");
     await portalPage.locator('[data-action="open-notifications"]').click();
@@ -222,6 +227,7 @@ try {
     { name: "president", roles: ["president", "member"], visible: "Başkanlık", hidden: null },
     { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık" },
     { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık" },
+    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Soruşturmalar" },
     { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Soruşturmalar" }
   ];
 
@@ -238,7 +244,7 @@ try {
   const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const adminPage = await adminContext.newPage();
   const adminProfile = { ...baseProfile, id: "admin-credit", email: "admin@example.test", roles: ["super_admin"], role: "super_admin", theme_preference: "blue" };
-  await openPortal(adminPage, adminProfile, "credit");
+  await openPortal(adminPage, adminProfile, "credit-management");
   assert.equal(await adminPage.locator(".credit-settings-panel").isVisible(), true, "admin should see credit settings");
   assert.equal(await adminPage.locator(".credit-transaction-amount.incoming").count(), 1, "incoming credit should have positive styling");
   assert.equal(await adminPage.locator(".credit-transaction-amount.outgoing").count(), 1, "outgoing credit should have negative styling");
@@ -247,6 +253,17 @@ try {
   assert.equal(await adminPage.locator("#credit-adjust-amount").isVisible(), true, "admin balance adjustment modal should open");
   await adminPage.keyboard.press("Escape");
   await adminContext.close();
+
+  const creditOfficerContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const creditOfficerPage = await creditOfficerContext.newPage();
+  const creditOfficerProfile = { ...baseProfile, id: "credit-officer-panel", email: "credit.officer@example.test", roles: ["credit_officer", "member"], role: "credit_officer", theme_preference: "blue" };
+  await openPortal(creditOfficerPage, creditOfficerProfile, "credit-management");
+  assert.equal(await creditOfficerPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "credit officer should retain a personal account menu");
+  assert.equal(await creditOfficerPage.getByText("Kredi Yönetimi", { exact: true }).first().isVisible(), true, "credit officer should see separate management menu");
+  assert.equal(await creditOfficerPage.locator(".credit-settings-panel").count(), 0, "credit officer must not change Admin economy settings");
+  assert.equal(await creditOfficerPage.locator('[data-action="open-credit-adjustment"]').isVisible(), true, "credit officer should manage balances");
+  assert.equal(await creditOfficerPage.getByRole("button", { name: "Onayla" }).first().isVisible(), true, "credit officer should review credit applications");
+  await creditOfficerContext.close();
 
   const creditTesterContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const creditTesterPage = await creditTesterContext.newPage();
@@ -262,7 +279,7 @@ try {
   };
   await openPortal(creditTesterPage, creditTesterProfile, "credit");
   assert.equal(await creditTesterPage.locator(".credit-onboarding-layout").isVisible(), true, "credit test account without an account should see onboarding");
-  assert.equal(await creditTesterPage.getByText("Kredi Sistemi", { exact: true }).first().isVisible(), true, "credit test account should see credit navigation");
+  assert.equal(await creditTesterPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "credit test account should see credit navigation");
   const openCreditAccount = creditTesterPage.locator('[data-action="credit-open-account"]');
   assert.equal(await openCreditAccount.isDisabled(), true, "account opening must require complete information and consent");
   assert.equal(await creditTesterPage.locator("[data-credit-open-phone]").count(), 0, "account opening must not request a phone number");
@@ -274,7 +291,7 @@ try {
   const ordinaryCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const ordinaryCreditPage = await ordinaryCreditContext.newPage();
   await openPortal(ordinaryCreditPage, baseProfile);
-  assert.equal(await ordinaryCreditPage.getByText("Kredi Sistemi", { exact: true }).first().isVisible(), true, "ordinary members must see credit navigation");
+  assert.equal(await ordinaryCreditPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "ordinary members must see credit navigation");
   await ordinaryCreditContext.close();
 
   const fundedCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

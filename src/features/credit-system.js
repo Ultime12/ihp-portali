@@ -1,5 +1,6 @@
 const IHP_CREDIT_ADMIN_V1 = true;
 const CREDIT_PAGE_ID = "credit";
+const CREDIT_MANAGEMENT_PAGE_ID = "credit-management";
 
 function isCreditTestAccount(profile = state.profile) {
   return Boolean(profile?.credit_test_access);
@@ -9,13 +10,27 @@ function canAccessCreditSystem() {
   return !(typeof isEntryAccessAccount === "function" && isEntryAccessAccount());
 }
 
+function canManageCreditSystem() {
+  return hasRole("super_admin", "credit_officer");
+}
+
 if (!navItems.some(([id]) => id === CREDIT_PAGE_ID)) {
   const settingsIndex = navItems.findIndex(([id]) => id === "settings");
   navItems.splice(settingsIndex < 0 ? navItems.length : settingsIndex, 0, [
     CREDIT_PAGE_ID,
-    "Kredi Sistemi",
+    "Kredi Hesabım",
     "wallet",
     canAccessCreditSystem
+  ]);
+}
+
+if (!navItems.some(([id]) => id === CREDIT_MANAGEMENT_PAGE_ID)) {
+  const settingsIndex = navItems.findIndex(([id]) => id === "settings");
+  navItems.splice(settingsIndex < 0 ? navItems.length : settingsIndex, 0, [
+    CREDIT_MANAGEMENT_PAGE_ID,
+    "Kredi Yönetimi",
+    "chart",
+    canManageCreditSystem
   ]);
 }
 
@@ -46,8 +61,8 @@ function creditTransactionLabel(kind) {
     transfer_out: "Giden transfer", transfer_in: "Gelen transfer", transfer_tax: "Transfer vergisi",
     weekly_allowance: "Haftalık ödeme", cheque_issue: "Çek oluşturuldu", cheque_redeem: "Çek bozduruldu",
     loan_disbursement: "Kredi kullandırıldı", loan_repayment: "Kredi ödemesi",
-    balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Admin düzeltmesi",
-    game_entry: "Oyun giriş bedeli"
+    balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Yetkili düzeltmesi",
+    game_entry: "Oyun giriş bedeli", game_reward: "Oyun ödülü"
   })[kind] || kind;
 }
 
@@ -55,7 +70,7 @@ function creditTransactionDirection(item = {}) {
   if (item.kind === "admin_adjustment") {
     return item.metadata?.direction === "credit" ? "incoming" : "outgoing";
   }
-  if (["transfer_in", "weekly_allowance", "cheque_redeem", "loan_disbursement"].includes(item.kind)) return "incoming";
+  if (["transfer_in", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward"].includes(item.kind)) return "incoming";
   if (["transfer_out", "transfer_tax", "cheque_issue", "loan_repayment", "balance_forfeit", "game_entry"].includes(item.kind)) return "outgoing";
   return "neutral";
 }
@@ -92,7 +107,7 @@ function creditSettingsForm(settings) {
 }
 
 function creditLoanLabel(status) {
-  return ({ pending: "Admin kararı bekliyor", approved: "Aktif kredi", rejected: "Reddedildi", paid: "Tamamlandı", delinquent: "Gecikmede" })[status] || status;
+  return ({ pending: "Kredi Yönetimi kararı bekliyor", approved: "Aktif kredi", rejected: "Reddedildi", paid: "Tamamlandı", delinquent: "Gecikmede" })[status] || status;
 }
 
 function creditGameName(key) {
@@ -189,9 +204,9 @@ function creditMemberPage() {
         </div>
       </details>
       <details class="credit-operation-card glass">
-        <summary><span class="credit-operation-icon">${icon("briefcase")}</span><span><small>Admin onaylı</small><strong>Kredi başvurusu</strong></span><em>${icon("chevron")}</em></summary>
+        <summary><span class="credit-operation-icon">${icon("briefcase")}</span><span><small>Yetkili onaylı</small><strong>Kredi başvurusu</strong></span><em>${icon("chevron")}</em></summary>
         <div class="credit-operation-content">
-          ${pendingLoan ? `<div class="credit-loan-banner">${badge("Bekliyor", "gold")}<strong>${creditAmount(pendingLoan.principal)}</strong><span>Başvuru Admin kararı bekliyor.</span></div>` : `
+          ${pendingLoan ? `<div class="credit-loan-banner">${badge("Bekliyor", "gold")}<strong>${creditAmount(pendingLoan.principal)}</strong><span>Başvuru Kredi Yönetimi kararı bekliyor.</span></div>` : `
             <label>Talep edilen tutar<input class="field" data-credit-loan-amount type="number" min="1" max="${Number(settings.max_loan_amount || 5000)}" placeholder="500" /></label>
             <div class="form-grid"><label>Vade (gün)<input class="field" data-credit-loan-term type="number" min="1" max="${Number(settings.max_term_days || 30)}" value="30" /></label><label>Taksit sayısı<select class="field" data-credit-loan-installments><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label></div>
             <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-request-loan">Başvuruyu gönder</button>
@@ -234,7 +249,7 @@ function creditAccountsPanel(data) {
   const profiles = creditProfileMap(data);
   return `
     <section class="panel glass credit-account-admin-panel">
-      <div class="panel-head"><div><span class="panel-kicker">Admin bakiye merkezi</span><h3>Hesaplara kredi ekle veya çek</h3></div>${badge(`${accounts.length} aktif hesap`, "blue")}</div>
+      <div class="panel-head"><div><span class="panel-kicker">Kredi Yönetimi bakiye merkezi</span><h3>Hesaplara kredi ekle veya çek</h3></div>${badge(`${accounts.length} aktif hesap`, "blue")}</div>
       ${accounts.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Hesap sahibi</th><th>Hesap kodu</th><th>Bakiye</th><th>İşlem</th></tr></thead><tbody>${accounts.map((account) => { const member = profiles.get(account.profile_id); return `<tr><td><strong>${esc(member?.display_name || "Bilinmeyen hesap")}</strong><small class="table-subtitle">${esc(member?.email || "")}</small></td><td><code>${esc(account.account_code)}</code></td><td><strong>${creditAmount(account.balance)}</strong></td><td><button class="table-action" type="button" data-action="open-credit-adjustment" data-id="${esc(account.id)}" data-name="${esc(member?.display_name || account.account_code)}" data-balance="${Number(account.balance || 0)}">Bakiye düzenle</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyCard("Henüz açılmış hesap yok", "Kullanıcılar bilgilerini onaylayıp hesap açtığında burada görünür.")}
     </section>
   `;
@@ -256,14 +271,14 @@ function creditPage() {
   const pendingLoans = data.loans.filter((item) => item.status === "pending");
   const delinquent = data.installments.filter((item) => item.status === "delinquent");
   return `
-    <section class="page-head credit-head"><div><span class="eyebrow">İHP Kredi Sistemi</span><h2>Kapalı devre ekonomi merkezi.</h2><p>Hesaplar, transferler, çekler, krediler ve otomatik ödemeler tek, değiştirilemez işlem defterinde izlenir.</p></div><span class="credit-admin-seal">${icon("lock")} Yalnızca Admin</span></section>
+    <section class="page-head credit-head"><div><span class="eyebrow">İHP Kredi Yönetimi</span><h2>Operasyon konsolu.</h2><p>Hesap bakiyeleri, kredi başvuruları, çekler ve işlem raporları kişisel hesaptan ayrı yönetilir.</p></div><span class="credit-admin-seal">${icon("lock")} ${hasRole("super_admin") ? "Admin" : "Kredi İşleri Sorumlusu"}</span></section>
     <section class="metrics-grid credit-metrics">
       ${metric("Aktif hesap", activeAccounts.length, "Açılmış banka hesabı", "users")}
       ${metric("Toplam bakiye", totalBalance.toLocaleString("tr-TR"), "Sistem içi kredi", "chart")}
-      ${metric("Bekleyen kredi", pendingLoans.length, "Admin kararı bekliyor", "inbox")}
+      ${metric("Bekleyen kredi", pendingLoans.length, "Yetkili kararı bekliyor", "inbox")}
       ${metric("Geciken taksit", delinquent.length, "Disiplin akışına gider", "shield")}
     </section>
-    ${creditSettingsForm(data.settings || {})}
+    ${hasRole("super_admin") ? creditSettingsForm(data.settings || {}) : ""}
     ${creditAccountsPanel(data)}
     <section class="credit-dashboard-grid">
       <article class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Onay merkezi</span><h3>Bekleyen kredi başvuruları</h3></div>${badge(String(pendingLoans.length), pendingLoans.length ? "gold" : "gray")}</div>
@@ -318,18 +333,19 @@ async function exportCreditReport(range) {
 
 const creditBaseRenderPortalPage = renderPortalPage;
 renderPortalPage = function creditRenderPortalPage(page) {
-  if (page === CREDIT_PAGE_ID) return hasRole("super_admin") ? creditPage() : creditMemberPage();
+  if (page === CREDIT_PAGE_ID) return creditMemberPage();
+  if (page === CREDIT_MANAGEMENT_PAGE_ID) return creditPage();
   return creditBaseRenderPortalPage(page);
 };
 
 const creditBaseLoadPage = loadPage;
 loadPage = async function creditLoadPage(page) {
-  if (page !== CREDIT_PAGE_ID) return creditBaseLoadPage(page);
+  if (![CREDIT_PAGE_ID, CREDIT_MANAGEMENT_PAGE_ID].includes(page)) return creditBaseLoadPage(page);
   state.loading = true; state.pageError = null; render();
   try {
     state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
       module: "credit",
-      action: hasRole("super_admin") ? "admin_status" : "member_status"
+      action: page === CREDIT_MANAGEMENT_PAGE_ID ? "admin_status" : "member_status"
     });
   }
   catch (error) { state.pageError = { page, message: error.message }; }
@@ -405,7 +421,7 @@ handleClick = async function creditHandleClick(event) {
       const termDays = Number(document.querySelector("[data-credit-loan-term]")?.value);
       const installmentCount = Number(document.querySelector("[data-credit-loan-installments]")?.value);
       state.cache.creditSystem = await portalServerRequest("/api/manage-member", { module: "credit", action: "request_loan", amount, termDays, installmentCount });
-      showToast("Kredi başvurusu Admin onayına gönderildi.", "success"); render();
+      showToast("Kredi başvurusu Kredi Yönetimine gönderildi.", "success"); render();
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;
   }

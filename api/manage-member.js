@@ -12,6 +12,7 @@ const PARTY_ROLES = new Set([
   "vice_president",
   "presidential_aide",
   "spokesperson",
+  "credit_officer",
   "discipline_chair",
   "discipline_vice_chair",
   "discipline_member",
@@ -27,6 +28,7 @@ const VALID_PROFILE_ROLES = new Set([
   "vice_president",
   "presidential_aide",
   "spokesperson",
+  "credit_officer",
   "discipline_chair",
   "discipline_vice_chair",
   "discipline_member",
@@ -116,6 +118,7 @@ function primaryRole(roles) {
     "discipline_vice_chair",
     "youth_chair",
     "spokesperson",
+    "credit_officer",
     "chief_representative",
     "representative",
     "discipline_member",
@@ -195,6 +198,7 @@ function canModerateProfile(actorRoles, targetRoles, requestedRoles) {
   if (isTechnicalSuperAdminRoles(actorRoles)) return true;
   if (targetRoles.some((role) => ["super_admin", "president"].includes(role))) return false;
   if (actorRoles.includes("vice_president") && targetRoles.includes("vice_president")) return false;
+  if (requestedRoles.includes("credit_officer") && !actorRoles.some((role) => ["super_admin", "president"].includes(role))) return false;
 
   const forbidden = actorRoles.includes("president")
     ? new Set(["super_admin", "president"])

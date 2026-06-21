@@ -40,24 +40,24 @@ function flappyNextPeriodText() {
 function flappyPage() {
   const status = state.cache.flappyStatus || {};
   const session = status.session;
-  const points = Number(status.disciplinePoints ?? disciplinePoints(state.profile));
+  const creditBalance = Number(status.creditBalance || 0);
   const config = status.config || { entryCost: 5, reward: 10, targetScore: 10000, scorePerPipe: 400 };
-  const rankedAvailable = !session && points >= config.entryCost;
+  const rankedAvailable = !session && creditBalance >= config.entryCost;
   return `
     <section class="page-head flappy-page-head">
-      <div><span class="eyebrow">2 günde bir meydan okuma</span><h2>İHP Flappy</h2><p>Refleksini antrenmanda geliştir, hazır olduğunda iki günlük puanlı denemeye gir.</p></div>
-      <div class="flappy-points-orb"><span>Disiplin puanın</span><strong>${points}</strong></div>
+      <div><span class="eyebrow">2 günde bir meydan okuma</span><h2>İHP Flappy</h2><p>Refleksini antrenmanda geliştir, hazır olduğunda iki günlük kredili denemeye gir.</p></div>
+      <div class="flappy-points-orb"><span>Kredi bakiyen</span><strong>${creditBalance}</strong></div>
     </section>
     <section class="flappy-mode-grid">
       <article class="panel glass flappy-mode-card flappy-practice-card">
         <span class="flappy-card-icon">${icon("sparkles")}</span>
-        <div><span class="panel-kicker">Sınırsız</span><h3>Antrenman</h3><p>Puan harcamadan istediğin kadar oyna. Oyun zorluğu ve fizik kuralları puanlı modla aynıdır.</p></div>
-        <div class="flappy-facts"><span>Puan bedeli <b>0</b></span><span>Deneme <b>Sınırsız</b></span></div>
+        <div><span class="panel-kicker">Sınırsız</span><h3>Antrenman</h3><p>Kredi harcamadan istediğin kadar oyna. Oyun zorluğu ve fizik kuralları kredili modla aynıdır.</p></div>
+        <div class="flappy-facts"><span>Kredi bedeli <b>0</b></span><span>Deneme <b>Sınırsız</b></span></div>
         <button class="btn btn-secondary" type="button" data-action="start-flappy-practice">Antrenmana başla ${icon("arrow")}</button>
       </article>
       <article class="panel glass flappy-mode-card flappy-ranked-card">
         <span class="flappy-card-icon">${icon("shield")}</span>
-        <div><span class="panel-kicker">2 günde bir</span><h3>Puanlı deneme</h3><p>Giriş 5 puandır. 10.000 skora ulaşırsan sistem en fazla 10 puan ödül verir.</p></div>
+        <div><span class="panel-kicker">2 günde bir</span><h3>Kredili deneme</h3><p>Giriş bedeli ve kredi ödülü Admin tarafından belirlenir.</p></div>
         <div class="flappy-facts"><span>Hedef <b>${Number(config.targetScore).toLocaleString("tr-TR")}</b></span><span>Ödül <b>+${config.reward}</b></span></div>
         ${session ? `
           <div class="flappy-week-result">
@@ -67,7 +67,7 @@ function flappyPage() {
           </div>
         ` : `
           <button class="btn btn-primary" type="button" data-action="open-ranked-flappy-terms" ${rankedAvailable ? "" : "disabled"}>
-            ${points < config.entryCost ? "Yetersiz puan" : "Puanlı denemeye gir"} ${icon("arrow")}
+            ${creditBalance < config.entryCost ? "Yetersiz kredi" : "Kredili denemeye gir"} ${icon("arrow")}
           </button>
         `}
       </article>
@@ -77,7 +77,7 @@ function flappyPage() {
       <div class="flappy-rule-grid">
         <div><b>01</b><span>Her engel 400 skor kazandırır.</span></div>
         <div><b>02</b><span>Hız kademeli artar, geçiş aralığı daralır.</span></div>
-        <div><b>03</b><span>Puanlı sonuç sunucuda yeniden hesaplanır.</span></div>
+        <div><b>03</b><span>Kredili sonuç sunucuda yeniden hesaplanır.</span></div>
         <div><b>04</b><span>İki günlük deneme başlatıldıktan sonra iade edilmez.</span></div>
       </div>
     </section>
@@ -87,19 +87,19 @@ function flappyPage() {
 function openRankedFlappyTerms() {
   const config = state.cache.flappyStatus?.config || { entryCost: 5 };
   modal({
-    title: "Puanlı oyun onayı",
-    subtitle: "Bu iki günlük dönemde yalnızca bir puanlı deneme hakkınız bulunur.",
+    title: "Kredili oyun onayı",
+    subtitle: "Bu iki günlük dönemde yalnızca bir kredili deneme hakkınız bulunur.",
     body: `
       <div class="flappy-terms-box">
         <span class="flappy-terms-icon">${icon("shield")}</span>
-        <div><strong>Puan kullanımı aydınlatma metni</strong><p>Bu iki günlük oyun denemesi başlatıldığında ${config.entryCost} disiplin puanı hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya başarısız olsam dahi bu puanın iade edilmeyeceğini ve aynı dönemde yeniden puanlı giriş yapamayacağımı anladım.</p></div>
+        <div><strong>Kredi kullanımı aydınlatma metni</strong><p>Bu iki günlük oyun denemesi başlatıldığında ${config.entryCost} kredi hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya başarısız olsam dahi kredinin iade edilmeyeceğini anladım.</p></div>
       </div>
       <label class="flappy-consent"><input type="checkbox" data-flappy-consent /> <span>Metni okudum, anladım ve kabul ediyorum.</span></label>
     `,
     actions: `
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
-        <button class="btn btn-primary btn-sm" type="button" data-action="confirm-ranked-flappy" disabled>${config.entryCost} puan kullan ve başlat</button>
+        <button class="btn btn-primary btn-sm" type="button" data-action="confirm-ranked-flappy" disabled>${config.entryCost} kredi kullan ve başlat</button>
       </div>
     `
   });
@@ -240,14 +240,13 @@ async function finishRankedFlappy(game) {
     });
     game.submitted = true;
     game.serverResult = result;
-    state.profile.discipline_points = result.disciplinePoints;
     state.cache.flappyStatus = {
       ...(state.cache.flappyStatus || {}),
       session: result.session,
-      disciplinePoints: result.disciplinePoints
+      creditBalance: result.creditBalance
     };
     if (result.verified?.won || result.session?.status === "won") {
-      updateFlappyResult(game, "Tebrikler!", `10.000 skora ulaştın. Hesabına ${result.session.reward_points} disiplin puanı eklendi.`, `<button class="btn btn-primary btn-sm" type="button" data-action="close-flappy-result">Tamamla</button>`);
+      updateFlappyResult(game, "Tebrikler!", `10.000 skora ulaştın. Kredi hesabına ${result.session.reward_points} kredi eklendi.`, `<button class="btn btn-primary btn-sm" type="button" data-action="close-flappy-result">Tamamla</button>`);
       state.cache.notifications = await loadNotifications().catch(() => state.cache.notifications || []);
       maybeCelebrateRewards();
     } else {
@@ -265,7 +264,7 @@ function finishPracticeFlappy(game) {
   updateFlappyResult(
     game,
     won ? "Hedef tamam!" : "Antrenman bitti",
-    won ? "Puanlı deneme için hazırsın." : `${game.state.pipesPassed} engel geçtin. Bir sonraki deneme puan harcamaz.`,
+    won ? "Kredili deneme için hazırsın." : `${game.state.pipesPassed} engel geçtin. Bir sonraki antrenman kredi harcamaz.`,
     `<button class="btn btn-primary btn-sm" type="button" data-action="restart-flappy-practice">Tekrar oyna</button><button class="btn btn-secondary btn-sm" type="button" data-action="close-flappy-result">Kapat</button>`
   );
 }
@@ -416,7 +415,6 @@ loadPage = async function flappyLoadPage(page) {
     ]);
     state.cache.flappyStatus = gameStatus;
     state.cache.notifications = notifications;
-    state.profile.discipline_points = gameStatus.disciplinePoints;
     maybeCelebrateRewards();
   } catch (error) {
     state.pageError = { page, message: error.message };
@@ -451,8 +449,7 @@ handleClick = async function flappyHandleClick(event) {
     target.disabled = true;
     try {
       const result = await portalServerRequest("/api/flappy-session", { action: "start", acceptedTerms: true });
-      state.profile.discipline_points = result.disciplinePoints;
-      state.cache.flappyStatus = { ...(state.cache.flappyStatus || {}), session: result.session, disciplinePoints: result.disciplinePoints };
+      state.cache.flappyStatus = { ...(state.cache.flappyStatus || {}), session: result.session, creditBalance: result.creditBalance };
       flappyBaseCloseModal();
       launchFlappyGame("ranked", result.session);
     } catch (error) {
@@ -466,8 +463,7 @@ handleClick = async function flappyHandleClick(event) {
     target.disabled = true;
     try {
       const result = await portalServerRequest("/api/flappy-session", { action: "start", acceptedTerms: true });
-      state.profile.discipline_points = result.disciplinePoints;
-      state.cache.flappyStatus = { ...(state.cache.flappyStatus || {}), session: result.session, disciplinePoints: result.disciplinePoints };
+      state.cache.flappyStatus = { ...(state.cache.flappyStatus || {}), session: result.session, creditBalance: result.creditBalance };
       launchFlappyGame("ranked", result.session);
     } catch (error) {
       showToast(error.message, "error");
