@@ -75,6 +75,8 @@ function tablePayload(table, url, profile) {
 }
 
 async function mockBackend(page, profile) {
+  const approvedGameKeys = new Set();
+  let creditAccountClosed = false;
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
   await page.route("https://mock.supabase.test/auth/v1/logout", (route) => route.fulfill({ status: 204, body: "" }));
@@ -84,8 +86,8 @@ async function mockBackend(page, profile) {
       return route.fulfill({
         json: {
           creditBalance: 500,
-          creditAccount: profile.id === "funded-credit" ? { id: "funded-account", account_code: "IHP111222333", balance: 500, status: "active" } : null,
-          gameCreditRequests: [],
+          creditAccount: profile.id === "funded-credit" && !creditAccountClosed ? { id: "funded-account", account_code: "IHP111222333", balance: 500, status: "active" } : null,
+          gameCreditRequests: [...approvedGameKeys].map((gameKey) => ({ id: `approved-${gameKey}`, game_key: gameKey, credit_amount: 5, status: "approved" })),
           attempts: [],
           adminStats: { flappy: 0, snake: 0, scratch: 0 },
           memberStatus: [{ id: profile.id, displayName: profile.display_name, creditBalance: 500, flappy: false, snake: false, scratch: false }],
@@ -110,6 +112,22 @@ async function mockBackend(page, profile) {
   });
   await page.route("**/api/manage-member", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
+    if (body.module === "credit" && body.action === "decide_game_charge") {
+      if (body.approve) approvedGameKeys.add("snake");
+      return route.fulfill({ json: {
+        settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
+        account: { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 495, status: "active" },
+        loans: [], installments: [], transactions: [], cheques: [],
+        gameRequests: [...approvedGameKeys].map((gameKey) => ({ id: `approved-${gameKey}`, game_key: gameKey, credit_amount: 5, status: "approved" }))
+      } });
+    }
+    if (body.module === "credit" && body.action === "close_account") {
+      creditAccountClosed = true;
+      return route.fulfill({ json: {
+        settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
+        account: null, loans: [], installments: [], transactions: [], cheques: [], gameRequests: []
+      } });
+    }
     if (body.module === "credit" && body.action === "issue_cheque") {
       return route.fulfill({ json: {
         code: "123456789012345678901234",
@@ -122,14 +140,17 @@ async function mockBackend(page, profile) {
       const funded = profile.id === "funded-credit";
       return route.fulfill({ json: {
         settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
-        account: funded ? { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 500, status: "active" } : null,
+        account: funded && !creditAccountClosed ? { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 500, status: "active" } : null,
         loans: [], installments: [], transactions: [], cheques: [],
         gameRequests: funded ? [{ id: "game-charge-1", game_key: "snake", credit_amount: 5, status: "pending", requested_at: "2026-06-21T10:00:00.000Z" }] : []
       } });
     }
     return route.fulfill({ json: {
       settings: { member_access_enabled: true, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
-      accounts: [{ id: "admin-test-account", profile_id: "member-1", account_code: "IHP123456789", balance: 250, status: "active" }], profiles: members,
+      accounts: [
+        { id: "admin-test-account", profile_id: "member-1", account_code: "IHP123456789", balance: 250, status: "active" },
+        ...(profile.roles.includes("credit_officer") ? [{ id: "credit-officer-own", profile_id: profile.id, account_code: "IHP555666777", balance: 300, status: "active" }] : [])
+      ], profiles: [...members, profile],
       loans: profile.roles.includes("credit_officer") ? [{ id: "loan-pending", account_id: "admin-test-account", principal: 500, total_due: 550, term_days: 30, installment_count: 2, status: "pending" }] : [],
       installments: [], transactions: [
         { id: "tx-in", account_id: "admin-test-account", kind: "transfer_in", amount: 100, balance_after: 250, created_at: "2026-06-20T12:00:00.000Z", metadata: {} },
@@ -279,6 +300,13 @@ try {
   assert.equal(await adminPage.locator('[data-action="open-credit-adjustment"]').isVisible(), true, "admin should see balance adjustment action");
   await adminPage.locator('[data-action="open-credit-adjustment"]').click();
   assert.equal(await adminPage.locator("#credit-adjust-amount").isVisible(), true, "admin balance adjustment modal should open");
+  assert.equal(await adminPage.locator("#credit-adjust-amount").getAttribute("max"), null, "credit balance adjustment must not have the old hard cap");
+  await adminPage.keyboard.press("Escape");
+  await adminPage.evaluate(() => { location.hash = "#/portal/presidency"; });
+  await adminPage.waitForSelector(".hierarchy-list");
+  await adminPage.locator('[data-action="edit-member"]').first().click();
+  assert.equal(await adminPage.locator("#member-discipline-points").isVisible(), true, "admin should directly edit member discipline points");
+  assert.equal(await adminPage.locator("#member-discipline-points").inputValue(), "100");
   await adminPage.keyboard.press("Escape");
   await adminContext.close();
 
@@ -290,6 +318,8 @@ try {
   assert.equal(await creditOfficerPage.getByText("Kredi Yönetimi", { exact: true }).first().isVisible(), true, "credit officer should see separate management menu");
   assert.equal(await creditOfficerPage.locator(".credit-settings-panel").count(), 0, "credit officer must not change Admin economy settings");
   assert.equal(await creditOfficerPage.locator('[data-action="open-credit-adjustment"]').isVisible(), true, "credit officer should manage balances");
+  assert.equal(await creditOfficerPage.locator('[data-action="open-credit-adjustment"][data-id="credit-officer-own"]').count(), 0, "credit officer must not adjust their own account");
+  assert.equal(await creditOfficerPage.getByText("Kendi hesabın", { exact: true }).isVisible(), true, "own officer account should be visibly locked");
   assert.equal(await creditOfficerPage.getByRole("button", { name: "Onayla" }).first().isVisible(), true, "credit officer should review credit applications");
   await creditOfficerContext.close();
 
@@ -303,6 +333,11 @@ try {
   const fundedCreditPage = await fundedCreditContext.newPage();
   await openPortal(fundedCreditPage, { ...baseProfile, id: "funded-credit", email: "funded@example.test" }, "credit");
   assert.equal(await fundedCreditPage.getByText("İHP Snake", { exact: true }).isVisible(), true, "pending game charge must appear in credit center");
+  await fundedCreditPage.locator('[data-action="approve-game-charge"]').click();
+  await fundedCreditPage.waitForSelector(".arcade-grid");
+  assert.equal(await fundedCreditPage.locator('[data-action="start-approved-snake"]').isVisible(), true, "approved credit charge must immediately activate the game");
+  await fundedCreditPage.evaluate(() => { location.hash = "#/portal/credit"; });
+  await fundedCreditPage.waitForSelector(".credit-balance-stage");
   await fundedCreditPage.getByText("Kredi transferi", { exact: true }).click();
   await fundedCreditPage.locator("[data-credit-recipient]").fill("IHP999888777");
   await fundedCreditPage.locator("[data-credit-transfer-amount]").fill("100");
@@ -316,6 +351,15 @@ try {
   const chequeDownload = fundedCreditPage.waitForEvent("download");
   await fundedCreditPage.locator('[data-action="download-credit-cheque"]').click();
   assert.match((await chequeDownload).suggestedFilename(), /^IHP-Kredi-Ceki-1234\.pdf$/);
+  await fundedCreditPage.keyboard.press("Escape");
+  await fundedCreditPage.locator('[data-action="open-credit-account-close"]').click();
+  const closeCreditButton = fundedCreditPage.locator('[data-action="confirm-credit-account-close"]');
+  assert.equal(await closeCreditButton.isDisabled(), true, "credit account closure must require explicit consent");
+  await fundedCreditPage.locator("[data-credit-close-consent]").check();
+  await fundedCreditPage.locator("[data-credit-close-text]").fill("KREDİ HESABIMI SİL");
+  assert.equal(await closeCreditButton.isEnabled(), true, "credit account closure must require the exact phrase");
+  await closeCreditButton.click();
+  await fundedCreditPage.waitForSelector(".credit-onboarding-layout");
   await fundedCreditContext.close();
 
   const disciplineContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

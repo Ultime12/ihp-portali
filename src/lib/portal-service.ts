@@ -160,9 +160,9 @@ export async function manageMember(payload: Record<string, any>) {
 }
 
 export async function deleteOwnAccount(payload: Record<string, any>) {
-  return serverRequest("/api/delete-account", {
+  return serverRequest("/api/manage-member", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ module: "account", action: "self_delete", ...payload })
   });
 }
 

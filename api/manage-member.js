@@ -43,6 +43,8 @@ const DISPLAY_NAME_PATTERN = /^[\p{L}][\p{L} .'-]{1,47}$/u;
 const INITIALS_PATTERN = /^[\p{L}0-9]{1,4}$/u;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DISCIPLINE_POINT_MIN = 0;
+const DISCIPLINE_POINT_MAX = 200;
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -76,7 +78,7 @@ async function authenticateActor(request) {
 
   const authUser = await authResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,role,roles,status,is_system_account&limit=1`
   );
   const [profile] = await profileResponse.json();
   if (!profile || profile.status !== "active") return null;
@@ -94,7 +96,7 @@ function isTechnicalSuperAdminRoles(roles) {
 
 async function getProfileById(id) {
   const response = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,display_name,email,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(id)}&select=id,display_name,email,role,roles,status,discipline_points&limit=1`
   );
   const [profile] = await response.json().catch(() => []);
   return profile || null;
@@ -136,6 +138,13 @@ function cleanProfilePayload(body, actorRoles) {
   if (body.avatarInitials && !INITIALS_PATTERN.test(body.avatarInitials)) return null;
   if (body.avatarColor && !COLOR_PATTERN.test(body.avatarColor)) return null;
   if (body.avatarUrl && String(body.avatarUrl).length > 500000) return null;
+  const disciplinePoints = Number(body.disciplinePoints);
+  if (
+    !isTechnicalSuperAdminRoles(actorRoles) ||
+    !Number.isInteger(disciplinePoints) ||
+    disciplinePoints < DISCIPLINE_POINT_MIN ||
+    disciplinePoints > DISCIPLINE_POINT_MAX
+  ) return null;
 
   return {
     display_name: body.displayName,
@@ -144,7 +153,8 @@ function cleanProfilePayload(body, actorRoles) {
     status: body.status || "active",
     avatar_initials: body.avatarInitials || null,
     avatar_color: body.avatarColor || "#f3c969",
-    avatar_url: body.avatarUrl || null
+    avatar_url: body.avatarUrl || null,
+    discipline_points: disciplinePoints
   };
 }
 
@@ -327,9 +337,27 @@ export default async function handler(request, response) {
   }
 
   const { action, id, password } = request.body || {};
-  if (!id || !action) return json(response, 400, { error: "Eksik uye islemi." });
-
+  if (!action) return json(response, 400, { error: "Eksik uye islemi." });
   const actor = await authenticateActor(request);
+  if (request.body?.module === "account" && action === "self_delete") {
+    if (!actor) return json(response, 401, { error: "Oturum gecersiz veya sona ermis." });
+    if (actor.profile.is_system_account) return json(response, 403, { error: "Sistem hesaplari bu ekrandan silinemez." });
+    if (request.body?.acceptDataLoss !== true || String(request.body?.confirmation || "").trim() !== "HESABIMI SİL") {
+      return json(response, 400, { error: "Hesap silme metnini okuyup tam olarak onaylamalisiniz." });
+    }
+    const deleteResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(actor.authUser.id)}`, {
+      method: "DELETE"
+    });
+    if (!deleteResponse.ok) {
+      const result = await deleteResponse.json().catch(() => ({}));
+      return json(response, deleteResponse.status, {
+        error: result.msg || result.message || "Hesap silinemedi. Lutfen tekrar deneyin."
+      });
+    }
+    return json(response, 200, { ok: true });
+  }
+  if (!id) return json(response, 400, { error: "Eksik uye islemi." });
+
   const isFullManager = actor && isTechnicalSuperAdminRoles(actor.roles);
   const actionAllowed = ["set_discipline_role", "remove_discipline_role"].includes(action)
     ? actor && hasAny(actor.roles, DISCIPLINE_ROLE_MANAGERS)
@@ -530,7 +558,9 @@ export default async function handler(request, response) {
 
   await insertAudit(actor.authUser.id, id, "Üye profili ve rolleri güncellendi", {
     old_roles: rolesOf(beforeProfile),
-    new_roles: payload.roles
+    new_roles: payload.roles,
+    old_discipline_points: beforeProfile.discipline_points,
+    new_discipline_points: payload.discipline_points
   });
 
   await emailProfile(supabaseRequest, id, {

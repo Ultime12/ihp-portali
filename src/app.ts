@@ -2669,6 +2669,7 @@ function openMemberEditor(member) {
                 <div class="form-group"><label for="avatar-initials">Avatar kısaltması</label><input class="field" id="avatar-initials" name="avatarInitials" value="${esc(member.avatar_initials || "")}" placeholder="TMK" maxlength="4" /></div>
                 <div class="form-group"><label for="avatar-color">Avatar rengi</label><input class="field" id="avatar-color" name="avatarColor" type="color" value="${esc(member.avatar_color || "#f3c969")}" /></div>
               </div>
+              <div class="form-group"><label for="member-discipline-points">Disiplin puanı</label><input class="field" id="member-discipline-points" name="disciplinePoints" type="number" min="0" max="200" step="1" value="${disciplinePoints(member)}" required /><p class="security-note">Admin, üyenin disiplin puanını 0 ile 200 arasında doğrudan düzeltebilir.</p></div>
               <div class="form-group"><label for="avatar-file">Profil fotoğrafı yükle</label><input class="field" id="avatar-file" type="file" accept="image/*" data-avatar-upload data-avatar-target="member-avatar-url" /><input id="member-avatar-url" name="avatarUrl" type="hidden" value="${esc(member.avatar_url || "")}" /></div>
               <div class="form-group"><label for="member-password">Yeni şifre (boş bırakılırsa değişmez)</label><input class="field" id="member-password" name="password" type="text" minlength="8" autocomplete="off" /></div>`
             : ""

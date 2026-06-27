@@ -65,7 +65,7 @@ async function statusFor(member) {
   const [attemptsResponse, accountResponse, requestResponse] = await Promise.all([
     supabaseRequest(`/rest/v1/game_attempts?profile_id=eq.${encodeURIComponent(member.profile.id)}&select=*&order=created_at.desc&limit=12`),
     supabaseRequest(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(member.profile.id)}&status=eq.active&select=id,account_code,balance,status&limit=1`),
-    supabaseRequest(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(member.profile.id)}&status=in.(pending,approved)&select=*&order=requested_at.desc&limit=3`)
+    supabaseRequest(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(member.profile.id)}&status=in.(pending,approved)&select=*&order=requested_at.desc&limit=10`)
   ]);
   const attempts = await attemptsResponse.json().catch(() => []);
   const [creditAccount] = await accountResponse.json().catch(() => []);

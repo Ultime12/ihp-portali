@@ -6,6 +6,7 @@ const ROLE_KEYS = new Set([
   "discipline_chair", "discipline_vice_chair", "discipline_member", "youth_chair",
   "youth_member", "chief_representative", "representative", "member"
 ]);
+const MAX_SAFE_CREDIT = Number.MAX_SAFE_INTEGER;
 
 function json(response, status, body) {
   response.setHeader("Cache-Control", "no-store");
@@ -83,15 +84,16 @@ async function adminStatus() {
 async function memberStatus(profileId) {
   const [settingsRows, accountRows, gameRequests] = await Promise.all([
     rows("/rest/v1/credit_settings?id=eq.main&select=member_access_enabled,transfer_tax_basis_points,loan_interest_basis_points,max_loan_amount,max_term_days,grace_days&limit=1", "Kredi ayarlari alinamadi."),
-    rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&select=*&limit=1`, "Kredi hesabi alinamadi."),
+    rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=*&limit=1`, "Kredi hesabi alinamadi."),
     rows(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(profileId)}&select=*&order=requested_at.desc&limit=20`, "Oyun kredi talepleri alinamadi.")
   ]);
   const account = accountRows[0] || null;
   if (!account) return { settings: settingsRows[0] || null, account: null, transactions: [], cheques: [], loans: [], installments: [], gameRequests };
+  const openedAt = encodeURIComponent(account.opened_at);
   const [transactions, cheques, loans] = await Promise.all([
-    rows(`/rest/v1/credit_transactions?account_id=eq.${encodeURIComponent(account.id)}&select=*&order=created_at.desc&limit=100`, "Hesap hareketleri alinamadi."),
-    rows(`/rest/v1/credit_cheques?or=(issuer_account_id.eq.${account.id},redeemed_by_account_id.eq.${account.id})&select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=50`, "Cekler alinamadi."),
-    rows(`/rest/v1/credit_loans?account_id=eq.${encodeURIComponent(account.id)}&select=*&order=requested_at.desc&limit=50`, "Kredi basvurulari alinamadi.")
+    rows(`/rest/v1/credit_transactions?account_id=eq.${encodeURIComponent(account.id)}&created_at=gte.${openedAt}&select=*&order=created_at.desc&limit=100`, "Hesap hareketleri alinamadi."),
+    rows(`/rest/v1/credit_cheques?or=(issuer_account_id.eq.${account.id},redeemed_by_account_id.eq.${account.id})&issued_at=gte.${openedAt}&select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=50`, "Cekler alinamadi."),
+    rows(`/rest/v1/credit_loans?account_id=eq.${encodeURIComponent(account.id)}&requested_at=gte.${openedAt}&select=*&order=requested_at.desc&limit=50`, "Kredi basvurulari alinamadi.")
   ]);
   const loanIds = loans.map((loan) => loan.id);
   const installments = loanIds.length
@@ -221,15 +223,24 @@ export default async function handler(request, response) {
 
     if (action === "adjust_balance") {
       if (!actor.isCreditManager) return json(response, 403, { error: "Kredi yonetimi yetkisi gerekir." });
-      const amount = boundedInteger(request.body?.amount, 1, 1_000_000);
+      const amount = boundedInteger(request.body?.amount, 1, MAX_SAFE_CREDIT);
       const direction = String(request.body?.direction || "");
       const reason = String(request.body?.reason || "").trim();
       if (amount === null || !["credit", "debit"].includes(direction) || reason.length < 5 || reason.length > 300) {
         return json(response, 400, { error: "Bakiye islemi bilgileri gecersiz." });
       }
+      const accountId = String(request.body?.accountId || "");
+      const targetRows = await rows(
+        `/rest/v1/credit_accounts?id=eq.${encodeURIComponent(accountId)}&status=eq.active&select=id,profile_id&limit=1`,
+        "Kredi hesabi alinamadi."
+      );
+      if (!targetRows[0]) return json(response, 404, { error: "Aktif kredi hesabi bulunamadi." });
+      if (!actor.isAdmin && targetRows[0].profile_id === actor.profile.id) {
+        return json(response, 403, { error: "Kredi Isleri Sorumlusu kendi bakiyesini duzenleyemez." });
+      }
       await rpc("admin_adjust_credit_balance", {
         p_admin_profile_id: actor.profile.id,
-        p_account_id: String(request.body?.accountId || ""),
+        p_account_id: accountId,
         p_delta: direction === "credit" ? amount : -amount,
         p_reason: reason
       });
@@ -254,6 +265,12 @@ export default async function handler(request, response) {
       return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
     }
     if (action === "close_account") {
+      if (
+        request.body?.acceptDataLoss !== true ||
+        String(request.body?.confirmation || "").trim() !== "KREDİ HESABIMI SİL"
+      ) {
+        return json(response, 400, { error: "Kredi hesabi kapatma metnini tam olarak onaylamalisiniz." });
+      }
       const result = await rpc("close_credit_account", { p_profile_id: actor.profile.id });
       return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
     }

@@ -680,6 +680,12 @@ body.modal-open { overflow: hidden; }
 .credit-identity-grid .field[readonly] { background: rgba(5, 20, 43, .22); color: var(--text-soft); cursor: default; }
 .credit-opening-consent { align-items: start; background: rgba(85, 157, 242, .08); border: 1px solid rgba(145, 195, 255, .13); border-radius: 16px; cursor: pointer; display: grid !important; font-size: .76rem !important; grid-template-columns: auto 1fr; line-height: 1.55; padding: .85rem; }
 .credit-opening-consent input { accent-color: var(--accent); margin-top: .18rem; }
+.credit-account-danger { align-items: center; border-color: rgba(255, 91, 108, .2); display: flex; gap: 1rem; justify-content: space-between; margin-top: 1rem; }
+.credit-account-danger h3 { margin: .25rem 0; }
+.credit-account-danger p { color: var(--text-soft); line-height: 1.55; margin: 0; max-width: 760px; }
+.danger-confirmation { background: rgba(220, 65, 80, .09); border: 1px solid rgba(231, 82, 96, .22); border-radius: 18px; padding: 1rem; }
+.danger-confirmation strong { color: #ff929d; }
+.danger-confirmation p { color: var(--muted-strong); line-height: 1.55; margin: .45rem 0 0; }
 .credit-opening-summary { align-content: start; display: grid; gap: 1rem; overflow: hidden; position: relative; }
 .credit-opening-summary::after { background: var(--accent); border-radius: 999px; content: ""; filter: blur(70px); height: 160px; opacity: .13; position: absolute; right: -70px; top: -70px; width: 160px; }
 .credit-opening-summary p { color: var(--text-soft); line-height: 1.65; }
@@ -767,7 +773,7 @@ body.modal-open { overflow: hidden; }
   .credit-balance-stage { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .account-danger-zone { align-items: flex-start; flex-direction: column; }
+  .account-danger-zone, .credit-account-danger { align-items: flex-start; flex-direction: column; }
   .arcade-grid, .game-admin-grid, .credit-settings-grid, .credit-dashboard-grid, .credit-member-grid { grid-template-columns: 1fr; }
   .credit-installment-list > div { grid-template-columns: 1fr; }
   .credit-identity-grid { grid-template-columns: 1fr; }

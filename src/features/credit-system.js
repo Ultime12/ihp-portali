@@ -214,6 +214,10 @@ function creditMemberPage() {
     <section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Hesap defteri</span><h3>Son hareketler</h3></div>${badge(`${(data.transactions || []).length} kayıt`, "blue")}</div>
       ${(data.transactions || []).length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.map((item) => `<tr><td>${formatDate(item.created_at, true)}</td><td>${creditTransactionKindMarkup(item)}</td><td>${creditTransactionAmountMarkup(item)}</td><td>${creditAmount(item.balance_after)}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Henüz hareket yok", "Kredi işlemleri burada listelenecek.")}
     </section>
+    <section class="panel glass credit-account-danger">
+      <div><span class="panel-kicker">Hesap yönetimi</span><h3>Kredi hesabını kapat</h3><p>Kapatma sonunda kullanılabilir bakiyeniz sıfırlanır. Açık kredi borcu, devam eden oyun veya kullanılmamış çek varken hesap kapatılamaz.</p></div>
+      <button class="btn btn-danger btn-sm" type="button" data-action="open-credit-account-close">Hesabı kapat</button>
+    </section>
   `;
 }
 
@@ -268,7 +272,11 @@ function creditAccountsPanel(data) {
   return `
     <section class="panel glass credit-account-admin-panel">
       <div class="panel-head"><div><span class="panel-kicker">Kredi Yönetimi bakiye merkezi</span><h3>Hesaplara kredi ekle veya çek</h3></div>${badge(`${accounts.length} aktif hesap`, "blue")}</div>
-      ${accounts.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Hesap sahibi</th><th>Hesap kodu</th><th>Bakiye</th><th>İşlem</th></tr></thead><tbody>${accounts.map((account) => { const member = profiles.get(account.profile_id); return `<tr><td><strong>${esc(member?.display_name || "Bilinmeyen hesap")}</strong><small class="table-subtitle">${esc(member?.email || "")}</small></td><td><code>${esc(account.account_code)}</code></td><td><strong>${creditAmount(account.balance)}</strong></td><td><button class="table-action" type="button" data-action="open-credit-adjustment" data-id="${esc(account.id)}" data-name="${esc(member?.display_name || account.account_code)}" data-balance="${Number(account.balance || 0)}">Bakiye düzenle</button></td></tr>`; }).join("")}</tbody></table></div>` : emptyCard("Henüz açılmış hesap yok", "Kullanıcılar bilgilerini onaylayıp hesap açtığında burada görünür.")}
+      ${accounts.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Hesap sahibi</th><th>Hesap kodu</th><th>Bakiye</th><th>İşlem</th></tr></thead><tbody>${accounts.map((account) => {
+        const member = profiles.get(account.profile_id);
+        const ownOfficerAccount = !hasRole("super_admin") && account.profile_id === state.profile?.id;
+        return `<tr><td><strong>${esc(member?.display_name || "Bilinmeyen hesap")}</strong><small class="table-subtitle">${esc(member?.email || "")}</small></td><td><code>${esc(account.account_code)}</code></td><td><strong>${creditAmount(account.balance)}</strong></td><td>${ownOfficerAccount ? badge("Kendi hesabın", "gray") : `<button class="table-action" type="button" data-action="open-credit-adjustment" data-id="${esc(account.id)}" data-name="${esc(member?.display_name || account.account_code)}" data-balance="${Number(account.balance || 0)}">Bakiye düzenle</button>`}</td></tr>`;
+      }).join("")}</tbody></table></div>` : emptyCard("Henüz açılmış hesap yok", "Kullanıcılar bilgilerini onaylayıp hesap açtığında burada görünür.")}
     </section>
   `;
 }
@@ -277,8 +285,24 @@ function openCreditAdjustment(accountId, memberName, balance) {
   modal({
     title: `${memberName} bakiyesini düzenle`,
     subtitle: `Güncel bakiye: ${creditAmount(balance)}. Her işlem hesap defterine ve üyenin bildirimlerine kaydedilir.`,
-    body: `<div class="form-grid"><div class="form-group"><label for="credit-adjust-direction">İşlem</label><select class="field" id="credit-adjust-direction"><option value="credit">Kredi ekle</option><option value="debit">Kredi çek</option></select></div><div class="form-group"><label for="credit-adjust-amount">Tutar</label><input class="field" id="credit-adjust-amount" type="number" min="1" max="1000000" placeholder="100" /></div></div><div class="form-group"><label for="credit-adjust-reason">Gerekçe</label><textarea class="field textarea" id="credit-adjust-reason" minlength="5" maxlength="300" placeholder="Bakiye değişikliğinin gerekçesini yazın"></textarea></div>`,
+    body: `<div class="form-grid"><div class="form-group"><label for="credit-adjust-direction">İşlem</label><select class="field" id="credit-adjust-direction"><option value="credit">Kredi ekle</option><option value="debit">Kredi çek</option></select></div><div class="form-group"><label for="credit-adjust-amount">Tutar</label><input class="field" id="credit-adjust-amount" type="number" min="1" step="1" placeholder="100" /></div></div><div class="form-group"><label for="credit-adjust-reason">Gerekçe</label><textarea class="field textarea" id="credit-adjust-reason" minlength="5" maxlength="300" placeholder="Bakiye değişikliğinin gerekçesini yazın"></textarea></div>`,
     actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="button" data-action="confirm-credit-adjustment" data-id="${esc(accountId)}">Bakiyeyi güncelle</button></div>`
+  });
+}
+
+function openCreditAccountClose() {
+  modal({
+    title: "Kredi hesabını kapat",
+    subtitle: "Bu işlem hesabı kapatır ve kullanılabilir bakiyeyi kalıcı olarak sıfırlar.",
+    body: `
+      <div class="danger-confirmation">
+        <strong>Geri alınamaz işlem</strong>
+        <p>Hesabımdaki bütün kullanılabilir kredilerin kaybolacağını ve yeniden hesap açarsam sıfır bakiyeyle başlayacağımı anladım.</p>
+      </div>
+      <label class="credit-opening-consent"><input type="checkbox" data-credit-close-consent /><span>Yukarıdaki sonuçları okudum ve kabul ediyorum.</span></label>
+      <div class="form-group"><label for="credit-close-confirmation">Onaylamak için <strong>KREDİ HESABIMI SİL</strong> yazın</label><input class="field" id="credit-close-confirmation" autocomplete="off" data-credit-close-text /></div>
+    `,
+    actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-danger btn-sm" type="button" data-action="confirm-credit-account-close" disabled>Kredi hesabını kapat</button></div>`
   });
 }
 
@@ -404,6 +428,32 @@ handleClick = async function creditHandleClick(event) {
         approve: action === "approve-game-charge"
       });
       showToast(action === "approve-game-charge" ? "Oyun kredisi onaylandı." : "Oyun kredi talebi reddedildi.", "success");
+      if (action === "approve-game-charge") {
+        state.cache.gameCenter = null;
+        navigate("portal/games");
+      } else {
+        render();
+      }
+    } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
+  if (action === "open-credit-account-close") {
+    event.preventDefault();
+    openCreditAccountClose();
+    return;
+  }
+  if (action === "confirm-credit-account-close") {
+    event.preventDefault(); target.disabled = true;
+    try {
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
+        module: "credit",
+        action: "close_account",
+        acceptDataLoss: Boolean(modalRoot.querySelector("[data-credit-close-consent]")?.checked),
+        confirmation: modalRoot.querySelector("[data-credit-close-text]")?.value || ""
+      });
+      state.cache.gameCenter = null;
+      closeModal();
+      showToast("Kredi hesabınız kapatıldı ve bakiyeniz sıfırlandı.", "success");
       render();
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;
@@ -517,6 +567,13 @@ handleClick = async function creditHandleClick(event) {
 
 const creditBaseHandleFilter = handleFilter;
 handleFilter = async function creditHandleFilter(event) {
+  if (event.target.matches("[data-credit-close-consent], [data-credit-close-text]")) {
+    const accepted = Boolean(modalRoot.querySelector("[data-credit-close-consent]")?.checked);
+    const confirmation = modalRoot.querySelector("[data-credit-close-text]")?.value.trim() || "";
+    const button = modalRoot.querySelector('[data-action="confirm-credit-account-close"]');
+    if (button) button.disabled = !(accepted && confirmation === "KREDİ HESABIMI SİL");
+    return;
+  }
   if (event.target.matches("[data-credit-open-purpose], [data-credit-open-consent]")) {
     const purpose = document.querySelector("[data-credit-open-purpose]")?.value || "";
     const accepted = Boolean(document.querySelector("[data-credit-open-consent]")?.checked);
