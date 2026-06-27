@@ -69,37 +69,48 @@ async function rows(path, errorMessage) {
 }
 
 async function adminStatus() {
-  const [settingsRows, accounts, profiles, loans, installments, transactions, cheques] = await Promise.all([
+  const [settingsRows, accounts, profiles, loans, installments, transactions, cheques, scheduledTransfers] = await Promise.all([
     rows("/rest/v1/credit_settings?id=eq.main&select=*&limit=1", "Kredi ayarlari alinamadi."),
     rows("/rest/v1/credit_accounts?select=*&order=opened_at.desc", "Kredi hesaplari alinamadi."),
     rows("/rest/v1/profiles?is_system_account=eq.false&select=id,display_name,email,member_code,status,role,roles&order=display_name.asc", "Uyeler alinamadi."),
     rows("/rest/v1/credit_loans?select=*&order=requested_at.desc&limit=150", "Kredi basvurulari alinamadi."),
     rows("/rest/v1/credit_installments?select=*&order=due_at.asc&limit=300", "Taksitler alinamadi."),
     rows("/rest/v1/credit_transactions?select=*&order=created_at.desc&limit=250", "Islem kayitlari alinamadi."),
-    rows("/rest/v1/credit_cheques?select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=150", "Cekler alinamadi.")
+    rows("/rest/v1/credit_cheques?select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=150", "Cekler alinamadi."),
+    rows("/rest/v1/credit_scheduled_transfers?select=*&order=created_at.desc&limit=150", "Planli transferler alinamadi.")
   ]);
-  return { settings: settingsRows[0] || null, accounts, profiles, loans, installments, transactions, cheques };
+  return { settings: settingsRows[0] || null, accounts, profiles, loans, installments, transactions, cheques, scheduledTransfers };
 }
 
 async function memberStatus(profileId) {
   const [settingsRows, accountRows, gameRequests] = await Promise.all([
-    rows("/rest/v1/credit_settings?id=eq.main&select=member_access_enabled,transfer_tax_basis_points,loan_interest_basis_points,max_loan_amount,max_term_days,grace_days&limit=1", "Kredi ayarlari alinamadi."),
+    rows("/rest/v1/credit_settings?id=eq.main&select=member_access_enabled,weekly_allowance_enabled,weekly_allowance_next_at,weekly_allowance_last_at,transfer_tax_basis_points,loan_interest_basis_points,max_loan_amount,max_term_days,grace_days&limit=1", "Kredi ayarlari alinamadi."),
     rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=*&limit=1`, "Kredi hesabi alinamadi."),
     rows(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(profileId)}&select=*&order=requested_at.desc&limit=20`, "Oyun kredi talepleri alinamadi.")
   ]);
   const account = accountRows[0] || null;
-  if (!account) return { settings: settingsRows[0] || null, account: null, transactions: [], cheques: [], loans: [], installments: [], gameRequests };
+  if (!account) return { settings: settingsRows[0] || null, account: null, transactions: [], cheques: [], loans: [], installments: [], scheduledTransfers: [], gameRequests };
   const openedAt = encodeURIComponent(account.opened_at);
-  const [transactions, cheques, loans] = await Promise.all([
+  const [transactions, cheques, loans, scheduledTransfers] = await Promise.all([
     rows(`/rest/v1/credit_transactions?account_id=eq.${encodeURIComponent(account.id)}&created_at=gte.${openedAt}&select=*&order=created_at.desc&limit=100`, "Hesap hareketleri alinamadi."),
     rows(`/rest/v1/credit_cheques?or=(issuer_account_id.eq.${account.id},redeemed_by_account_id.eq.${account.id})&issued_at=gte.${openedAt}&select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=50`, "Cekler alinamadi."),
-    rows(`/rest/v1/credit_loans?account_id=eq.${encodeURIComponent(account.id)}&requested_at=gte.${openedAt}&select=*&order=requested_at.desc&limit=50`, "Kredi basvurulari alinamadi.")
+    rows(`/rest/v1/credit_loans?account_id=eq.${encodeURIComponent(account.id)}&requested_at=gte.${openedAt}&select=*&order=requested_at.desc&limit=50`, "Kredi basvurulari alinamadi."),
+    rows(`/rest/v1/credit_scheduled_transfers?sender_account_id=eq.${encodeURIComponent(account.id)}&select=*&order=created_at.desc&limit=50`, "Planli transferler alinamadi.")
   ]);
+  const recipientIds = [...new Set(scheduledTransfers.map((item) => item.recipient_account_id).filter(Boolean))];
+  const recipientAccounts = recipientIds.length
+    ? await rows(`/rest/v1/credit_accounts?id=in.(${recipientIds.join(",")})&select=id,account_code`, "Alici hesaplari alinamadi.")
+    : [];
+  const recipientCodeById = new Map(recipientAccounts.map((item) => [item.id, item.account_code]));
+  const enrichedScheduledTransfers = scheduledTransfers.map((item) => ({
+    ...item,
+    recipient_account_code: recipientCodeById.get(item.recipient_account_id) || "Bilinmeyen hesap"
+  }));
   const loanIds = loans.map((loan) => loan.id);
   const installments = loanIds.length
     ? await rows(`/rest/v1/credit_installments?loan_id=in.(${loanIds.join(",")})&select=*&order=due_at.asc`, "Taksitler alinamadi.")
     : [];
-  return { settings: settingsRows[0] || null, account, transactions, cheques, loans, installments, gameRequests };
+  return { settings: settingsRows[0] || null, account, transactions, cheques, loans, installments, scheduledTransfers: enrichedScheduledTransfers, gameRequests };
 }
 
 function boundedInteger(value, minimum, maximum) {
@@ -180,8 +191,13 @@ export default async function handler(request, response) {
       const maxTerm = boundedInteger(request.body?.maxTermDays, 1, 30);
       const grace = boundedInteger(request.body?.graceDays, 0, 7);
       const allowances = request.body?.roleAllowances || {};
+      const weeklyEnabled = Boolean(request.body?.weeklyAllowanceEnabled);
+      const weeklyNext = request.body?.weeklyAllowanceNextAt ? new Date(request.body.weeklyAllowanceNextAt) : null;
       if ([transferTax, interest, maxLoan, maxTerm, grace].includes(null) || typeof allowances !== "object") {
         return json(response, 400, { error: "Kredi ayarlari gecersiz." });
+      }
+      if (weeklyEnabled && (!weeklyNext || Number.isNaN(weeklyNext.getTime()) || weeklyNext.getTime() < Date.now() + 30_000)) {
+        return json(response, 400, { error: "Ilk veya sonraki haftalik odeme zamani gelecekte olmalidir." });
       }
       const roleAllowances = {};
       for (const role of ROLE_KEYS) {
@@ -194,7 +210,8 @@ export default async function handler(request, response) {
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({
           member_access_enabled: true,
-          weekly_allowance_enabled: Boolean(request.body?.weeklyAllowanceEnabled),
+          weekly_allowance_enabled: weeklyEnabled,
+          weekly_allowance_next_at: weeklyNext ? weeklyNext.toISOString() : null,
           transfer_tax_basis_points: transferTax,
           loan_interest_basis_points: interest,
           max_loan_amount: maxLoan,
@@ -286,7 +303,27 @@ export default async function handler(request, response) {
       const result = await rpc("credit_transfer", {
         p_profile_id: actor.profile.id,
         p_recipient_code: String(request.body?.recipientCode || ""),
-        p_amount: Number(request.body?.amount)
+        p_amount: Number(request.body?.amount),
+        p_description: String(request.body?.description || "").trim().slice(0, 160)
+      });
+      return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
+    }
+    if (action === "schedule_transfer") {
+      const scheduledFor = new Date(request.body?.scheduledFor || "");
+      if (Number.isNaN(scheduledFor.getTime())) return json(response, 400, { error: "Planli transfer zamani gecersiz." });
+      const result = await rpc("schedule_credit_transfer", {
+        p_profile_id: actor.profile.id,
+        p_recipient_code: String(request.body?.recipientCode || ""),
+        p_amount: Number(request.body?.amount),
+        p_description: String(request.body?.description || "").trim().slice(0, 160),
+        p_scheduled_for: scheduledFor.toISOString()
+      });
+      return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
+    }
+    if (action === "cancel_scheduled_transfer") {
+      const result = await rpc("cancel_scheduled_credit_transfer", {
+        p_profile_id: actor.profile.id,
+        p_transfer_id: String(request.body?.transferId || "")
       });
       return json(response, 200, { result, ...(await memberStatus(actor.profile.id)) });
     }

@@ -51,10 +51,27 @@ function creditAmount(value) {
   return `${Number(value || 0).toLocaleString("tr-TR")} kredi`;
 }
 
+function creditDateTimeLocalValue(value = new Date(Date.now() + 60 * 60 * 1000)) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function creditScheduledTransferStatus(status) {
+  return ({
+    scheduled: "Bekliyor",
+    completed: "Gönderildi",
+    cancelled: "İptal edildi",
+    failed: "Teslim edilemedi"
+  })[status] || status;
+}
+
 function creditTransactionLabel(kind) {
   return ({
     account_opened: "Hesap açıldı",
     transfer_out: "Giden transfer", transfer_in: "Gelen transfer", transfer_tax: "Transfer vergisi",
+    transfer_reserve: "Planlı transfer rezervasyonu", transfer_refund: "Planlı transfer iadesi",
     weekly_allowance: "Haftalık ödeme", cheque_issue: "Çek oluşturuldu", cheque_redeem: "Çek bozduruldu",
     loan_disbursement: "Kredi kullandırıldı", loan_repayment: "Kredi ödemesi",
     balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Yetkili düzeltmesi",
@@ -66,8 +83,8 @@ function creditTransactionDirection(item = {}) {
   if (item.kind === "admin_adjustment") {
     return item.metadata?.direction === "credit" ? "incoming" : "outgoing";
   }
-  if (["transfer_in", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward"].includes(item.kind)) return "incoming";
-  if (["transfer_out", "transfer_tax", "cheque_issue", "loan_repayment", "balance_forfeit", "game_entry"].includes(item.kind)) return "outgoing";
+  if (["transfer_in", "transfer_refund", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward"].includes(item.kind)) return "incoming";
+  if (["transfer_out", "transfer_tax", "transfer_reserve", "cheque_issue", "loan_repayment", "balance_forfeit", "game_entry"].includes(item.kind)) return "outgoing";
   return "neutral";
 }
 
@@ -94,10 +111,11 @@ function creditSettingsForm(settings) {
         <label>En uzun vade (gün)<input class="field" data-credit-max-term type="number" min="1" max="30" value="${Number(settings.max_term_days || 30)}" /></label>
         <label>Ek ödeme süresi (gün)<input class="field" data-credit-grace type="number" min="0" max="7" value="${Number(settings.grace_days ?? 1)}" /></label>
         <label class="switch-row"><span>Haftalık rütbe ödemesi</span><input type="checkbox" data-credit-weekly ${settings.weekly_allowance_enabled ? "checked" : ""} /></label>
+        <label>İlk / sonraki ödeme zamanı<input class="field" data-credit-weekly-next type="datetime-local" min="${creditDateTimeLocalValue(new Date(Date.now() + 60_000))}" value="${creditDateTimeLocalValue(settings.weekly_allowance_next_at || new Date(Date.now() + 24 * 60 * 60 * 1000))}" ${settings.weekly_allowance_enabled ? "" : "disabled"} /></label>
       </div>
       <details class="credit-allowance-details"><summary>Rütbeye göre haftalık kredi</summary><div class="credit-allowance-grid">${ROLE_OPTIONS.map(([role, label]) => `<label>${esc(label)}<input class="field" data-credit-allowance="${role}" type="number" min="0" max="1000000" value="${Number(allowances[role] || 0)}" /></label>`).join("")}</div></details>
       <div class="panel-actions"><button class="btn btn-primary btn-sm" type="button" data-action="save-credit-settings">Kredi ayarlarını kaydet</button></div>
-      <p class="credit-safety-note">Üyeler hesap açılış sözleşmesini onayladıktan sonra kişisel hesap numarası oluşturabilir.</p>
+      <p class="credit-safety-note">Son ödeme: <strong>${settings.weekly_allowance_last_at ? formatDate(settings.weekly_allowance_last_at, true) : "Henüz yapılmadı"}</strong>. Etkin olduğunda sistem seçilen zamandan başlayarak her 7 günde bir ödeme yapar.</p>
     </section>
   `;
 }
@@ -157,6 +175,8 @@ function creditMemberPage() {
   const pendingLoan = (data.loans || []).find((item) => item.status === "pending");
   const activeLoan = (data.loans || []).find((item) => ["approved", "delinquent"].includes(item.status));
   const dueInstallments = (data.installments || []).filter((item) => item.status !== "paid");
+  const scheduledTransfers = data.scheduledTransfers || [];
+  const pendingTransfers = scheduledTransfers.filter((item) => item.status === "scheduled");
   const taxRate = Number(settings.transfer_tax_basis_points || 0) / 100;
   const interestRate = Number(settings.loan_interest_basis_points || 0) / 100;
   return `
@@ -175,6 +195,7 @@ function creditMemberPage() {
         <div><span>Transfer vergisi</span><strong>%${taxRate.toLocaleString("tr-TR")}</strong></div>
         <div><span>Kredi faizi</span><strong>%${interestRate.toLocaleString("tr-TR")}</strong></div>
         <div><span>Açık taksit</span><strong>${dueInstallments.length}</strong><small>${activeLoan ? creditLoanLabel(activeLoan.status) : "Aktif kredi yok"}</small></div>
+        <div><span>Son haftalık ödeme</span><strong>${settings.weekly_allowance_last_at ? formatDate(settings.weekly_allowance_last_at) : "—"}</strong><small>Sonraki: ${settings.weekly_allowance_enabled && settings.weekly_allowance_next_at ? formatDate(settings.weekly_allowance_next_at, true) : "Planlanmadı"}</small></div>
       </div>
     </section>
     ${gameCreditRequestsPanel(data)}
@@ -184,8 +205,14 @@ function creditMemberPage() {
         <div class="credit-operation-content">
           <label>Alıcı hesap kodu<input class="field" data-credit-recipient maxlength="12" placeholder="IHP900000002" autocomplete="off" /></label>
           <label>Alıcıya gidecek tutar<input class="field" data-credit-transfer-amount type="number" min="1" max="1000000" placeholder="100" /></label>
+          <label>Açıklama <span class="field-hint">İsteğe bağlı</span><textarea class="field textarea credit-transfer-description" data-credit-transfer-description maxlength="160" placeholder="Ödeme açıklaması"></textarea></label>
+          <div class="credit-delivery-choice" role="group" aria-label="Gönderim zamanı">
+            <label><input type="radio" name="credit-delivery" value="now" data-credit-delivery checked /><span>Şimdi gönder</span></label>
+            <label><input type="radio" name="credit-delivery" value="scheduled" data-credit-delivery /><span>İleri tarih seç</span></label>
+          </div>
+          <label class="credit-schedule-field" data-credit-schedule-field hidden>Gönderim tarihi ve saati<input class="field" data-credit-scheduled-for type="datetime-local" min="${creditDateTimeLocalValue(new Date(Date.now() + 60_000))}" value="${creditDateTimeLocalValue(new Date(Date.now() + 60 * 60 * 1000))}" /></label>
           <div class="credit-transfer-preview" data-credit-transfer-preview><span>Alıcıya <b>0 kredi</b></span><span>Vergi <b>0 kredi</b></span><strong>Toplam kesinti <b>0 kredi</b></strong></div>
-          <p class="credit-card-note">Yanlış hesaba yapılan transfer geri alınamaz.</p>
+          <p class="credit-card-note" data-credit-delivery-note>Yanlış hesaba yapılan anlık transfer geri alınamaz.</p>
           <button class="btn btn-primary btn-sm" type="button" data-action="credit-member-transfer" disabled>Transferi tamamla</button>
         </div>
       </details>
@@ -210,12 +237,13 @@ function creditMemberPage() {
         </div>
       </details>
     </section>
+    ${scheduledTransfers.length ? `<section class="panel glass credit-scheduled-panel"><div class="panel-head"><div><span class="panel-kicker">Transfer takvimi</span><h3>Planlı gönderimler</h3></div>${badge(`${pendingTransfers.length} bekleyen`, pendingTransfers.length ? "gold" : "gray")}</div><div class="credit-scheduled-list">${scheduledTransfers.map((item) => `<article class="credit-scheduled-item ${esc(item.status)}"><span class="credit-scheduled-orb">${icon(item.status === "completed" ? "check" : item.status === "cancelled" || item.status === "failed" ? "x" : "history")}</span><div><strong>${creditAmount(item.amount)} · ${esc(item.recipient_account_code)}</strong><p>${item.description ? esc(item.description) : "Açıklama yok"}</p><small>${formatDate(item.scheduled_for, true)} · Vergi ${creditAmount(item.tax)}</small></div><div class="credit-scheduled-actions">${badge(creditScheduledTransferStatus(item.status), item.status === "completed" ? "green" : item.status === "scheduled" ? "gold" : "gray")}${item.status === "scheduled" ? `<button class="table-action danger" type="button" data-action="credit-cancel-scheduled-transfer" data-id="${esc(item.id)}">İptal et</button>` : ""}</div></article>`).join("")}</div></section>` : ""}
     ${dueInstallments.length ? `<section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Ödeme planı</span><h3>Bekleyen taksitler</h3></div>${badge(String(dueInstallments.length), "gold")}</div><div class="credit-installment-list">${dueInstallments.map((item) => `<div><span><strong>${item.installment_no}. taksit</strong><small>Son tarih ${formatDate(item.due_at)}</small></span><b>${creditAmount(item.amount)}</b><button class="btn btn-secondary btn-sm" type="button" data-action="credit-member-pay-installment" data-id="${esc(item.id)}">Taksidi öde</button></div>`).join("")}</div></section>` : ""}
     <section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Hesap defteri</span><h3>Son hareketler</h3></div>${badge(`${(data.transactions || []).length} kayıt`, "blue")}</div>
-      ${(data.transactions || []).length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.map((item) => `<tr><td>${formatDate(item.created_at, true)}</td><td>${creditTransactionKindMarkup(item)}</td><td>${creditTransactionAmountMarkup(item)}</td><td>${creditAmount(item.balance_after)}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Henüz hareket yok", "Kredi işlemleri burada listelenecek.")}
+      ${(data.transactions || []).length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Açıklama</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.map((item) => `<tr><td>${formatDate(item.created_at, true)}</td><td>${creditTransactionKindMarkup(item)}</td><td><span class="credit-ledger-description">${esc(item.metadata?.description || "—")}</span></td><td>${creditTransactionAmountMarkup(item)}</td><td>${creditAmount(item.balance_after)}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Henüz hareket yok", "Kredi işlemleri burada listelenecek.")}
     </section>
     <section class="panel glass credit-account-danger">
-      <div><span class="panel-kicker">Hesap yönetimi</span><h3>Kredi hesabını kapat</h3><p>Kapatma sonunda kullanılabilir bakiyeniz sıfırlanır. Açık kredi borcu, devam eden oyun veya kullanılmamış çek varken hesap kapatılamaz.</p></div>
+      <div><span class="panel-kicker">Hesap yönetimi</span><h3>Kredi hesabını kapat</h3><p>Kapatma sonunda kullanılabilir bakiyeniz sıfırlanır. Açık kredi borcu, planlı transfer, devam eden oyun veya kullanılmamış çek varken hesap kapatılamaz.</p></div>
       <button class="btn btn-danger btn-sm" type="button" data-action="open-credit-account-close">Hesabı kapat</button>
     </section>
   `;
@@ -259,11 +287,24 @@ function updateCreditTransferPreview() {
   const basisPoints = Number(data.settings?.transfer_tax_basis_points || 0);
   const tax = amount > 0 ? Math.ceil(amount * basisPoints / 10000) : 0;
   const total = amount + tax;
+  const delivery = document.querySelector("[data-credit-delivery]:checked")?.value || "now";
+  const scheduleField = document.querySelector("[data-credit-schedule-field]");
+  const scheduledInput = document.querySelector("[data-credit-scheduled-for]");
+  const scheduledAt = scheduledInput?.value ? new Date(scheduledInput.value) : null;
+  const validSchedule = delivery === "now" || (scheduledAt && !Number.isNaN(scheduledAt.getTime()) && scheduledAt.getTime() >= Date.now() + 30_000);
+  if (scheduleField) scheduleField.hidden = delivery !== "scheduled";
   const preview = document.querySelector("[data-credit-transfer-preview]");
-  if (preview) preview.innerHTML = `<span>Alıcıya <b>${amount.toLocaleString("tr-TR")} kredi</b></span><span>Vergi <b>${tax.toLocaleString("tr-TR")} kredi</b></span><strong>Toplam kesinti <b>${total.toLocaleString("tr-TR")} kredi</b></strong>`;
+  if (preview) preview.innerHTML = `<span>Alıcıya <b>${amount.toLocaleString("tr-TR")} kredi</b></span><span>Vergi <b>${tax.toLocaleString("tr-TR")} kredi</b></span><span>Teslim <b>${delivery === "scheduled" && validSchedule ? formatDate(scheduledAt, true) : "Şimdi"}</b></span><strong>Toplam kesinti <b>${total.toLocaleString("tr-TR")} kredi</b></strong>`;
+  const note = document.querySelector("[data-credit-delivery-note]");
+  if (note) note.textContent = delivery === "scheduled"
+    ? "Toplam tutar şimdi rezerve edilir. Gönderim gerçekleşmeden iptal ederseniz tamamı hesabınıza döner."
+    : "Yanlış hesaba yapılan anlık transfer geri alınamaz.";
   const recipient = document.querySelector("[data-credit-recipient]")?.value.trim().toUpperCase() || "";
   const button = document.querySelector('[data-action="credit-member-transfer"]');
-  if (button) button.disabled = !(/^IHP[0-9]{9}$/.test(recipient) && amount > 0 && total <= Number(data.account?.balance || 0));
+  if (button) {
+    button.disabled = !(/^IHP[0-9]{9}$/.test(recipient) && amount > 0 && total <= Number(data.account?.balance || 0) && validSchedule);
+    button.textContent = delivery === "scheduled" ? "Transferi planla" : "Transferi tamamla";
+  }
 }
 
 function creditAccountsPanel(data) {
@@ -463,8 +504,32 @@ handleClick = async function creditHandleClick(event) {
     try {
       const recipientCode = document.querySelector("[data-credit-recipient]")?.value.trim().toUpperCase();
       const amount = Number(document.querySelector("[data-credit-transfer-amount]")?.value);
-      state.cache.creditSystem = await portalServerRequest("/api/manage-member", { module: "credit", action: "transfer", recipientCode, amount });
-      showToast("Transfer tamamlandı.", "success"); render();
+      const description = document.querySelector("[data-credit-transfer-description]")?.value.trim() || "";
+      const delivery = document.querySelector("[data-credit-delivery]:checked")?.value || "now";
+      const scheduledFor = document.querySelector("[data-credit-scheduled-for]")?.value || "";
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
+        module: "credit",
+        action: delivery === "scheduled" ? "schedule_transfer" : "transfer",
+        recipientCode,
+        amount,
+        description,
+        scheduledFor: delivery === "scheduled" ? new Date(scheduledFor).toISOString() : undefined
+      });
+      showToast(delivery === "scheduled" ? "Transfer planlandı ve tutar rezerve edildi." : "Transfer tamamlandı.", "success");
+      render();
+    } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
+  if (action === "credit-cancel-scheduled-transfer") {
+    event.preventDefault(); target.disabled = true;
+    try {
+      state.cache.creditSystem = await portalServerRequest("/api/manage-member", {
+        module: "credit",
+        action: "cancel_scheduled_transfer",
+        transferId: target.dataset.id
+      });
+      showToast("Planlı transfer iptal edildi; rezerve edilen tutar iade edildi.", "success");
+      render();
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
     return;
   }
@@ -540,6 +605,9 @@ handleClick = async function creditHandleClick(event) {
         maxTermDays: Number(document.querySelector("[data-credit-max-term]").value),
         graceDays: Number(document.querySelector("[data-credit-grace]").value),
         weeklyAllowanceEnabled: document.querySelector("[data-credit-weekly]").checked,
+        weeklyAllowanceNextAt: document.querySelector("[data-credit-weekly-next]")?.value
+          ? new Date(document.querySelector("[data-credit-weekly-next]").value).toISOString()
+          : null,
         roleAllowances
       });
       showToast("Kredi sistemi ayarları kaydedildi.", "success"); render();
@@ -581,7 +649,12 @@ handleFilter = async function creditHandleFilter(event) {
     if (button) button.disabled = !(purpose && accepted);
     return;
   }
-  if (event.target.matches("[data-credit-transfer-amount], [data-credit-recipient]")) {
+  if (event.target.matches("[data-credit-weekly]")) {
+    const dateInput = document.querySelector("[data-credit-weekly-next]");
+    if (dateInput) dateInput.disabled = !event.target.checked;
+    return;
+  }
+  if (event.target.matches("[data-credit-transfer-amount], [data-credit-recipient], [data-credit-delivery], [data-credit-scheduled-for]")) {
     updateCreditTransferPreview();
     return;
   }

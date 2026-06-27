@@ -77,6 +77,7 @@ function tablePayload(table, url, profile) {
 async function mockBackend(page, profile) {
   const approvedGameKeys = new Set();
   let creditAccountClosed = false;
+  let scheduledTransfers = [];
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
   await page.route("https://mock.supabase.test/auth/v1/logout", (route) => route.fulfill({ status: 204, body: "" }));
@@ -136,17 +137,45 @@ async function mockBackend(page, profile) {
         loans: [], installments: [], transactions: [], cheques: [], gameRequests: []
       } });
     }
+    if (body.module === "credit" && body.action === "schedule_transfer") {
+      scheduledTransfers = [{
+        id: "scheduled-transfer-1",
+        sender_account_id: "funded-account",
+        recipient_account_id: "recipient-account",
+        recipient_account_code: body.recipientCode,
+        amount: body.amount,
+        tax: Math.ceil(body.amount * .2),
+        total_debit: Math.ceil(body.amount * 1.2),
+        description: body.description,
+        scheduled_for: body.scheduledFor,
+        status: "scheduled",
+        created_at: new Date().toISOString()
+      }];
+      return route.fulfill({ json: {
+        settings: { member_access_enabled: true, weekly_allowance_enabled: true, weekly_allowance_next_at: "2026-07-01T16:00:00.000Z", weekly_allowance_last_at: "2026-06-24T16:00:00.000Z", transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
+        account: { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 380, status: "active" },
+        loans: [], installments: [], transactions: [], cheques: [], scheduledTransfers, gameRequests: []
+      } });
+    }
+    if (body.module === "credit" && body.action === "cancel_scheduled_transfer") {
+      scheduledTransfers = scheduledTransfers.map((item) => ({ ...item, status: "cancelled", cancelled_at: new Date().toISOString() }));
+      return route.fulfill({ json: {
+        settings: { member_access_enabled: true, weekly_allowance_enabled: true, weekly_allowance_next_at: "2026-07-01T16:00:00.000Z", weekly_allowance_last_at: "2026-06-24T16:00:00.000Z", transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
+        account: { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 500, status: "active" },
+        loans: [], installments: [], transactions: [], cheques: [], scheduledTransfers, gameRequests: []
+      } });
+    }
     if (body.module === "credit" && body.action === "member_status") {
       const funded = profile.id === "funded-credit";
       return route.fulfill({ json: {
-        settings: { member_access_enabled: true, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
+        settings: { member_access_enabled: true, weekly_allowance_enabled: true, weekly_allowance_next_at: "2026-07-01T16:00:00.000Z", weekly_allowance_last_at: "2026-06-24T16:00:00.000Z", transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1 },
         account: funded && !creditAccountClosed ? { id: "funded-account", profile_id: profile.id, account_code: "IHP111222333", balance: 500, status: "active" } : null,
-        loans: [], installments: [], transactions: [], cheques: [],
+        loans: [], installments: [], transactions: [], cheques: [], scheduledTransfers,
         gameRequests: funded ? [{ id: "game-charge-1", game_key: "snake", credit_amount: 5, status: "pending", requested_at: "2026-06-21T10:00:00.000Z" }] : []
       } });
     }
     return route.fulfill({ json: {
-      settings: { member_access_enabled: true, weekly_allowance_enabled: false, transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
+      settings: { member_access_enabled: true, weekly_allowance_enabled: false, weekly_allowance_next_at: "2026-07-01T16:00:00.000Z", weekly_allowance_last_at: "2026-06-24T16:00:00.000Z", transfer_tax_basis_points: 2000, loan_interest_basis_points: 1000, max_loan_amount: 5000, max_term_days: 30, grace_days: 1, role_allowances: {} },
       accounts: [
         { id: "admin-test-account", profile_id: "member-1", account_code: "IHP123456789", balance: 250, status: "active" },
         ...(profile.roles.includes("credit_officer") ? [{ id: "credit-officer-own", profile_id: profile.id, account_code: "IHP555666777", balance: 300, status: "active" }] : [])
@@ -155,7 +184,7 @@ async function mockBackend(page, profile) {
       installments: [], transactions: [
         { id: "tx-in", account_id: "admin-test-account", kind: "transfer_in", amount: 100, balance_after: 250, created_at: "2026-06-20T12:00:00.000Z", metadata: {} },
         { id: "tx-out", account_id: "admin-test-account", kind: "transfer_out", amount: 50, balance_after: 150, created_at: "2026-06-20T11:00:00.000Z", metadata: {} }
-      ], cheques: []
+      ], cheques: [], scheduledTransfers: []
     } });
   });
   await page.route("https://mock.supabase.test/rest/v1/**", (route) => {
@@ -223,6 +252,7 @@ try {
     await portalPage.locator("[data-theme-select]").selectOption("light");
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "light", "light theme should apply");
     assert.equal(await portalPage.evaluate(() => getComputedStyle(document.documentElement).colorScheme), "light", "light theme must use a light color scheme");
+    assert.equal(await portalPage.locator(".dashboard-hero h2").evaluate((element) => getComputedStyle(element).color), "rgb(16, 36, 59)", "light theme hero text must keep readable contrast");
     await portalPage.screenshot({ path: join(output, `${viewport.name}-portal-light.png`), fullPage: true });
     assert.equal(await portalPage.locator(".premium-metrics .metric-card").first().locator("strong").innerText(), "03", "dashboard member count must exclude test and technical admin accounts");
     await portalPage.locator("[data-theme-select]").selectOption("green");
@@ -295,6 +325,7 @@ try {
   const adminProfile = { ...baseProfile, id: "admin-credit", email: "admin@example.test", roles: ["super_admin"], role: "super_admin", theme_preference: "blue" };
   await openPortal(adminPage, adminProfile, "credit-management");
   assert.equal(await adminPage.locator(".credit-settings-panel").isVisible(), true, "admin should see credit settings");
+  assert.equal(await adminPage.locator("[data-credit-weekly-next]").count(), 1, "admin should configure the weekly allowance start time");
   assert.equal(await adminPage.locator(".credit-transaction-amount.incoming").count(), 1, "incoming credit should have positive styling");
   assert.equal(await adminPage.locator(".credit-transaction-amount.outgoing").count(), 1, "outgoing credit should have negative styling");
   assert.equal(await adminPage.locator('[data-action="open-credit-adjustment"]').isVisible(), true, "admin should see balance adjustment action");
@@ -341,12 +372,30 @@ try {
   await fundedCreditPage.getByText("Kredi transferi", { exact: true }).click();
   await fundedCreditPage.locator("[data-credit-recipient]").fill("IHP999888777");
   await fundedCreditPage.locator("[data-credit-transfer-amount]").fill("100");
+  await fundedCreditPage.locator("[data-credit-transfer-description]").fill("Kurul etkinlik ödemesi");
   assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Vergi\s+20 kredi/);
   assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Toplam kesinti\s+120 kredi/);
   assert.equal(await fundedCreditPage.locator('[data-action="credit-member-transfer"]').isEnabled(), true, "valid transfer with tax preview must be enabled");
+  await fundedCreditPage.locator('[data-credit-delivery][value="scheduled"]').check();
+  const scheduledTransferValue = await fundedCreditPage.evaluate(() => {
+    const date = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 16);
+  });
+  await fundedCreditPage.locator("[data-credit-scheduled-for]").fill(scheduledTransferValue);
+  assert.equal(await fundedCreditPage.locator("[data-credit-schedule-field]").isVisible(), true, "scheduled transfer date field should appear");
+  assert.match(await fundedCreditPage.locator("[data-credit-delivery-note]").innerText(), /rezerve edilir/i);
+  await fundedCreditPage.locator('[data-action="credit-member-transfer"]').click();
+  await fundedCreditPage.waitForSelector(".credit-scheduled-panel");
+  assert.equal(await fundedCreditPage.locator(".credit-scheduled-panel").isVisible(), true, "scheduled transfer should appear in the transfer calendar");
+  assert.match(await fundedCreditPage.locator(".credit-scheduled-item").innerText(), /Kurul etkinlik ödemesi/);
+  await fundedCreditPage.locator('[data-action="credit-cancel-scheduled-transfer"]').click();
+  await fundedCreditPage.waitForFunction(() => document.querySelector(".credit-scheduled-item")?.textContent?.includes("İptal edildi"));
+  assert.match(await fundedCreditPage.locator(".credit-scheduled-item").innerText(), /İptal edildi/);
   await fundedCreditPage.getByText("Çek işlemleri", { exact: true }).click();
   await fundedCreditPage.locator("[data-credit-cheque-amount]").fill("100");
   await fundedCreditPage.locator('[data-action="credit-member-issue-cheque"]').click();
+  await fundedCreditPage.waitForSelector('[data-action="download-credit-cheque"]');
   assert.equal(await fundedCreditPage.locator('[data-action="download-credit-cheque"]').isVisible(), true, "created cheque should offer a PDF document");
   const chequeDownload = fundedCreditPage.waitForEvent("download");
   await fundedCreditPage.locator('[data-action="download-credit-cheque"]').click();
