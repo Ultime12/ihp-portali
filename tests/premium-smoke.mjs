@@ -104,6 +104,22 @@ function tablePayload(table, url, profile) {
   }
   if (table === "notifications") return [{ id: "n1", title: "Portal bildirimi", body: "Yeni duyuru yayınlandı.", category: "system", created_at: "2026-06-18T17:00:00.000Z", read_at: null }];
   if (table === "applications") return [{ id: "ap1", status: "new", created_at: "2026-06-18T12:00:00.000Z" }];
+  if (table === "discipline_records") return [{
+    id: "discipline-existing",
+    member_id: "member-2",
+    investigation_id: "investigation-used",
+    record_type: "Uyarı",
+    reason: "Mevcut karar",
+    description: "Mevcut disiplin kararı",
+    decision_status: "decided",
+    archived: false,
+    created_at: "2026-06-18T13:00:00.000Z"
+  }];
+  if (table === "investigations") return [
+    { id: "investigation-used", subject_profile_id: "member-2", title: "Karara bağlanan soruşturma", status: "reviewing", subject: members[1], created_at: "2026-06-18T12:00:00.000Z" },
+    { id: "investigation-open", subject_profile_id: "member-2", title: "Açık soruşturma", status: "open", subject: members[1], created_at: "2026-06-19T12:00:00.000Z" },
+    { id: "investigation-closed", subject_profile_id: "member-2", title: "Kapalı soruşturma", status: "closed", subject: members[1], created_at: "2026-06-17T12:00:00.000Z" }
+  ];
   if (table === "portal_settings") return [{ id: "main", portal_name: "İHP Portalı", logo_url: null, notifications_enabled: true }];
   return [];
 }
@@ -546,6 +562,9 @@ try {
   };
   await openPortal(disciplinePage, disciplineProfile, "discipline");
   await disciplinePage.locator('[data-action="open-discipline"]').click();
+  assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-open"]').count(), 1, "unused open investigation should be selectable");
+  assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-used"]').count(), 0, "investigation with a penalty must not be selectable again");
+  assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-closed"]').count(), 0, "closed investigation must not be selectable");
   const suspensionField = disciplinePage.locator("[data-discipline-suspension]");
   assert.equal(await suspensionField.isHidden(), true, "suspension duration should start hidden");
   await disciplinePage.locator("#discipline-effect").selectOption("party_suspension");

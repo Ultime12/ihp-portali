@@ -209,6 +209,12 @@ export async function restRequest(path: string, options: RequestInit = {}): Prom
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
+    if (
+      payload?.code === "23505"
+      && String(payload?.message || "").includes("discipline_records_one_per_investigation_idx")
+    ) {
+      throw new Error("Bu soruşturma için zaten bir disiplin cezası kaydedilmiş.");
+    }
     throw new Error(payload?.message || payload?.hint || "Veri işlemi tamamlanamadı.");
   }
   return payload;

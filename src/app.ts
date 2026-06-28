@@ -2777,7 +2777,15 @@ function openAnnouncement(item = null) {
 
 function openDiscipline(item = null) {
   const members = disciplineTargetMembers();
-  const investigations = (state.cache.investigations || []).filter((row) => !["cancelled"].includes(row.status));
+  const usedInvestigationIds = new Set(
+    (state.cache.discipline || [])
+      .filter((record) => record.id !== item?.id && record.investigation_id)
+      .map((record) => record.investigation_id)
+  );
+  const investigations = (state.cache.investigations || []).filter((row) => (
+    row.id === item?.investigation_id
+    || (["open", "reviewing"].includes(row.status) && !usedInvestigationIds.has(row.id))
+  ));
   modal({
     title: item ? "Disiplin kararını düzelt" : "Ceza kararnamesi yaz",
     subtitle: "Ceza girmek için önce soruşturma açılmış olmalıdır. Kayıt kaydedilince durum otomatik Kararname Yazıldı olur.",
@@ -2787,7 +2795,7 @@ function openDiscipline(item = null) {
           <div class="form-group"><label for="discipline-member">İlgili üye</label><select class="field" id="discipline-member" name="member_id" required><option value="">Seçin</option>${members.map((member) => `<option value="${esc(member.id)}" ${item?.member_id === member.id ? "selected" : ""}>${esc(member.display_name)} · ${disciplinePoints(member)} puan</option>`).join("")}</select></div>
           <div class="form-group"><label for="discipline-type">Ceza türü</label><select class="field" id="discipline-type" name="record_type">${["Uyarı", "Kınama", "Geçici Kısıtlama", "Görevden Alma", "Üyelik Askısı"].map((value) => `<option ${item?.record_type === value ? "selected" : ""}>${value}</option>`).join("")}</select></div>
         </div>
-        <div class="form-group"><label for="discipline-investigation">İlgili soruşturma</label><select class="field" id="discipline-investigation" name="investigation_id" required><option value="">Soruşturma seçin</option>${investigations.map((row) => `<option value="${esc(row.id)}" ${item?.investigation_id === row.id ? "selected" : ""}>${esc(row.title)} · ${esc(investigationSubjectLabel(row))}</option>`).join("")}</select><p class="security-note">Ceza kararı soruşturma olmadan girilemez. Önce Soruşturmalar bölümünden kayıt açın.</p></div>
+        <div class="form-group"><label for="discipline-investigation">İlgili soruşturma</label><select class="field" id="discipline-investigation" name="investigation_id" required><option value="">Soruşturma seçin</option>${investigations.map((row) => `<option value="${esc(row.id)}" ${item?.investigation_id === row.id ? "selected" : ""}>${esc(row.title)} · ${esc(investigationSubjectLabel(row))}</option>`).join("")}</select><p class="security-note">${investigations.length ? "Her soruşturmaya yalnızca bir ceza bağlanabilir. Ceza kaydedildiğinde soruşturma otomatik kapanır." : "Ceza verilebilecek açık ve kullanılmamış soruşturma bulunmuyor."}</p></div>
         <div class="form-group"><label for="discipline-reason">Sebep</label><input class="field" id="discipline-reason" name="reason" value="${esc(item?.reason || "")}" required maxlength="160" /></div>
         <div class="form-group"><label for="discipline-description">Açıklama</label><textarea class="field" id="discipline-description" name="description" required maxlength="1200">${esc(item?.description || "")}</textarea></div>
         <div class="form-grid">

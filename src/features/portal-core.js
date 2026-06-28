@@ -1258,7 +1258,9 @@ submitForm = async function patchedSubmitForm(event) {
           description: payload.description || payload.reason
         });
       }
-      showToast("Disiplin kaydı kaydedildi.");
+      showToast(recordValues.investigation_id
+        ? "Disiplin cezası kaydedildi ve soruşturma otomatik kapatıldı."
+        : "Disiplin kaydı kaydedildi.");
       closeModal();
       await loadPage("discipline");
     } catch (error) {
