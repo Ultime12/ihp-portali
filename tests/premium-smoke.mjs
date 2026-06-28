@@ -354,7 +354,16 @@ try {
     if (roleCase.hidden) assert.equal(await page.getByText(roleCase.hidden, { exact: true }).count(), 0, `${roleCase.name}: forbidden menu item`);
     await page.evaluate(() => { location.hash = "#/portal/my-info"; });
     await page.waitForSelector(".identity-card-deck");
-    assert.equal(await page.locator(`.identity-main-art.identity-art-${roleCase.identityArt}`).count(), 1, `${roleCase.name}: identity insignia should match the role`);
+    const roleInsignia = page.locator(`.identity-main-art.identity-art-${roleCase.identityArt}`);
+    assert.equal(await roleInsignia.count(), 1, `${roleCase.name}: identity insignia should match the role`);
+    if (roleCase.identityArt === "presidency") {
+      assert.match(await roleInsignia.evaluate((element) => getComputedStyle(element).backgroundImage), /presidency-shield\.png/, `${roleCase.name}: complete transparent presidency badge should be used`);
+    } else if (["executive", "youth"].includes(roleCase.identityArt)) {
+      assert.equal(await roleInsignia.evaluate((element) => getComputedStyle(element).backgroundBlendMode), "screen", `${roleCase.name}: opaque badge background should use the official navy treatment`);
+    }
+    if (roleCase.name === "president") {
+      await page.screenshot({ path: join(output, "desktop-president-identity.png"), fullPage: true });
+    }
     await context.close();
   }
 
