@@ -20,7 +20,8 @@ const featureFiles = [
   "snake-engine.js",
   "game-center.js",
   "credit-system.js",
-  "premium-ui.js"
+  "premium-ui.js",
+  "member-identity.js"
 ];
 
 async function copyFile(source, destination) {

@@ -65,9 +65,43 @@ const members = [
 function tablePayload(table, url, profile) {
   const query = url.search;
   if (table === "profiles" && query.includes(`id=eq.${profile.id}`)) return [profile];
-  if (table === "profiles") return members.map((item) => ({ ...item, roles: item.id === profile.id ? profile.roles : item.roles }));
+  if (table === "profiles") {
+    const rows = members.map((item) => ({ ...item, roles: item.id === profile.id ? profile.roles : item.roles }));
+    if (profile.id === "discipline-identity") {
+      rows.push({
+        ...baseProfile,
+        id: "discipline-chief",
+        email: "dk.baskani@example.test",
+        display_name: "Disiplin Kurulu Başkanı",
+        member_code: "887766",
+        role: "discipline_chair",
+        roles: ["discipline_chair", "member"]
+      });
+    }
+    return rows;
+  }
   if (table === "announcements") return [{ id: "a1", title: "Kurul toplantısı", category: "Genel", status: "published", created_at: "2026-06-18T16:00:00.000Z" }];
-  if (table === "committees") return [{ id: "c1", name: "Yürütme Kurulu", status: "active" }, { id: "c2", name: "Disiplin Kurulu", status: "active" }];
+  if (table === "committees") return [
+    { id: "c1", name: "Yürütme Kurulu", status: "active", profiles: { display_name: "Genel Başkan" } },
+    { id: "c2", name: "Disiplin Kurulu", status: "active", profiles: { display_name: "Disiplin Kurulu Başkanı" } }
+  ];
+  if (table === "positions") {
+    const role = profile.roles[0] || "member";
+    const rolePositions = {
+      president: ["Başkan", 10, "Yürütme Kurulu"],
+      discipline_member: ["Disiplin Kurulu Üyesi", 5, "Disiplin Kurulu"],
+      member: ["Üye", 1, "Genel Üyelik"]
+    };
+    const [title, authority, committee] = rolePositions[role] || [role, 1, "Genel Üyelik"];
+    return [{
+      id: `position-${profile.id}`,
+      title,
+      authority_level: authority,
+      assigned_profile_id: profile.id,
+      status: "active",
+      committees: { name: committee }
+    }];
+  }
   if (table === "notifications") return [{ id: "n1", title: "Portal bildirimi", body: "Yeni duyuru yayınlandı.", category: "system", created_at: "2026-06-18T17:00:00.000Z", read_at: null }];
   if (table === "applications") return [{ id: "ap1", status: "new", created_at: "2026-06-18T12:00:00.000Z" }];
   if (table === "portal_settings") return [{ id: "main", portal_name: "İHP Portalı", logo_url: null, notifications_enabled: true }];
@@ -302,12 +336,13 @@ try {
   await deletionContext.close();
 
   const roleCases = [
-    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null },
-    { name: "president", roles: ["president", "member"], visible: "Başkanlık", hidden: null },
-    { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık" },
-    { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık" },
-    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Soruşturmalar" },
-    { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Soruşturmalar" }
+    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null, identityArt: "presidency" },
+    { name: "president", roles: ["president", "member"], visible: "Başkanlık", hidden: null, identityArt: "presidency" },
+    { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık", identityArt: "discipline" },
+    { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık", identityArt: "discipline" },
+    { name: "youth-chair", roles: ["youth_chair", "member"], visible: "Gençlik Kolları", hidden: "Soruşturmalar", identityArt: "youth" },
+    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Soruşturmalar", identityArt: "party" },
+    { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Soruşturmalar", identityArt: "party" }
   ];
 
   for (const roleCase of roleCases) {
@@ -317,6 +352,9 @@ try {
     await openPortal(page, profile);
     assert.equal(await page.getByText(roleCase.visible, { exact: true }).first().isVisible(), true, `${roleCase.name}: expected menu item`);
     if (roleCase.hidden) assert.equal(await page.getByText(roleCase.hidden, { exact: true }).count(), 0, `${roleCase.name}: forbidden menu item`);
+    await page.evaluate(() => { location.hash = "#/portal/my-info"; });
+    await page.waitForSelector(".identity-card-deck");
+    assert.equal(await page.locator(`.identity-main-art.identity-art-${roleCase.identityArt}`).count(), 1, `${roleCase.name}: identity insignia should match the role`);
     await context.close();
   }
 
@@ -358,7 +396,97 @@ try {
   const ordinaryCreditPage = await ordinaryCreditContext.newPage();
   await openPortal(ordinaryCreditPage, baseProfile);
   assert.equal(await ordinaryCreditPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "ordinary members must see credit navigation");
+  assert.equal(await ordinaryCreditPage.getByText("Bilgilerim", { exact: true }).first().isVisible(), true, "ordinary members should see their digital identity");
   await ordinaryCreditContext.close();
+
+  for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "mobile", width: 390, height: 844 }]) {
+    const identityContext = await browser.newContext({ viewport, reducedMotion: viewport.name === "mobile" ? "no-preference" : "reduce" });
+    const identityPage = await identityContext.newPage();
+    const identityProfile = {
+      ...baseProfile,
+      id: "discipline-identity",
+      email: "disiplin.uye@example.test",
+      display_name: "Ekin Deniz Aras",
+      member_code: "451209",
+      role: "discipline_member",
+      roles: ["discipline_member", "member"],
+      avatar_initials: "EDA",
+      profile_committees: [{
+        committee_id: "c2",
+        role_in_committee: "member",
+        committee: { id: "c2", name: "Disiplin Kurulu", status: "active" }
+      }]
+    };
+    await openPortal(identityPage, identityProfile, "my-info");
+    assert.equal(await identityPage.locator(".digital-id-front").isVisible(), true, `${viewport.name}: identity front should render`);
+    assert.equal(await identityPage.locator(".digital-id-back").count(), 1, `${viewport.name}: identity back should render`);
+    assert.match(await identityPage.locator(".digital-id-front").innerText(), /451209/);
+    assert.match(await identityPage.locator(".digital-id-front").innerText(), /Seviye 5 \/ 10/);
+    assert.match(await identityPage.locator(".digital-id-back").textContent(), /Disiplin Kurulu Başkanı/);
+    assert.equal(await identityPage.locator(".identity-art-discipline").count() > 0, true, `${viewport.name}: discipline insignia should sync`);
+    const cardSize = await identityPage.locator(".digital-id-front").evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    });
+    assert.equal(cardSize.height > cardSize.width * 1.4, true, `${viewport.name}: identity card should use a vertical ratio`);
+    const flipButton = identityPage.locator('[data-action="toggle-identity-card"]');
+    if (viewport.name === "mobile") {
+      assert.equal(await flipButton.isVisible(), true, "mobile: badge switch should be visible");
+      assert.equal(await identityPage.locator(".digital-id-front").isVisible(), true, "mobile: front should be visible initially");
+      assert.equal(await identityPage.locator(".digital-id-back").isHidden(), true, "mobile: back should be hidden initially");
+      await flipButton.click();
+      await identityPage.waitForFunction(() => document.querySelector("[data-identity-deck]")?.classList.contains("show-back"));
+      await identityPage.locator(".digital-id-front").waitFor({ state: "hidden" });
+      await identityPage.locator(".digital-id-back").waitFor({ state: "visible" });
+      assert.equal(await flipButton.getAttribute("aria-label"), "Kimliği göster");
+      assert.equal(await flipButton.getAttribute("aria-pressed"), "true");
+      assert.equal(await identityPage.locator(".digital-id-front").isHidden(), true, "mobile: front should hide after flip");
+      assert.equal(await identityPage.locator(".digital-id-back").isVisible(), true, "mobile: badge side should show after flip");
+    } else {
+      assert.equal(await flipButton.isHidden(), true, "desktop: mobile badge switch should stay hidden");
+      assert.equal(await identityPage.locator(".digital-id-back").isVisible(), true, "desktop: both identity sides should be visible");
+    }
+    const identityOverflow = await identityPage.evaluate(() => ({
+      fits: document.documentElement.scrollWidth <= window.innerWidth,
+      pageWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+      offenders: [...document.querySelectorAll("body *")]
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.right > window.innerWidth + 1 || rect.left < -1;
+        })
+        .slice(0, 8)
+        .map((element) => ({
+          className: element.className,
+          left: Math.round(element.getBoundingClientRect().left),
+          right: Math.round(element.getBoundingClientRect().right),
+          width: Math.round(element.getBoundingClientRect().width)
+        }))
+    }));
+    assert.equal(identityOverflow.fits, true, `${viewport.name}: identity horizontal overflow ${JSON.stringify(identityOverflow)}`);
+    await identityPage.screenshot({ path: join(output, `${viewport.name}-identity.png`), fullPage: true });
+    await identityContext.close();
+  }
+
+  const reducedIdentityContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    reducedMotion: "reduce"
+  });
+  const reducedIdentityPage = await reducedIdentityContext.newPage();
+  await openPortal(reducedIdentityPage, {
+    ...baseProfile,
+    id: "reduced-identity",
+    email: "reduced@example.test"
+  }, "my-info");
+  await reducedIdentityPage.locator('[data-action="toggle-identity-card"]').click();
+  await reducedIdentityPage.locator(".digital-id-back").waitFor({ state: "visible" });
+  assert.equal(
+    await reducedIdentityPage.locator(".digital-id-back").evaluate((element) => getComputedStyle(element).transform),
+    "none",
+    "reduced motion: identity switch should not use 3D rotation"
+  );
+  assert.equal(await reducedIdentityPage.locator(".digital-id-back").isVisible(), true, "reduced motion: badge side should still open");
+  await reducedIdentityContext.close();
 
   const fundedCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const fundedCreditPage = await fundedCreditContext.newPage();
