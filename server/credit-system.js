@@ -61,6 +61,14 @@ async function rpc(name, body) {
   return Array.isArray(payload) ? payload[0] : payload;
 }
 
+async function processSchedulesBestEffort() {
+  try {
+    await rpc("process_credit_schedules", {});
+  } catch {
+    // Status pages stay available even if the background scheduler is temporarily unavailable.
+  }
+}
+
 async function rows(path, errorMessage) {
   const response = await supabaseRequest(path);
   const payload = await response.json().catch(() => []);
@@ -176,10 +184,12 @@ export default async function handler(request, response) {
   try {
     if (action === "admin_status") {
       if (!actor.isCreditManager) return json(response, 403, { error: "Kredi yonetimi yetkisi gerekir." });
+      await processSchedulesBestEffort();
       return json(response, 200, await adminStatus());
     }
 
     if (action === "member_status") {
+      await processSchedulesBestEffort();
       return json(response, 200, await memberStatus(actor.profile.id));
     }
 
