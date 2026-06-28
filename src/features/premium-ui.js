@@ -74,10 +74,17 @@ portalShell = function premiumPortalShell(page) {
         <div class="sidebar-head">${brand()}</div>
         <nav class="app-nav">${navSection(page)}</nav>
         <div class="sidebar-bottom">
-          <button class="side-profile" type="button" data-page="settings" aria-label="Profil ayarlarını aç">
-            ${avatar(profile)}
-            <span><strong>${esc(profile.display_name)}</strong><small>${typeof ihpAdminRoleBadgesV1 === "function" ? ihpAdminRoleBadgesV1(profile) : esc(roleLabels(profile))}</small></span>
-          </button>
+          <div class="side-profile-wrap">
+            <button class="side-profile" type="button" data-page="settings" aria-label="Profil ayarlarını aç">
+              ${avatar(profile)}
+              <span><strong>${esc(profile.display_name)}</strong><small>${typeof ihpAdminRoleBadgesV1 === "function" ? ihpAdminRoleBadgesV1(profile) : esc(roleLabels(profile))}</small></span>
+            </button>
+            ${
+              typeof isSystemProfile === "function" && isSystemProfile(profile)
+                ? ""
+                : `<button class="identity-star-button" type="button" data-action="open-member-credential" aria-label="Görevli rozetini aç" title="Görevli rozetini aç">★</button>`
+            }
+          </div>
           <button class="nav-item logout-item" type="button" data-action="logout">${icon("logout")} <b>Çıkış Yap</b></button>
         </div>
       </aside>

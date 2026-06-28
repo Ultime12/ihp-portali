@@ -336,13 +336,14 @@ try {
   await deletionContext.close();
 
   const roleCases = [
-    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null, identityArt: "presidency" },
-    { name: "president", roles: ["president", "member"], visible: "Başkanlık", hidden: null, identityArt: "presidency" },
-    { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık", identityArt: "discipline" },
-    { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık", identityArt: "discipline" },
-    { name: "youth-chair", roles: ["youth_chair", "member"], visible: "Gençlik Kolları", hidden: "Soruşturmalar", identityArt: "youth" },
-    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Soruşturmalar", identityArt: "party" },
-    { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Soruşturmalar", identityArt: "party" }
+    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null, credential: "member" },
+    { name: "president", roles: ["discipline_chair", "president", "member"], visible: "Başkanlık", hidden: null, credential: "presidency" },
+    { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık", credential: "discipline" },
+    { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık", credential: "discipline" },
+    { name: "youth-chair", roles: ["youth_chair", "member"], visible: "Gençlik Kolları", hidden: "Soruşturmalar", credential: "youth" },
+    { name: "representative", roles: ["representative", "member"], visible: "Antlaşmalar", hidden: "Soruşturmalar", credential: "executive" },
+    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Soruşturmalar", credential: "member" },
+    { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Soruşturmalar", credential: "member" }
   ];
 
   for (const roleCase of roleCases) {
@@ -352,18 +353,23 @@ try {
     await openPortal(page, profile);
     assert.equal(await page.getByText(roleCase.visible, { exact: true }).first().isVisible(), true, `${roleCase.name}: expected menu item`);
     if (roleCase.hidden) assert.equal(await page.getByText(roleCase.hidden, { exact: true }).count(), 0, `${roleCase.name}: forbidden menu item`);
-    await page.evaluate(() => { location.hash = "#/portal/my-info"; });
-    await page.waitForSelector(".identity-card-deck");
-    const roleInsignia = page.locator(`.identity-main-art.identity-art-${roleCase.identityArt}`);
-    assert.equal(await roleInsignia.count(), 1, `${roleCase.name}: identity insignia should match the role`);
-    if (roleCase.identityArt === "presidency") {
-      assert.match(await roleInsignia.evaluate((element) => getComputedStyle(element).backgroundImage), /presidency-shield\.png/, `${roleCase.name}: complete transparent presidency badge should be used`);
-    } else if (["executive", "youth"].includes(roleCase.identityArt)) {
-      assert.equal(await roleInsignia.evaluate((element) => getComputedStyle(element).backgroundBlendMode), "screen", `${roleCase.name}: opaque badge background should use the official navy treatment`);
+    assert.equal(await page.getByText("Bilgilerim", { exact: true }).count(), 0, `${roleCase.name}: separate identity navigation should be removed`);
+    await page.locator('[data-action="open-member-credential"]').click();
+    await page.waitForSelector(".credential-modal-stage");
+    if (roleCase.credential === "member") {
+      assert.equal(await page.locator(".member-standard-card").isVisible(), true, `${roleCase.name}: standard member identity should open`);
+      assert.equal(await page.locator(".official-credential").count(), 0, `${roleCase.name}: role badge should not be shown`);
+    } else {
+      assert.equal(await page.locator(`.official-credential-${roleCase.credential}`).isVisible(), true, `${roleCase.name}: highest role badge should open`);
+      assert.equal(await page.locator(".member-standard-card").count(), 0, `${roleCase.name}: standard identity should be hidden for office holders`);
+      assert.equal(await page.locator(".official-credential").count(), 1, `${roleCase.name}: only one highest badge should be shown`);
     }
     if (roleCase.name === "president") {
-      await page.screenshot({ path: join(output, "desktop-president-identity.png"), fullPage: true });
+      assert.match(await page.locator(".official-credential").innerText(), /Genel Başkan/);
+      assert.equal(await page.locator(".official-credential-discipline").count(), 0, "president and discipline chair should only see presidency");
+      await page.screenshot({ path: join(output, "desktop-president-credential.png"), fullPage: true });
     }
+    await page.keyboard.press("Escape");
     await context.close();
   }
 
@@ -405,11 +411,14 @@ try {
   const ordinaryCreditPage = await ordinaryCreditContext.newPage();
   await openPortal(ordinaryCreditPage, baseProfile);
   assert.equal(await ordinaryCreditPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "ordinary members must see credit navigation");
-  assert.equal(await ordinaryCreditPage.getByText("Bilgilerim", { exact: true }).first().isVisible(), true, "ordinary members should see their digital identity");
+  assert.equal(await ordinaryCreditPage.getByText("Bilgilerim", { exact: true }).count(), 0, "identity should not use a separate navigation item");
+  await ordinaryCreditPage.locator('[data-action="open-member-credential"]').click();
+  assert.equal(await ordinaryCreditPage.locator(".member-standard-card").isVisible(), true, "ordinary member should open the standard digital identity");
+  assert.equal(await ordinaryCreditPage.locator(".official-credential").count(), 0, "ordinary member should not receive an office badge");
   await ordinaryCreditContext.close();
 
   for (const viewport of [{ name: "desktop", width: 1440, height: 1000 }, { name: "mobile", width: 390, height: 844 }]) {
-    const identityContext = await browser.newContext({ viewport, reducedMotion: viewport.name === "mobile" ? "no-preference" : "reduce" });
+    const identityContext = await browser.newContext({ viewport, reducedMotion: "reduce" });
     const identityPage = await identityContext.newPage();
     const identityProfile = {
       ...baseProfile,
@@ -426,35 +435,32 @@ try {
         committee: { id: "c2", name: "Disiplin Kurulu", status: "active" }
       }]
     };
-    await openPortal(identityPage, identityProfile, "my-info");
-    assert.equal(await identityPage.locator(".digital-id-front").isVisible(), true, `${viewport.name}: identity front should render`);
-    assert.equal(await identityPage.locator(".digital-id-back").count(), 1, `${viewport.name}: identity back should render`);
-    assert.match(await identityPage.locator(".digital-id-front").innerText(), /451209/);
-    assert.match(await identityPage.locator(".digital-id-front").innerText(), /Seviye 5 \/ 10/);
-    assert.match(await identityPage.locator(".digital-id-back").textContent(), /Disiplin Kurulu Başkanı/);
-    assert.equal(await identityPage.locator(".identity-art-discipline").count() > 0, true, `${viewport.name}: discipline insignia should sync`);
-    const cardSize = await identityPage.locator(".digital-id-front").evaluate((element) => {
+    await openPortal(identityPage, identityProfile);
+    if (viewport.name === "mobile") {
+      await identityPage.locator('[data-action="toggle-sidebar"]').click();
+      await identityPage.locator(".sidebar.open").waitFor({ state: "visible" });
+    }
+    const starButton = identityPage.locator('[data-action="open-member-credential"]');
+    assert.equal(await starButton.isVisible(), true, `${viewport.name}: credential star should be visible`);
+    await starButton.click();
+    await identityPage.waitForSelector(".official-credential-discipline");
+    assert.equal(await identityPage.locator(".official-credential-discipline").isVisible(), true, `${viewport.name}: discipline badge should open`);
+    assert.equal(await identityPage.locator(".member-standard-card").count(), 0, `${viewport.name}: office holder should not see standard identity`);
+    assert.match(await identityPage.locator(".official-credential").innerText(), /Disiplin Kurulu Üyesi/);
+    assert.match(await identityPage.locator(".official-credential").innerText(), /451209/);
+    assert.equal(await identityPage.locator(".official-barcode").isVisible(), true, `${viewport.name}: barcode should render`);
+    const credentialSpacing = await identityPage.evaluate(() => {
+      const emblem = document.querySelector(".official-credential-emblem")?.getBoundingClientRect();
+      const rank = document.querySelector(".official-credential-rank")?.getBoundingClientRect();
+      return { emblemBottom: emblem?.bottom || 0, rankTop: rank?.top || 0 };
+    });
+    assert.equal(credentialSpacing.emblemBottom <= credentialSpacing.rankTop, true, `${viewport.name}: emblem must not overlap the rank label`);
+    const cardSize = await identityPage.locator(".official-credential").evaluate((element) => {
       const rect = element.getBoundingClientRect();
       return { width: rect.width, height: rect.height };
     });
-    assert.equal(cardSize.height > cardSize.width * 1.4, true, `${viewport.name}: identity card should use a vertical ratio`);
-    const flipButton = identityPage.locator('[data-action="toggle-identity-card"]');
-    if (viewport.name === "mobile") {
-      assert.equal(await flipButton.isVisible(), true, "mobile: badge switch should be visible");
-      assert.equal(await identityPage.locator(".digital-id-front").isVisible(), true, "mobile: front should be visible initially");
-      assert.equal(await identityPage.locator(".digital-id-back").isHidden(), true, "mobile: back should be hidden initially");
-      await flipButton.click();
-      await identityPage.waitForFunction(() => document.querySelector("[data-identity-deck]")?.classList.contains("show-back"));
-      await identityPage.locator(".digital-id-front").waitFor({ state: "hidden" });
-      await identityPage.locator(".digital-id-back").waitFor({ state: "visible" });
-      assert.equal(await flipButton.getAttribute("aria-label"), "Kimliği göster");
-      assert.equal(await flipButton.getAttribute("aria-pressed"), "true");
-      assert.equal(await identityPage.locator(".digital-id-front").isHidden(), true, "mobile: front should hide after flip");
-      assert.equal(await identityPage.locator(".digital-id-back").isVisible(), true, "mobile: badge side should show after flip");
-    } else {
-      assert.equal(await flipButton.isHidden(), true, "desktop: mobile badge switch should stay hidden");
-      assert.equal(await identityPage.locator(".digital-id-back").isVisible(), true, "desktop: both identity sides should be visible");
-    }
+    assert.equal(cardSize.height > cardSize.width * 1.4, true, `${viewport.name}: credential should use a vertical ratio`);
+    assert.match(await identityPage.locator(".official-credential").evaluate((element) => getComputedStyle(element).backgroundImage), /linear-gradient/, `${viewport.name}: institution theme should render`);
     const identityOverflow = await identityPage.evaluate(() => ({
       fits: document.documentElement.scrollWidth <= window.innerWidth,
       pageWidth: document.documentElement.scrollWidth,
@@ -476,26 +482,6 @@ try {
     await identityPage.screenshot({ path: join(output, `${viewport.name}-identity.png`), fullPage: true });
     await identityContext.close();
   }
-
-  const reducedIdentityContext = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    reducedMotion: "reduce"
-  });
-  const reducedIdentityPage = await reducedIdentityContext.newPage();
-  await openPortal(reducedIdentityPage, {
-    ...baseProfile,
-    id: "reduced-identity",
-    email: "reduced@example.test"
-  }, "my-info");
-  await reducedIdentityPage.locator('[data-action="toggle-identity-card"]').click();
-  await reducedIdentityPage.locator(".digital-id-back").waitFor({ state: "visible" });
-  assert.equal(
-    await reducedIdentityPage.locator(".digital-id-back").evaluate((element) => getComputedStyle(element).transform),
-    "none",
-    "reduced motion: identity switch should not use 3D rotation"
-  );
-  assert.equal(await reducedIdentityPage.locator(".digital-id-back").isVisible(), true, "reduced motion: badge side should still open");
-  await reducedIdentityContext.close();
 
   const fundedCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const fundedCreditPage = await fundedCreditContext.newPage();
@@ -584,6 +570,7 @@ try {
   await openPortal(accessPage, accessProfile, "access");
   assert.equal(await accessPage.locator(".app-nav .nav-item").count(), 1, "access account should see one menu item");
   assert.equal(await accessPage.getByText("Geçiş", { exact: true }).first().isVisible(), true);
+  assert.equal(await accessPage.locator('[data-action="open-member-credential"]').count(), 0, "system access account should not receive an identity star");
   await accessContext.close();
 
   console.log(`Premium smoke tests passed. Screenshots: ${output}`);
