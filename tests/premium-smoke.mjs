@@ -56,7 +56,7 @@ const baseProfile = {
 
 const members = [
   baseProfile,
-  { ...baseProfile, id: "member-2", email: "deniz@example.test", display_name: "Deniz Çiçek", member_code: "203847", avatar_initials: "DÇ" },
+  { ...baseProfile, id: "member-2", email: "deniz@example.test", display_name: "Deniz Çiçek", member_code: "203847", roles: ["discipline_member", "member"], role: "discipline_member", avatar_initials: "DÇ" },
   { ...baseProfile, id: "president-1", email: "baskan@example.test", display_name: "Genel Başkan", member_code: "304756", roles: ["president", "member"], role: "president", avatar_initials: "GB" },
   { ...baseProfile, id: "system-test", email: "deneme@example.test", display_name: "Kredi Deneme", member_code: null, is_system_account: true, credit_test_access: true },
   { ...baseProfile, id: "admin-hidden", email: "admin.hidden@example.test", display_name: "ADMIN", member_code: null, roles: ["super_admin"], role: "super_admin" }
@@ -117,7 +117,7 @@ function tablePayload(table, url, profile) {
   }];
   if (table === "investigations") return [
     { id: "investigation-used", subject_profile_id: "member-2", title: "Karara bağlanan soruşturma", status: "reviewing", subject: members[1], created_at: "2026-06-18T12:00:00.000Z" },
-    { id: "investigation-open", subject_profile_id: "member-2", title: "Açık soruşturma", status: "open", subject: members[1], created_at: "2026-06-19T12:00:00.000Z" },
+    { id: "investigation-open", subject_profile_id: "member-2", assigned_to: "member-2", title: "Açık soruşturma", status: "open", subject: members[1], assignee: { id: "member-2", display_name: "Deniz Çiçek" }, created_at: "2026-06-19T12:00:00.000Z" },
     { id: "investigation-closed", subject_profile_id: "member-2", title: "Kapalı soruşturma", status: "closed", subject: members[1], created_at: "2026-06-17T12:00:00.000Z" }
   ];
   if (table === "portal_settings") return [{ id: "main", portal_name: "İHP Portalı", logo_url: null, notifications_enabled: true }];
@@ -407,6 +407,12 @@ try {
   await adminPage.locator('[data-action="edit-member"]').first().click();
   assert.equal(await adminPage.locator("#member-discipline-points").isVisible(), true, "admin should directly edit member discipline points");
   assert.equal(await adminPage.locator("#member-discipline-points").inputValue(), "100");
+  await adminPage.keyboard.press("Escape");
+  await adminPage.evaluate(() => { location.hash = "#/portal/investigations"; });
+  await adminPage.waitForSelector('[data-action="edit-investigation"][data-id="investigation-open"]');
+  await adminPage.locator('[data-action="edit-investigation"][data-id="investigation-open"]').click();
+  assert.equal(await adminPage.locator("#investigation-edit-assignee").isVisible(), true, "admin should edit investigation assignee");
+  assert.equal(await adminPage.locator('#investigation-edit-assignee option[value="member-2"]').count(), 1, "admin assignment list should include active discipline staff");
   await adminPage.keyboard.press("Escape");
   await adminContext.close();
 

@@ -112,6 +112,12 @@ async function fetchProfileForAssignment(profileId) {
   );
 }
 
+function isAssignableInvestigator(profile) {
+  if (!profile || profile.status !== "active" || profile.is_system_account) return false;
+  const roles = rolesOf(profile);
+  return disciplineRank(roles) > 0 && !roles.includes("super_admin");
+}
+
 async function notify(profileId, actorId, title, body) {
   if (!profileId) return;
   await supabaseRequest("/rest/v1/notifications", {
@@ -254,6 +260,25 @@ export default async function handler(request, response) {
       evidence_file: String(body.evidenceFile ?? investigation.evidence_file ?? ""),
       evidence_filename: String(body.evidenceFilename ?? investigation.evidence_filename ?? "").slice(0, 180)
     };
+    const assignedToProvided = Object.prototype.hasOwnProperty.call(body, "assignedTo");
+    let nextAssignee = investigation.assigned_to || null;
+    if (assignedToProvided) {
+      const assignedTo = String(body.assignedTo || "").trim();
+      if (assignedTo) {
+        const targetAssignee = await fetchProfileForAssignment(assignedTo);
+        if (!targetAssignee) return json(response, 404, { error: "Atanacak sorusturmaci bulunamadi." });
+        if (!isAssignableInvestigator(targetAssignee)) {
+          return json(response, 400, { error: "Soruşturmacı yalnızca aktif DK personeli olabilir." });
+        }
+        nextAssignee = assignedTo;
+        patch.assigned_to = assignedTo;
+        if (assignedTo !== investigation.assigned_to) patch.assigned_at = new Date().toISOString();
+      } else {
+        nextAssignee = null;
+        patch.assigned_to = null;
+        patch.assigned_at = null;
+      }
+    }
     const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: { Prefer: "return=representation" },
@@ -263,7 +288,28 @@ export default async function handler(request, response) {
     if (!updateResponse.ok) {
       return json(response, updateResponse.status, { error: updated?.message || "Sorusturma duzenlenemedi." });
     }
-    await audit(actor.authUser.id, id, "Sorusturma admin tarafindan duzenlendi", { title: patch.title });
+    const assigneeChanged = assignedToProvided && (investigation.assigned_to || null) !== (nextAssignee || null);
+    await audit(actor.authUser.id, id, "Sorusturma admin tarafindan duzenlendi", {
+      title: patch.title,
+      old_assigned_to: assigneeChanged ? investigation.assigned_to : undefined,
+      new_assigned_to: assigneeChanged ? nextAssignee : undefined
+    });
+    if (assigneeChanged && investigation.assigned_to) {
+      await notify(
+        investigation.assigned_to,
+        actor.authUser.id,
+        "Soruşturma sorumluluğunuz değişti",
+        `${patch.title} soruşturması admin tarafından başka bir yetkiliye aktarıldı.`
+      );
+    }
+    if (assigneeChanged && nextAssignee) {
+      await notify(
+        nextAssignee,
+        actor.authUser.id,
+        "Soruşturma size atandı",
+        `${patch.title} soruşturması admin tarafından size atandı.`
+      );
+    }
     await notify(investigation.subject_profile_id, actor.authUser.id, "Sorusturma kaydi duzenlendi", patch.title);
     return json(response, 200, { ok: true, investigation: updated?.[0] || null });
   }
