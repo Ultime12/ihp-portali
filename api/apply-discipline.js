@@ -1,11 +1,13 @@
+import { randomInt } from "node:crypto";
 import { emailProfile } from "./_mail.js";
 
 const SANCTION_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
-const PROTECTED_ROLES = new Set(["super_admin", "president", "vice_president"]);
+const PROTECTED_ROLES = new Set(["super_admin"]);
 const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "party_suspension", "passive_member"]);
 const POINT_MIN = 0;
 const POINT_MAX = 200;
 const POINT_DELTA_LIMIT = 100;
+const CREDIT_FINE_MAX = 100_000_000;
 const SUSPENSION_DAY_MIN = 1;
 const SUSPENSION_DAY_MAX = 365;
 
@@ -103,6 +105,20 @@ function normalizeSuspensionDays(value) {
   return days;
 }
 
+function normalizeCreditFineAmount(value) {
+  if (value === undefined || value === null || value === "") return 0;
+  const amount = Number(value);
+  if (!Number.isInteger(amount) || amount < 0 || amount > CREDIT_FINE_MAX) return null;
+  return amount;
+}
+
+function normalizeCreditFineInstallments(value, amount) {
+  if (!amount) return 1;
+  const installments = Number(value || 1);
+  if (!Number.isInteger(installments) || installments < 1 || installments > 12 || installments > amount) return null;
+  return installments;
+}
+
 function suspensionUntil(days) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + days);
@@ -146,6 +162,43 @@ async function notify(profileId, actorId, title, body, category = "discipline") 
   }).catch(() => undefined);
 }
 
+async function rpc(name, body) {
+  const response = await supabaseRequest(`/rest/v1/rpc/${name}`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(payload?.message || "Sunucu islemi tamamlanamadi.");
+    error.status = response.status;
+    throw error;
+  }
+  return Array.isArray(payload) ? payload[0] : payload;
+}
+
+function randomCreditAccountCode() {
+  return `IHP${String(randomInt(0, 1_000_000_000)).padStart(9, "0")}`;
+}
+
+async function createCreditFineDebt({ actorId, recordId, memberId, amount, installments, note }) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return await rpc("create_discipline_credit_fine", {
+        p_actor_profile_id: actorId,
+        p_discipline_record_id: recordId,
+        p_member_profile_id: memberId,
+        p_account_code: randomCreditAccountCode(),
+        p_amount: amount,
+        p_installment_count: installments,
+        p_note: note
+      });
+    } catch (error) {
+      if (!/duplicate|unique|account_code/i.test(error.message)) throw error;
+    }
+  }
+  throw new Error("Para cezası için benzersiz kredi hesabı oluşturulamadı.");
+}
+
 export default async function handler(request, response) {
   if (request.method !== "POST") {
     return json(response, 405, { error: "Yalnizca POST istegi kabul edilir." });
@@ -175,8 +228,10 @@ export default async function handler(request, response) {
   let effect = request.body?.effect || "none";
   const pointDelta = normalizePointDelta(request.body?.pointDelta);
   const sanctionDays = normalizeSuspensionDays(request.body?.sanctionDays);
+  const creditFineAmount = normalizeCreditFineAmount(request.body?.creditFineAmount);
+  const creditFineInstallments = normalizeCreditFineInstallments(request.body?.creditFineInstallments, creditFineAmount || 0);
 
-  if (!memberId || !VALID_EFFECTS.has(effect) || pointDelta === null) {
+  if (!memberId || !VALID_EFFECTS.has(effect) || pointDelta === null || creditFineAmount === null || creditFineInstallments === null) {
     return json(response, 400, { error: "Yaptirim bilgisi gecersiz." });
   }
   if (effect === "party_suspension" && sanctionDays === null) {
@@ -222,13 +277,9 @@ export default async function handler(request, response) {
   }
 
   const targetRoles = rolesOf(target);
-  const isPointPenalty = effect === "points_only" && pointDelta < 0;
-  const chairProtectedPointPenalty =
-    isPointPenalty &&
-    actor.roles.includes("discipline_chair") &&
-    targetRoles.some((role) => ["president", "vice_president"].includes(role)) &&
-    !targetRoles.includes("super_admin");
-  if (!isReward && (!disciplineRecord || !disciplineRecord.investigation_id) && !chairProtectedPointPenalty) {
+  const isCreditFine = creditFineAmount > 0;
+  const isAuthorityOrStatusEffect = ["remove_roles", "suspend_member", "party_suspension", "passive_member"].includes(effect);
+  if (!isReward && (!disciplineRecord || !disciplineRecord.investigation_id)) {
     return json(response, 400, { error: "Ceza yaptirimi icin once sorusturmaya bagli disiplin kaydi gerekir." });
   }
   if (
@@ -240,10 +291,13 @@ export default async function handler(request, response) {
     return json(response, 403, { error: "Odul puanini yalnizca admin, baskan veya disiplin kurulu baskani verebilir." });
   }
   if (!isReward) {
-    if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES) && !chairProtectedPointPenalty) {
-      return json(response, 403, { error: "Baskan, baskan yardimcisi veya admin yetkisi disiplin kaydindan alinamaz." });
+    if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
+      return json(response, 403, { error: "Admin hesabi disiplin hiyerarsisi disinda korunur." });
     }
-    if (!chairProtectedPointPenalty && !canAffectTarget(actor.roles, targetRoles)) {
+    if (!actor.roles.includes("super_admin") && isAuthorityOrStatusEffect && targetRoles.some((role) => ["president", "vice_president"].includes(role))) {
+      return json(response, 403, { error: "Baskan veya baskan yardimcisina yalnizca puan/para cezasi uygulanabilir." });
+    }
+    if (!canAffectTarget(actor.roles, targetRoles)) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
     }
   }
@@ -270,20 +324,23 @@ export default async function handler(request, response) {
     payload.discipline_points = pointsAfter;
   }
 
-  if (!Object.keys(payload).length) {
+  if (!Object.keys(payload).length && !isCreditFine) {
     return json(response, 400, { error: "Uygulanacak sistem islemi bulunamadi." });
   }
 
-  const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}`, {
-    method: "PATCH",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify(payload)
-  });
-  const patched = await patchResponse.json().catch(() => null);
-  if (!patchResponse.ok) {
-    return json(response, patchResponse.status, {
-      error: patched?.message || "Yaptirim uygulanamadi."
+  let patched = null;
+  if (Object.keys(payload).length) {
+    const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(memberId)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(payload)
     });
+    patched = await patchResponse.json().catch(() => null);
+    if (!patchResponse.ok) {
+      return json(response, patchResponse.status, {
+        error: patched?.message || "Yaptirim uygulanamadi."
+      });
+    }
   }
 
   if (effect === "remove_roles") {
@@ -300,7 +357,9 @@ export default async function handler(request, response) {
     points_after: pointsAfter,
     sanction_effect: effect,
     sanction_days: effect === "party_suspension" ? sanctionDays : null,
-    sanction_until: sanctionUntil
+    sanction_until: sanctionUntil,
+    credit_fine_amount: creditFineAmount,
+    credit_fine_installments: creditFineInstallments
   };
 
   if (disciplineRecordId) {
@@ -337,6 +396,28 @@ export default async function handler(request, response) {
     savedDisciplineRecord = inserted?.[0] || null;
   }
 
+  let creditFineDebt = null;
+  if (!isReward && creditFineAmount > 0) {
+    const recordId = savedDisciplineRecord?.id || disciplineRecordId;
+    if (!recordId) {
+      return json(response, 400, { error: "Para cezası için disiplin kaydı bulunamadı." });
+    }
+    try {
+      creditFineDebt = await createCreditFineDebt({
+        actorId: actor.authUser.id,
+        recordId,
+        memberId,
+        amount: creditFineAmount,
+        installments: creditFineInstallments,
+        note: decreeBody
+      });
+    } catch (error) {
+      return json(response, error.status || 500, {
+        error: error.message || "Para cezasi kredi borcu olarak olusturulamadi."
+      });
+    }
+  }
+
   await supabaseRequest("/rest/v1/audit_logs", {
     method: "POST",
     headers: { Prefer: "return=minimal" },
@@ -356,6 +437,9 @@ export default async function handler(request, response) {
         effect,
         sanction_days: effect === "party_suspension" ? sanctionDays : null,
         sanction_until: sanctionUntil,
+        credit_fine_amount: creditFineAmount,
+        credit_fine_installments: creditFineInstallments,
+        credit_fine_debt_id: creditFineDebt?.id || null,
         point_delta: pointDelta,
         points_before: pointsBefore,
         points_after: pointsAfter
@@ -378,18 +462,22 @@ export default async function handler(request, response) {
     const suspensionText = effect === "party_suspension"
       ? ` Partiden uzaklastirma suresi: ${sanctionDays} gun. Bitis: ${new Date(sanctionUntil).toLocaleDateString("tr-TR")}.`
       : "";
+    const fineText = creditFineAmount > 0
+      ? ` ${creditFineAmount} kredi para cezasi kredi hesabinizda ${creditFineInstallments} taksit borc olarak gorunecek.`
+      : "";
     await notify(
       memberId,
       actor.authUser.id,
       "Disiplin yaptirimi uygulandi",
-      `${effect === "remove_roles" ? "Yetkileriniz guncellendi" : "Uyelik durumunuz veya disiplin puaniniz guncellendi"}.${pointText}${suspensionText} Kararname: ${reason}`
+      `${effect === "remove_roles" ? "Yetkileriniz guncellendi" : "Uyelik durumunuz veya disiplin puaniniz guncellendi"}.${pointText}${suspensionText}${fineText} Kararname: ${reason}`
     );
   }
 
   return json(response, 200, {
     ok: true,
-    profile: patched?.[0] || null,
+    profile: patched?.[0] || target,
     disciplineRecord: savedDisciplineRecord,
+    creditFineDebt,
     points: { before: pointsBefore, after: pointsAfter, delta: pointDelta }
   });
 }

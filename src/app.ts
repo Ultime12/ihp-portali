@@ -359,11 +359,11 @@ function disciplineRankLabel(profile) {
 }
 
 function isProtectedDisciplineTarget(profile) {
-  return rolesOf(profile).some((role) => ["super_admin", "president", "vice_president"].includes(role));
+  return rolesOf(profile).some((role) => ["super_admin"].includes(role));
 }
 
 function isProtectedInvestigationTarget(profile) {
-  return rolesOf(profile).some((role) => ["president", "vice_president"].includes(role));
+  return rolesOf(profile).some((role) => ["super_admin"].includes(role));
 }
 
 function canSetDisciplineRole(member, targetRole) {
@@ -1927,6 +1927,9 @@ function complaintActions(item) {
     buttons.push(`<button class="table-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="resolved">Çözüldü</button>`);
     buttons.push(`<button class="table-action danger-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>`);
   }
+  if (hasRole("super_admin")) {
+    buttons.push(`<button class="table-action" type="button" data-action="open-complaint-target" data-id="${esc(item.id)}">Ilgili uyeyi degistir</button>`);
+  }
   if (hasRole("super_admin") || (isOwn && item.status === "new")) {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-complaint" data-id="${esc(item.id)}">Sil</button>`);
   }
@@ -2022,6 +2025,39 @@ function openComplaintReview(item, status) {
         <div class="modal-actions">
           <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
           <button class="btn btn-primary btn-sm" type="submit">Kaydet</button>
+        </div>
+      </form>
+    `
+  });
+}
+
+function openComplaintTargetEdit(item) {
+  if (!item || !hasRole("super_admin")) return;
+  const members = visibleProfiles(state.cache.complaintMembers || state.cache.members || [])
+    .filter((member) => member.id !== state.profile?.id);
+  modal({
+    title: "Sikayette ilgili uye",
+    subtitle: "Admin, sikayetin ilgili uye alanini sorumlulugu bozmadan duzenler.",
+    body: `
+      <form class="form-stack" data-form="complaint-target" data-id="${esc(item.id)}">
+        <div class="setup-box">
+          <strong>${esc(item.subject)}</strong>
+          <p class="security-note">${esc(complaintPersonLabel(item))} -> ${esc(complaintTargetLabel(item))}</p>
+        </div>
+        <div class="form-group">
+          <label for="complaint-target-member">Ilgili uye</label>
+          <select class="field" id="complaint-target-member" name="accusedProfileId">
+            <option value="">Genel sikayet</option>
+            ${members.map((member) => `<option value="${esc(member.id)}" ${item.accused_profile_id === member.id ? "selected" : ""}>${esc(member.display_name)} · ${esc(member.email || "")}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="complaint-target-note">Admin notu</label>
+          <textarea class="field" id="complaint-target-note" name="decisionNote" maxlength="800">${esc(item.decision_note || "")}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgec</button>
+          <button class="btn btn-primary btn-sm" type="submit">Ilgili uyeyi kaydet</button>
         </div>
       </form>
     `
@@ -3296,6 +3332,18 @@ async function submitForm(event) {
       await loadPage("complaints");
     }
 
+    if (form.dataset.form === "complaint-target") {
+      await reviewComplaint({
+        id: form.dataset.id,
+        targetEdit: true,
+        accusedProfileId: values.accusedProfileId || null,
+        decisionNote: values.decisionNote || "Ilgili uye admin tarafindan guncellendi."
+      });
+      showToast("Sikayetin ilgili uyesi guncellendi.");
+      closeModal();
+      await loadPage("complaints");
+    }
+
     if (form.dataset.form === "investigation") {
       await manageInvestigation({
         action: "create",
@@ -3566,6 +3614,10 @@ async function handleClick(event) {
   if (action === "open-complaint-review") {
     const item = (state.cache.complaints || []).find((row) => row.id === target.dataset.id);
     openComplaintReview(item, target.dataset.status || "reviewing");
+  }
+  if (action === "open-complaint-target") {
+    const item = (state.cache.complaints || []).find((row) => row.id === target.dataset.id);
+    openComplaintTargetEdit(item);
   }
   if (action === "claim-complaint") {
     const item = (state.cache.complaints || []).find((row) => row.id === target.dataset.id);

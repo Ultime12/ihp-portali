@@ -104,9 +104,19 @@ export default async function handler(request, response) {
     return json(response, 403, { error: "Sikayet islemek icin disiplin kurulu yetkisi gerekir." });
   }
 
-  const { id, status = "reviewing", decisionNote = "", claim = false } = request.body || {};
+  const {
+    id,
+    status = "reviewing",
+    decisionNote = "",
+    claim = false,
+    targetEdit = false,
+    accusedProfileId
+  } = request.body || {};
   if (!id || !VALID_STATUSES.has(status)) {
     return json(response, 400, { error: "Sikayet bilgisi gecersiz." });
+  }
+  if (targetEdit && !actor.roles.includes("super_admin")) {
+    return json(response, 403, { error: "Ilgili uyeyi yalnizca admin degistirebilir." });
   }
 
   const complaintResponse = await supabaseRequest(
@@ -121,19 +131,35 @@ export default async function handler(request, response) {
   if (assignedToOther && !hasAny(actor.roles, OVERRIDE_MANAGERS)) {
     return json(response, 403, { error: "Bu sikayet baska bir yetkili tarafindan ustlenilmis." });
   }
-  const shouldAssignToActor = claim || !complaint.assigned_to || assignedToOther;
+  const shouldAssignToActor = !targetEdit && (claim || !complaint.assigned_to || assignedToOther);
+  const effectiveStatus = targetEdit && request.body?.status === undefined ? complaint.status : status;
 
   const patch = {
-    status,
+    status: effectiveStatus,
     decision_note: decisionNote || complaint.decision_note || null
   };
+
+  let targetProfile = null;
+  const requestedAccusedId = accusedProfileId === undefined ? undefined : String(accusedProfileId || "");
+  if (targetEdit && requestedAccusedId !== undefined) {
+    if (requestedAccusedId) {
+      const targetResponse = await supabaseRequest(
+        `/rest/v1/profiles?id=eq.${encodeURIComponent(requestedAccusedId)}&select=id,display_name,status,is_system_account&limit=1`
+      );
+      [targetProfile] = await targetResponse.json().catch(() => []);
+      if (!targetResponse.ok || !targetProfile || targetProfile.is_system_account) {
+        return json(response, 404, { error: "Ilgili uye bulunamadi." });
+      }
+    }
+    patch.accused_profile_id = requestedAccusedId || null;
+  }
 
   if (shouldAssignToActor) {
     patch.assigned_to = actor.authUser.id;
     patch.assigned_at = new Date().toISOString();
   }
 
-  if (["resolved", "rejected", "closed"].includes(status)) {
+  if (!targetEdit && ["resolved", "rejected", "closed"].includes(effectiveStatus)) {
     if (!String(decisionNote || "").trim()) {
       return json(response, 400, { error: "Sonuc icin karar notu zorunludur." });
     }
@@ -157,13 +183,28 @@ export default async function handler(request, response) {
     ? "Sikayet sorumlulugu disiplin kurulu baskani tarafindan devralindi"
     : claim || !complaint.assigned_to
       ? "Sikayet sorumlulugu alindi"
-    : `Sikayet durumu ${status} olarak guncellendi`;
+    : targetEdit
+      ? "Sikayetin ilgili uyesi admin tarafindan guncellendi"
+      : `Sikayet durumu ${effectiveStatus} olarak guncellendi`;
   await audit(actor.authUser.id, id, summary, {
     old_status: complaint.status,
-    new_status: status,
+    new_status: effectiveStatus,
     old_assigned_to: complaint.assigned_to,
-    new_assigned_to: patch.assigned_to || complaint.assigned_to
+    new_assigned_to: patch.assigned_to || complaint.assigned_to,
+    old_accused_profile_id: complaint.accused_profile_id,
+    new_accused_profile_id: Object.prototype.hasOwnProperty.call(patch, "accused_profile_id")
+      ? patch.accused_profile_id
+      : complaint.accused_profile_id
   });
+
+  if (targetEdit && Object.prototype.hasOwnProperty.call(patch, "accused_profile_id")) {
+    await notify(
+      targetProfile?.id,
+      actor.authUser.id,
+      "Sikayet kaydinda ilgili uye olarak eklendiniz",
+      decisionNote || "Bir sikayet kaydinda ilgili uye alani admin tarafindan guncellendi."
+    );
+  }
 
   if (assignedToOther && shouldAssignToActor) {
     await notify(
@@ -177,7 +218,7 @@ export default async function handler(request, response) {
   await notify(
     complaint.complainant_profile_id,
     actor.authUser.id,
-    status === "reviewing" ? "Şikayetiniz incelemeye alındı" : "Şikayetiniz güncellendi",
+    effectiveStatus === "reviewing" ? "Şikayetiniz incelemeye alındı" : "Şikayetiniz güncellendi",
     decisionNote || "Şikayet kaydınız disiplin kurulu tarafından güncellendi."
   );
 

@@ -47,6 +47,14 @@ function creditMemberForAccount(accountId, data = creditData()) {
   return creditProfileMap(data).get(account?.profile_id) || null;
 }
 
+function creditLoanMap(data = creditData()) {
+  return new Map((data.loans || []).map((item) => [item.id, item]));
+}
+
+function creditLoanDisplayName(loan = {}) {
+  return loan.source === "discipline_fine" ? "Disiplin para cezasi" : "Kredi taksiti";
+}
+
 function creditAmount(value) {
   return `${Number(value || 0).toLocaleString("tr-TR")} kredi`;
 }
@@ -74,6 +82,7 @@ function creditTransactionLabel(kind) {
     transfer_reserve: "Planlı transfer rezervasyonu", transfer_refund: "Planlı transfer iadesi",
     weekly_allowance: "Haftalık ödeme", cheque_issue: "Çek oluşturuldu", cheque_redeem: "Çek bozduruldu",
     loan_disbursement: "Kredi kullandırıldı", loan_repayment: "Kredi ödemesi",
+    discipline_fine_repayment: "Disiplin para cezası ödemesi",
     balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Yetkili düzeltmesi",
     game_entry: "Oyun giriş bedeli", game_reward: "Oyun ödülü"
   })[kind] || kind;
@@ -84,7 +93,7 @@ function creditTransactionDirection(item = {}) {
     return item.metadata?.direction === "credit" ? "incoming" : "outgoing";
   }
   if (["transfer_in", "transfer_refund", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward"].includes(item.kind)) return "incoming";
-  if (["transfer_out", "transfer_tax", "transfer_reserve", "cheque_issue", "loan_repayment", "balance_forfeit", "game_entry"].includes(item.kind)) return "outgoing";
+  if (["transfer_out", "transfer_tax", "transfer_reserve", "cheque_issue", "loan_repayment", "discipline_fine_repayment", "balance_forfeit", "game_entry"].includes(item.kind)) return "outgoing";
   return "neutral";
 }
 
@@ -175,6 +184,7 @@ function creditMemberPage() {
   const pendingLoan = (data.loans || []).find((item) => item.status === "pending");
   const activeLoan = (data.loans || []).find((item) => ["approved", "delinquent"].includes(item.status));
   const dueInstallments = (data.installments || []).filter((item) => item.status !== "paid");
+  const loansById = creditLoanMap(data);
   const scheduledTransfers = data.scheduledTransfers || [];
   const pendingTransfers = scheduledTransfers.filter((item) => item.status === "scheduled");
   const taxRate = Number(settings.transfer_tax_basis_points || 0) / 100;
@@ -238,7 +248,10 @@ function creditMemberPage() {
       </details>
     </section>
     ${scheduledTransfers.length ? `<section class="panel glass credit-scheduled-panel"><div class="panel-head"><div><span class="panel-kicker">Transfer takvimi</span><h3>Planlı gönderimler</h3></div>${badge(`${pendingTransfers.length} bekleyen`, pendingTransfers.length ? "gold" : "gray")}</div><div class="credit-scheduled-list">${scheduledTransfers.map((item) => `<article class="credit-scheduled-item ${esc(item.status)}"><span class="credit-scheduled-orb">${icon(item.status === "completed" ? "check" : item.status === "cancelled" || item.status === "failed" ? "x" : "history")}</span><div><strong>${creditAmount(item.amount)} · ${esc(item.recipient_account_code)}</strong><p>${item.description ? esc(item.description) : "Açıklama yok"}</p><small>${formatDate(item.scheduled_for, true)} · Vergi ${creditAmount(item.tax)}</small></div><div class="credit-scheduled-actions">${badge(creditScheduledTransferStatus(item.status), item.status === "completed" ? "green" : item.status === "scheduled" ? "gold" : "gray")}${item.status === "scheduled" ? `<button class="table-action danger" type="button" data-action="credit-cancel-scheduled-transfer" data-id="${esc(item.id)}">İptal et</button>` : ""}</div></article>`).join("")}</div></section>` : ""}
-    ${dueInstallments.length ? `<section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Ödeme planı</span><h3>Bekleyen taksitler</h3></div>${badge(String(dueInstallments.length), "gold")}</div><div class="credit-installment-list">${dueInstallments.map((item) => `<div><span><strong>${item.installment_no}. taksit</strong><small>Son tarih ${formatDate(item.due_at)}</small></span><b>${creditAmount(item.amount)}</b><button class="btn btn-secondary btn-sm" type="button" data-action="credit-member-pay-installment" data-id="${esc(item.id)}">Taksidi öde</button></div>`).join("")}</div></section>` : ""}
+    ${dueInstallments.length ? `<section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Ödeme planı</span><h3>Bekleyen taksitler</h3></div>${badge(String(dueInstallments.length), "gold")}</div><div class="credit-installment-list">${dueInstallments.map((item) => {
+      const loan = loansById.get(item.loan_id) || {};
+      return `<div><span><strong>${esc(creditLoanDisplayName(loan))} · ${item.installment_no}. taksit</strong><small>Son tarih ${formatDate(item.due_at)}</small></span><b>${creditAmount(item.amount)}</b><button class="btn btn-secondary btn-sm" type="button" data-action="credit-member-pay-installment" data-id="${esc(item.id)}">Taksidi öde</button></div>`;
+    }).join("")}</div></section>` : ""}
     <section class="panel glass"><div class="panel-head"><div><span class="panel-kicker">Hesap defteri</span><h3>Son hareketler</h3></div>${badge(`${(data.transactions || []).length} kayıt`, "blue")}</div>
       ${(data.transactions || []).length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Açıklama</th><th>Tutar</th><th>Son bakiye</th></tr></thead><tbody>${data.transactions.map((item) => `<tr><td>${formatDate(item.created_at, true)}</td><td>${creditTransactionKindMarkup(item)}</td><td><span class="credit-ledger-description">${esc(item.metadata?.description || "—")}</span></td><td>${creditTransactionAmountMarkup(item)}</td><td>${creditAmount(item.balance_after)}</td></tr>`).join("")}</tbody></table></div>` : emptyCard("Henüz hareket yok", "Kredi işlemleri burada listelenecek.")}
     </section>
@@ -351,7 +364,8 @@ function creditPage() {
   const data = creditData();
   const activeAccounts = data.accounts.filter((item) => item.status === "active");
   const totalBalance = activeAccounts.reduce((sum, item) => sum + Number(item.balance || 0), 0);
-  const pendingLoans = data.loans.filter((item) => item.status === "pending");
+  const pendingLoans = data.loans.filter((item) => item.status === "pending" && item.source !== "discipline_fine");
+  const disciplineFineLoans = data.loans.filter((item) => item.source === "discipline_fine" && item.status !== "paid");
   const delinquent = data.installments.filter((item) => item.status === "delinquent");
   return `
     <section class="page-head credit-head"><div><span class="eyebrow">İHP Kredi Yönetimi</span><h2>Operasyon konsolu.</h2><p>Hesap bakiyeleri, kredi başvuruları, çekler ve işlem raporları kişisel hesaptan ayrı yönetilir.</p></div><span class="credit-admin-seal">${icon("lock")} ${hasRole("super_admin") ? "Admin" : "Kredi İşleri Sorumlusu"}</span></section>
@@ -360,6 +374,7 @@ function creditPage() {
       ${metric("Toplam bakiye", totalBalance.toLocaleString("tr-TR"), "Sistem içi kredi", "chart")}
       ${metric("Bekleyen kredi", pendingLoans.length, "Yetkili kararı bekliyor", "inbox")}
       ${metric("Geciken taksit", delinquent.length, "Disiplin akışına gider", "shield")}
+      ${metric("Ceza borcu", disciplineFineLoans.length, "Krediye işlenen para cezası", "shield")}
     </section>
     ${hasRole("super_admin") ? creditSettingsForm(data.settings || {}) : ""}
     ${creditAccountsPanel(data)}

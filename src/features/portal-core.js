@@ -665,18 +665,7 @@ function syncDisciplineSuspensionField(effectSelect = document.getElementById("d
 }
 
 function chairProtectedPointPenaltySelection() {
-  if (!hasRole("discipline_chair")) return false;
-  const memberId = document.getElementById("discipline-member")?.value;
-  const member = (state.cache.disciplineMembers || []).find((item) => item.id === memberId);
-  const memberRoles = rolesOf(member);
-  const effect = document.getElementById("discipline-effect")?.value || "none";
-  const pointDelta = Number(document.getElementById("discipline-point-delta")?.value || 0);
-  return (
-    pointDelta < 0 &&
-    ["none", "points_only"].includes(effect) &&
-    memberRoles.some((role) => ["president", "vice_president"].includes(role)) &&
-    !memberRoles.includes("super_admin")
-  );
+  return false;
 }
 
 function syncDisciplineInvestigationRequirement() {
@@ -712,6 +701,25 @@ openDiscipline = function patchedOpenDiscipline(item = null) {
       </div>`
     );
   }
+  if (!document.getElementById("discipline-credit-fine")) {
+    document.getElementById("discipline-point-delta")?.closest(".form-grid")?.insertAdjacentHTML(
+      "afterend",
+      `<div class="form-grid" data-discipline-credit-fine-group>
+        <div class="form-group">
+          <label for="discipline-credit-fine">Kredi para cezasi</label>
+          <input class="field" id="discipline-credit-fine" name="credit_fine_amount" type="number" min="0" max="100000000" step="1" value="${esc(item?.credit_fine_amount ?? 0)}" />
+          <p class="security-note">Bu tutar bakiyeden hemen dusmez; kredi sisteminde borc olarak gorunur.</p>
+        </div>
+        <div class="form-group">
+          <label for="discipline-credit-installments">Taksit sayisi</label>
+          <select class="field" id="discipline-credit-installments" name="credit_fine_installments">
+            ${Array.from({ length: 12 }, (_, index) => index + 1).map((value) => `<option value="${value}" ${Number(item?.credit_fine_installments || 1) === value ? "selected" : ""}>${value} taksit</option>`).join("")}
+          </select>
+          <p class="security-note">Uye taksitleri kredi hesabindan oder.</p>
+        </div>
+      </div>`
+    );
+  }
   syncDisciplineSuspensionField(effect);
   syncDisciplineInvestigationRequirement();
 };
@@ -734,8 +742,14 @@ handleFilter = async function patchedDisciplineHandleFilter(event) {
 const baseOpenDisciplineDetails = openDisciplineDetails;
 openDisciplineDetails = function patchedOpenDisciplineDetails(item) {
   baseOpenDisciplineDetails(item);
-  if (!item?.sanction_days) return;
   const detailList = modalRoot.querySelector(".detail-list");
+  if (item?.credit_fine_amount > 0) {
+    detailList?.insertAdjacentHTML(
+      "beforeend",
+      `<div class="meta-row"><span>Kredi para cezasi</span><strong>${esc(item.credit_fine_amount)} kredi · ${esc(item.credit_fine_installments || 1)} taksit</strong></div>`
+    );
+  }
+  if (!item?.sanction_days) return;
   detailList?.insertAdjacentHTML(
     "beforeend",
     `<div class="meta-row"><span>Uzaklaştırma süresi</span><strong>${esc(item.sanction_days)} gün · ${formatDate(item.sanction_until, true)}</strong></div>`
@@ -1211,11 +1225,21 @@ submitForm = async function patchedSubmitForm(event) {
         sanction_effect: sanctionEffect = "none",
         point_delta: rawPointDelta = "0",
         sanction_days: rawSanctionDays = "",
+        credit_fine_amount: rawCreditFineAmount = "0",
+        credit_fine_installments: rawCreditFineInstallments = "1",
         ...recordValues
       } = values;
       const pointDelta = Number(rawPointDelta || 0);
       if (!Number.isInteger(pointDelta) || pointDelta < -100 || pointDelta > 0) {
         throw new Error("Ceza puanı 0 ile -100 arasında olmalıdır.");
+      }
+      const creditFineAmount = Number(rawCreditFineAmount || 0);
+      const creditFineInstallments = Number(rawCreditFineInstallments || 1);
+      if (!Number.isInteger(creditFineAmount) || creditFineAmount < 0 || creditFineAmount > 100000000) {
+        throw new Error("Kredi para cezasi 0 ile 100000000 arasinda olmalidir.");
+      }
+      if (!Number.isInteger(creditFineInstallments) || creditFineInstallments < 1 || creditFineInstallments > 12 || (creditFineAmount > 0 && creditFineInstallments > creditFineAmount)) {
+        throw new Error("Para cezasi taksiti 1-12 arasinda ve tutardan buyuk olmayacak sekilde secilmelidir.");
       }
       const sanctionDays = rawSanctionDays ? Number(rawSanctionDays) : null;
       const effectiveSanction = sanctionEffect === "none" && pointDelta !== 0 ? "points_only" : sanctionEffect;
@@ -1224,10 +1248,10 @@ submitForm = async function patchedSubmitForm(event) {
       }
       if (effectiveSanction === "reward_points" || pointDelta > 0) throw new Error("Ödül puanı ayrı Puan Ver ekranından verilir.");
       if (!recordValues.decree_text) throw new Error("Kararname metni zorunludur.");
-      const allowWithoutInvestigation = chairProtectedPointPenaltySelection();
+      const allowWithoutInvestigation = false;
       if (!recordValues.investigation_id && !allowWithoutInvestigation) throw new Error("Ceza girmek için önce soruşturma seçilmelidir.");
 
-      const shouldApply = effectiveSanction !== "none" || pointDelta !== 0;
+      const shouldApply = effectiveSanction !== "none" || pointDelta !== 0 || creditFineAmount > 0;
       const payload = {
         ...recordValues,
         investigation_id: recordValues.investigation_id || null,
@@ -1235,6 +1259,8 @@ submitForm = async function patchedSubmitForm(event) {
         point_delta: pointDelta,
         sanction_effect: effectiveSanction,
         sanction_days: effectiveSanction === "party_suspension" ? sanctionDays : null,
+        credit_fine_amount: creditFineAmount,
+        credit_fine_installments: creditFineInstallments,
         action_taken: recordValues.decree_text,
         created_by: state.profile.id
       };
@@ -1253,6 +1279,8 @@ submitForm = async function patchedSubmitForm(event) {
           effect: effectiveSanction,
           pointDelta,
           sanctionDays,
+          creditFineAmount,
+          creditFineInstallments,
           reason: payload.decree_text || payload.reason || "Disiplin kararnamesi",
           decreeText: payload.decree_text,
           description: payload.description || payload.reason

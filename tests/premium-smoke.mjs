@@ -584,7 +584,10 @@ try {
   await disciplinePage.locator("#discipline-effect").selectOption("points_only");
   await disciplinePage.locator("#discipline-point-delta").fill("-10");
   await disciplinePage.locator("#discipline-point-delta").dispatchEvent("input");
-  assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), null, "DK chair point penalty for president should not require investigation");
+  assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), "", "DK chair point penalty for president should still require investigation");
+  assert.equal(await disciplinePage.locator("#discipline-credit-fine").isVisible(), true, "discipline form should include credit fine debt amount");
+  await disciplinePage.locator("#discipline-credit-fine").fill("120");
+  await disciplinePage.locator("#discipline-credit-installments").selectOption("3");
   await disciplinePage.locator("#discipline-effect").selectOption("remove_roles");
   assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), "", "role sanction should still require investigation");
   await disciplineContext.close();
