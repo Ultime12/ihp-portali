@@ -49,6 +49,17 @@ function hasAny(roles, allowed) {
   return roles.some((role) => allowed.has(role));
 }
 
+function rolesOf(profile) {
+  const roles = Array.isArray(profile?.roles) && profile.roles.length ? [...profile.roles] : [];
+  if (profile?.role && !roles.includes(profile.role)) roles.unshift(profile.role);
+  return [...new Set(roles.filter(Boolean))];
+}
+
+function isComplaintAssignee(profile) {
+  if (!profile || profile.status !== "active" || profile.is_system_account) return false;
+  return rolesOf(profile).some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role));
+}
+
 async function notify(profileId, actorId, title, body) {
   if (!profileId) return;
   await supabaseRequest("/rest/v1/notifications", {
@@ -110,13 +121,13 @@ export default async function handler(request, response) {
     decisionNote = "",
     claim = false,
     targetEdit = false,
-    accusedProfileId
+    assignedTo
   } = request.body || {};
   if (!id || !VALID_STATUSES.has(status)) {
     return json(response, 400, { error: "Sikayet bilgisi gecersiz." });
   }
   if (targetEdit && !actor.roles.includes("super_admin")) {
-    return json(response, 403, { error: "Ilgili uyeyi yalnizca admin degistirebilir." });
+    return json(response, 403, { error: "Sikayet sorumlusunu yalnizca admin degistirebilir." });
   }
 
   const complaintResponse = await supabaseRequest(
@@ -139,19 +150,20 @@ export default async function handler(request, response) {
     decision_note: decisionNote || complaint.decision_note || null
   };
 
-  let targetProfile = null;
-  const requestedAccusedId = accusedProfileId === undefined ? undefined : String(accusedProfileId || "");
-  if (targetEdit && requestedAccusedId !== undefined) {
-    if (requestedAccusedId) {
+  let nextAssigneeProfile = null;
+  const requestedAssignedTo = assignedTo === undefined ? undefined : String(assignedTo || "");
+  if (targetEdit && requestedAssignedTo !== undefined) {
+    if (requestedAssignedTo) {
       const targetResponse = await supabaseRequest(
-        `/rest/v1/profiles?id=eq.${encodeURIComponent(requestedAccusedId)}&select=id,display_name,status,is_system_account&limit=1`
+        `/rest/v1/profiles?id=eq.${encodeURIComponent(requestedAssignedTo)}&select=id,display_name,role,roles,status,is_system_account&limit=1`
       );
-      [targetProfile] = await targetResponse.json().catch(() => []);
-      if (!targetResponse.ok || !targetProfile || targetProfile.is_system_account) {
-        return json(response, 404, { error: "Ilgili uye bulunamadi." });
+      [nextAssigneeProfile] = await targetResponse.json().catch(() => []);
+      if (!targetResponse.ok || !isComplaintAssignee(nextAssigneeProfile)) {
+        return json(response, 404, { error: "Sorumlu yalnizca aktif DK personeli olabilir." });
       }
     }
-    patch.accused_profile_id = requestedAccusedId || null;
+    patch.assigned_to = requestedAssignedTo || null;
+    patch.assigned_at = requestedAssignedTo ? new Date().toISOString() : null;
   }
 
   if (shouldAssignToActor) {
@@ -184,25 +196,34 @@ export default async function handler(request, response) {
     : claim || !complaint.assigned_to
       ? "Sikayet sorumlulugu alindi"
     : targetEdit
-      ? "Sikayetin ilgili uyesi admin tarafindan guncellendi"
+      ? "Sikayet sorumlusu admin tarafindan guncellendi"
       : `Sikayet durumu ${effectiveStatus} olarak guncellendi`;
   await audit(actor.authUser.id, id, summary, {
     old_status: complaint.status,
     new_status: effectiveStatus,
     old_assigned_to: complaint.assigned_to,
-    new_assigned_to: patch.assigned_to || complaint.assigned_to,
+    new_assigned_to: Object.prototype.hasOwnProperty.call(patch, "assigned_to")
+      ? patch.assigned_to
+      : complaint.assigned_to,
     old_accused_profile_id: complaint.accused_profile_id,
-    new_accused_profile_id: Object.prototype.hasOwnProperty.call(patch, "accused_profile_id")
-      ? patch.accused_profile_id
-      : complaint.accused_profile_id
+    new_accused_profile_id: complaint.accused_profile_id
   });
 
-  if (targetEdit && Object.prototype.hasOwnProperty.call(patch, "accused_profile_id")) {
+  if (targetEdit && Object.prototype.hasOwnProperty.call(patch, "assigned_to") && complaint.assigned_to && complaint.assigned_to !== patch.assigned_to) {
     await notify(
-      targetProfile?.id,
+      complaint.assigned_to,
       actor.authUser.id,
-      "Sikayet kaydinda ilgili uye olarak eklendiniz",
-      decisionNote || "Bir sikayet kaydinda ilgili uye alani admin tarafindan guncellendi."
+      "Sikayet sorumlulugunuz degisti",
+      decisionNote || "Ustlendiginiz sikayetin sorumlusu admin tarafindan degistirildi."
+    );
+  }
+
+  if (targetEdit && patch.assigned_to) {
+    await notify(
+      patch.assigned_to,
+      actor.authUser.id,
+      "Sikayet size atandi",
+      decisionNote || "Bir sikayet kaydi admin tarafindan size atandi."
     );
   }
 

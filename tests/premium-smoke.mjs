@@ -106,6 +106,20 @@ function tablePayload(table, url, profile) {
   }
   if (table === "notifications") return [{ id: "n1", title: "Portal bildirimi", body: "Yeni duyuru yayınlandı.", category: "system", created_at: "2026-06-18T17:00:00.000Z", read_at: null }];
   if (table === "applications") return [{ id: "ap1", status: "new", created_at: "2026-06-18T12:00:00.000Z" }];
+  if (table === "complaints") return [{
+    id: "complaint-open",
+    complainant_profile_id: "member-1",
+    accused_profile_id: "president-1",
+    assigned_to: "member-2",
+    subject: "Test sikayeti",
+    description: "Sorumlu degisikligi test kaydi.",
+    priority: "normal",
+    status: "new",
+    complainant: members[0],
+    accused: members[2],
+    assignee: members[1],
+    created_at: "2026-06-18T12:30:00.000Z"
+  }];
   if (table === "discipline_records") return [{
     id: "discipline-existing",
     member_id: "member-2",
@@ -415,6 +429,13 @@ try {
   await adminPage.locator('[data-action="edit-investigation"][data-id="investigation-open"]').click();
   assert.equal(await adminPage.locator("#investigation-edit-assignee").isVisible(), true, "admin should edit investigation assignee");
   assert.equal(await adminPage.locator('#investigation-edit-assignee option[value="member-2"]').count(), 1, "admin assignment list should include active discipline staff");
+  await adminPage.keyboard.press("Escape");
+  await adminPage.evaluate(() => { location.hash = "#/portal/complaints"; });
+  await adminPage.waitForSelector('[data-action="open-complaint-assignee"][data-id="complaint-open"]');
+  await adminPage.locator('[data-action="open-complaint-assignee"][data-id="complaint-open"]').click();
+  assert.equal(await adminPage.locator("#complaint-assignee-member").isVisible(), true, "admin should edit complaint assignee");
+  assert.equal(await adminPage.locator('#complaint-assignee-member option[value="member-2"]').count(), 1, "complaint assignee list should include active discipline staff");
+  assert.equal(await adminPage.locator("#complaint-target-member").count(), 0, "complaint admin edit should not expose accused member editing");
   await adminPage.keyboard.press("Escape");
   await adminContext.close();
 

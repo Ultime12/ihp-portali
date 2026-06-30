@@ -1934,7 +1934,7 @@ function complaintActions(item) {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>`);
   }
   if (hasRole("super_admin")) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-complaint-target" data-id="${esc(item.id)}">Ilgili uyeyi degistir</button>`);
+    buttons.push(`<button class="table-action" type="button" data-action="open-complaint-assignee" data-id="${esc(item.id)}">Sorumluyu degistir</button>`);
   }
   if (hasRole("super_admin") || (isOwn && item.status === "new")) {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-complaint" data-id="${esc(item.id)}">Sil</button>`);
@@ -2031,6 +2031,45 @@ function openComplaintReview(item, status) {
         <div class="modal-actions">
           <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
           <button class="btn btn-primary btn-sm" type="submit">Kaydet</button>
+        </div>
+      </form>
+    `
+  });
+}
+
+function canAssignComplaintTo(member) {
+  if (!member || member.is_system_account || isTechnicalSuperAdmin(member)) return false;
+  const roles = rolesOf(member);
+  return roles.some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role));
+}
+
+function openComplaintAssigneeEdit(item) {
+  if (!item || !hasRole("super_admin")) return;
+  const members = visibleProfiles(state.cache.complaintMembers || state.cache.members || [])
+    .filter((member) => canAssignComplaintTo(member) || member.id === item.assigned_to);
+  modal({
+    title: "Sikayet sorumlusu",
+    subtitle: "Admin, sikayetin sorumlu yetkilisini aktif DK personeli arasindan degistirir.",
+    body: `
+      <form class="form-stack" data-form="complaint-assignee" data-id="${esc(item.id)}">
+        <div class="setup-box">
+          <strong>${esc(item.subject)}</strong>
+          <p class="security-note">Mevcut sorumlu: ${esc(item.assignee?.display_name || "Henuz atanmadi")}</p>
+        </div>
+        <div class="form-group">
+          <label for="complaint-assignee-member">Sorumlu yetkili</label>
+          <select class="field" id="complaint-assignee-member" name="assignedTo">
+            <option value="">Sorumlu atanmadi</option>
+            ${members.map((member) => `<option value="${esc(member.id)}" ${item.assigned_to === member.id ? "selected" : ""}>${esc(member.display_name)} - ${esc(disciplineRankLabel(member))}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="complaint-assignee-note">Admin notu</label>
+          <textarea class="field" id="complaint-assignee-note" name="decisionNote" maxlength="800">${esc(item.decision_note || "")}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgec</button>
+          <button class="btn btn-primary btn-sm" type="submit">Sorumluyu kaydet</button>
         </div>
       </form>
     `
@@ -3342,14 +3381,14 @@ async function submitForm(event) {
       await loadPage("complaints");
     }
 
-    if (form.dataset.form === "complaint-target") {
+    if (form.dataset.form === "complaint-assignee") {
       await reviewComplaint({
         id: form.dataset.id,
         targetEdit: true,
-        accusedProfileId: values.accusedProfileId || null,
-        decisionNote: values.decisionNote || "Ilgili uye admin tarafindan guncellendi."
+        assignedTo: values.assignedTo || null,
+        decisionNote: values.decisionNote || "Sikayet sorumlusu admin tarafindan guncellendi."
       });
-      showToast("Sikayetin ilgili uyesi guncellendi.");
+      showToast("Sikayet sorumlusu guncellendi.");
       closeModal();
       await loadPage("complaints");
     }
@@ -3625,9 +3664,9 @@ async function handleClick(event) {
     const item = (state.cache.complaints || []).find((row) => row.id === target.dataset.id);
     openComplaintReview(item, target.dataset.status || "reviewing");
   }
-  if (action === "open-complaint-target") {
+  if (action === "open-complaint-assignee") {
     const item = (state.cache.complaints || []).find((row) => row.id === target.dataset.id);
-    openComplaintTargetEdit(item);
+    openComplaintAssigneeEdit(item);
   }
   if (action === "claim-complaint") {
     const item = (state.cache.complaints || []).find((row) => row.id === target.dataset.id);
