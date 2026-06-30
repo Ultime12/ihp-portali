@@ -1,6 +1,7 @@
 import {
   getConfig,
   getSession,
+  isAuthenticationError,
   loadConfig,
   changePassword,
   signIn,
@@ -3899,14 +3900,25 @@ async function boot() {
   if (getSession()) {
     try {
       state.profile = await getProfile();
-      setTheme(state.profile?.theme_preference || "blue", false);
-    } catch {
-      await signOut();
+      if (!state.profile) {
+        await signOut();
+      } else {
+        setTheme(state.profile.theme_preference || "blue", false);
+      }
+    } catch (error) {
+      if (isAuthenticationError(error)) await signOut();
       state.profile = null;
+      if (getSession()) {
+        showToast("Oturumunuz korundu. Bağlantı kurulunca sayfayı yenileyin.", "error");
+      }
     }
   }
   if (!state.profile) setTheme("blue", false);
   state.booting = false;
+  if (state.profile && !route().startsWith("portal")) {
+    navigate(state.profile.is_system_account ? "portal/access" : "portal/overview");
+    return;
+  }
   await handleRoute();
 }
 

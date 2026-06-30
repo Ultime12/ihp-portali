@@ -10,6 +10,18 @@ let runtimeConfig: RuntimeConfig = {
 
 let session: AuthSession | null = null;
 
+class SupabaseRequestError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, status: number, code = "") {
+    super(message);
+    this.name = "SupabaseRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 function sessionStore(): Storage | null {
   try {
     return globalThis.localStorage || null;
@@ -79,11 +91,13 @@ async function authRequest(path: string, options: RequestInit = {}): Promise<any
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(
+    throw new SupabaseRequestError(
       payload.error_description ||
         payload.msg ||
         payload.message ||
-        "Kimlik doğrulama işlemi tamamlanamadı."
+        "Kimlik doğrulama işlemi tamamlanamadı.",
+      response.status,
+      payload.error_code || payload.code || payload.error || ""
     );
   }
 
@@ -101,8 +115,15 @@ async function refreshSession() {
     });
     writeSession(payload);
     return payload;
-  } catch {
-    writeSession(null);
+  } catch (error) {
+    if (
+      error instanceof SupabaseRequestError &&
+      error.status >= 400 &&
+      error.status < 500 &&
+      error.status !== 429
+    ) {
+      writeSession(null);
+    }
     return null;
   }
 }
@@ -131,6 +152,10 @@ export function getConfig() {
 
 export function getSession() {
   return session;
+}
+
+export function isAuthenticationError(error: unknown) {
+  return error instanceof SupabaseRequestError && error.status === 401;
 }
 
 export async function getAccessToken() {
@@ -215,7 +240,11 @@ export async function restRequest(path: string, options: RequestInit = {}): Prom
     ) {
       throw new Error("Bu soruşturma için zaten bir disiplin cezası kaydedilmiş.");
     }
-    throw new Error(payload?.message || payload?.hint || "Veri işlemi tamamlanamadı.");
+    throw new SupabaseRequestError(
+      payload?.message || payload?.hint || "Veri işlemi tamamlanamadı.",
+      response.status,
+      payload?.code || ""
+    );
   }
   return payload;
 }

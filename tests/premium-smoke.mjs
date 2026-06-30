@@ -146,6 +146,14 @@ async function mockBackend(page, profile) {
   let scheduledTransfers = [];
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
   await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
+  await page.route("https://mock.supabase.test/auth/v1/token?*", (route) => route.fulfill({
+    json: {
+      access_token: "refreshed-access-token",
+      refresh_token: "refreshed-refresh-token",
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: profile.id, email: profile.email }
+    }
+  }));
   await page.route("https://mock.supabase.test/auth/v1/logout", (route) => route.fulfill({ status: 204, body: "" }));
   await page.route("**/api/flappy-session", async (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
@@ -355,6 +363,27 @@ try {
     assert.deepEqual(errors, [], `${viewport.name}: page errors`);
     await portalContext.close();
   }
+
+  const persistenceContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const persistencePage = await persistenceContext.newPage();
+  await openPortal(persistencePage, baseProfile);
+  await persistencePage.evaluate(() => {
+    const stored = JSON.parse(localStorage.getItem("ihp-auth-session"));
+    stored.expires_at = Math.floor(Date.now() / 1000) - 60;
+    localStorage.setItem("ihp-auth-session", JSON.stringify(stored));
+  });
+  await persistencePage.close();
+  const reopenedPage = await persistenceContext.newPage();
+  await mockBackend(reopenedPage, baseProfile);
+  await reopenedPage.goto(baseUrl);
+  await reopenedPage.waitForSelector(".app-shell");
+  assert.equal(new URL(reopenedPage.url()).hash, "#/portal/overview", "saved session should reopen directly in the portal");
+  assert.equal(
+    await reopenedPage.evaluate(() => JSON.parse(localStorage.getItem("ihp-auth-session"))?.access_token),
+    "refreshed-access-token",
+    "expired saved session should refresh without another login"
+  );
+  await persistenceContext.close();
 
   const deletionContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const deletionPage = await deletionContext.newPage();
