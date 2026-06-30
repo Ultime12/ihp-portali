@@ -239,9 +239,23 @@ export default async function handler(request, response) {
       if (!actor.isCreditManager) return json(response, 403, { error: "Kredi yonetimi yetkisi gerekir." });
       const decision = String(request.body?.decision || "");
       if (!["approved", "rejected"].includes(decision)) return json(response, 400, { error: "Kredi karari gecersiz." });
+      const loanId = String(request.body?.loanId || "");
+      const loanRows = await rows(
+        `/rest/v1/credit_loans?id=eq.${encodeURIComponent(loanId)}&status=eq.pending&select=id,account_id&limit=1`,
+        "Kredi basvurusu alinamadi."
+      );
+      if (!loanRows[0]) return json(response, 404, { error: "Bekleyen kredi basvurusu bulunamadi." });
+      const accountRows = await rows(
+        `/rest/v1/credit_accounts?id=eq.${encodeURIComponent(loanRows[0].account_id)}&select=profile_id&limit=1`,
+        "Kredi hesabi alinamadi."
+      );
+      if (!accountRows[0]) return json(response, 404, { error: "Kredi hesabi bulunamadi." });
+      if (!actor.isAdmin && accountRows[0].profile_id === actor.profile.id) {
+        return json(response, 403, { error: "Kredi Isleri Sorumlusu kendi kredi basvurusunu sonuclandiramaz." });
+      }
       await rpc("review_credit_loan", {
         p_admin_profile_id: actor.profile.id,
-        p_loan_id: String(request.body?.loanId || ""),
+        p_loan_id: loanId,
         p_decision: decision,
         p_note: String(request.body?.note || "").slice(0, 600)
       });

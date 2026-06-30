@@ -246,7 +246,10 @@ async function mockBackend(page, profile) {
         { id: "admin-test-account", profile_id: "member-1", account_code: "IHP123456789", balance: 250, status: "active" },
         ...(profile.roles.includes("credit_officer") ? [{ id: "credit-officer-own", profile_id: profile.id, account_code: "IHP555666777", balance: 300, status: "active" }] : [])
       ], profiles: [...members, profile],
-      loans: profile.roles.includes("credit_officer") ? [{ id: "loan-pending", account_id: "admin-test-account", principal: 500, total_due: 550, term_days: 30, installment_count: 2, status: "pending" }] : [],
+      loans: profile.roles.includes("credit_officer") ? [
+        { id: "loan-pending", account_id: "admin-test-account", principal: 500, total_due: 550, term_days: 30, installment_count: 2, status: "pending" },
+        { id: "loan-own", account_id: "credit-officer-own", principal: 250, total_due: 275, term_days: 14, installment_count: 2, status: "pending" }
+      ] : [],
       installments: [], transactions: [
         { id: "tx-in", account_id: "admin-test-account", kind: "transfer_in", amount: 100, balance_after: 250, created_at: "2026-06-20T12:00:00.000Z", metadata: {} },
         { id: "tx-out", account_id: "admin-test-account", kind: "transfer_out", amount: 50, balance_after: 150, created_at: "2026-06-20T11:00:00.000Z", metadata: {} }
@@ -450,6 +453,8 @@ try {
   assert.equal(await creditOfficerPage.locator('[data-action="open-credit-adjustment"][data-id="credit-officer-own"]').count(), 0, "credit officer must not adjust their own account");
   assert.equal(await creditOfficerPage.getByText("Kendi hesabın", { exact: true }).isVisible(), true, "own officer account should be visibly locked");
   assert.equal(await creditOfficerPage.getByRole("button", { name: "Onayla" }).first().isVisible(), true, "credit officer should review credit applications");
+  assert.equal(await creditOfficerPage.locator('[data-action="open-credit-review"][data-id="loan-own"]').count(), 0, "credit officer must not review their own loan application");
+  assert.equal(await creditOfficerPage.locator(".credit-self-service-lock").isVisible(), true, "own loan application should be visibly locked");
   await creditOfficerContext.close();
 
   const ordinaryCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
