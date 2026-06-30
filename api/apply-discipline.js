@@ -140,6 +140,40 @@ function canAffectTarget(actorRoles, targetRoles) {
   return false;
 }
 
+function disciplineRank(roles) {
+  if (roles.includes("discipline_chair")) return 3;
+  if (roles.includes("discipline_vice_chair")) return 2;
+  if (roles.includes("discipline_member")) return 1;
+  return 0;
+}
+
+const UPPER_POINT_LIMIT_ROLES = new Set([
+  "president",
+  "vice_president",
+  "presidential_aide",
+  "discipline_chair",
+  "discipline_vice_chair"
+]);
+
+function isUpperPointLimitTarget(actorRoles, targetRoles) {
+  const actorRank = disciplineRank(actorRoles);
+  const targetRank = disciplineRank(targetRoles);
+  return (
+    targetRoles.some((role) => UPPER_POINT_LIMIT_ROLES.has(role))
+    || (actorRank > 0 && targetRank > 0 && targetRank >= actorRank)
+  );
+}
+
+function isLimitedUpperRankPointPenalty(effect, pointDelta, creditFineAmount, isAuthorityOrStatusEffect) {
+  return (
+    ["none", "points_only"].includes(effect)
+    && pointDelta < 0
+    && pointDelta >= -50
+    && creditFineAmount === 0
+    && !isAuthorityOrStatusEffect
+  );
+}
+
 async function notify(profileId, actorId, title, body, category = "discipline") {
   await supabaseRequest("/rest/v1/notifications", {
     method: "POST",
@@ -297,7 +331,18 @@ export default async function handler(request, response) {
     if (!actor.roles.includes("super_admin") && isAuthorityOrStatusEffect && targetRoles.some((role) => ["president", "vice_president"].includes(role))) {
       return json(response, 403, { error: "Baskan veya baskan yardimcisina yalnizca puan/para cezasi uygulanabilir." });
     }
-    if (!canAffectTarget(actor.roles, targetRoles)) {
+    const canApplyNormally = canAffectTarget(actor.roles, targetRoles);
+    const upperPointLimitTarget = isUpperPointLimitTarget(actor.roles, targetRoles);
+    if (!actor.roles.includes("super_admin") && upperPointLimitTarget && pointDelta < -50) {
+      return json(response, 400, { error: "Ust rutbe uyelere admin disinda en fazla 50 puan ceza yazilabilir." });
+    }
+    if (
+      !canApplyNormally &&
+      !(
+        upperPointLimitTarget &&
+        isLimitedUpperRankPointPenalty(effect, pointDelta, creditFineAmount, isAuthorityOrStatusEffect)
+      )
+    ) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
     }
   }

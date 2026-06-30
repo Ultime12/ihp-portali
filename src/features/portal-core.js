@@ -85,12 +85,6 @@ canModerateMember = function patchedCanModerateMember(member) {
 const baseCanDisciplineTarget = canDisciplineTarget;
 canDisciplineTarget = function patchedCanDisciplineTarget(member) {
   if (isSystemProfile(member)) return false;
-  const targetRoles = rolesOf(member);
-  if (
-    hasRole("discipline_chair") &&
-    !targetRoles.includes("super_admin") &&
-    targetRoles.some((role) => ["president", "vice_president"].includes(role))
-  ) return true;
   return baseCanDisciplineTarget(member);
 };
 
@@ -1243,6 +1237,10 @@ submitForm = async function patchedSubmitForm(event) {
       }
       const sanctionDays = rawSanctionDays ? Number(rawSanctionDays) : null;
       const effectiveSanction = sanctionEffect === "none" && pointDelta !== 0 ? "points_only" : sanctionEffect;
+      const targetMember = disciplineTargetMembers().find((member) => member.id === recordValues.member_id);
+      if (!hasRole("super_admin") && targetMember && isUpperPointLimitTarget(targetMember) && pointDelta < -50) {
+        throw new Error("Ust rutbe uyelere admin disinda en fazla 50 puan ceza yazilabilir.");
+      }
       if (effectiveSanction === "party_suspension" && (!Number.isInteger(sanctionDays) || sanctionDays < 1 || sanctionDays > 365)) {
         throw new Error("Partiden uzaklaştırma için 1-365 gün arası süre girin.");
       }

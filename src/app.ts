@@ -366,6 +366,16 @@ function isProtectedInvestigationTarget(profile) {
   return rolesOf(profile).some((role) => ["super_admin"].includes(role));
 }
 
+function isUpperPointLimitTarget(profile) {
+  const roles = rolesOf(profile);
+  const actorRank = disciplineRank(state.profile);
+  const targetRank = disciplineRank(profile);
+  return (
+    roles.some((role) => ["president", "vice_president", "presidential_aide", "discipline_chair", "discipline_vice_chair"].includes(role))
+    || (actorRank > 0 && targetRank > 0 && targetRank >= actorRank)
+  );
+}
+
 function canSetDisciplineRole(member, targetRole) {
   if (!member || member.id === state.profile?.id) return false;
   const currentRank = disciplineRank(member);
@@ -385,12 +395,10 @@ function canSetDisciplineRole(member, targetRole) {
 
 function canDisciplineTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
+  if (isTechnicalSuperAdmin(member) || member.is_system_account || isProtectedDisciplineTarget(member)) return false;
   if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
-  if (isProtectedDisciplineTarget(member)) return false;
-  const actorRank = disciplineRank(state.profile);
-  const targetRank = disciplineRank(member);
-  return targetRank === 0 || targetRank < actorRank;
+  return true;
 }
 
 function disciplineTargetMembers() {
@@ -399,13 +407,11 @@ function disciplineTargetMembers() {
 
 function canInvestigateTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
-  if (isTechnicalSuperAdmin(member)) return false;
+  if (isTechnicalSuperAdmin(member) || member.is_system_account) return false;
   if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   if (isProtectedInvestigationTarget(member)) return false;
-  const actorRank = disciplineRank(state.profile);
-  const targetRank = disciplineRank(member);
-  return targetRank === 0 || targetRank < actorRank;
+  return true;
 }
 
 function investigationTargetMembers() {
@@ -3198,6 +3204,10 @@ async function submitForm(event) {
         sanctionEffect === "none" && pointDelta !== 0
           ? "points_only"
           : sanctionEffect;
+      const targetMember = disciplineTargetMembers().find((member) => member.id === recordValues.member_id);
+      if (!hasRole("super_admin") && targetMember && isUpperPointLimitTarget(targetMember) && pointDelta < -50) {
+        throw new Error("Ust rutbe uyelere admin disinda en fazla 50 puan ceza yazilabilir.");
+      }
       if (effectiveSanction === "reward_points" || pointDelta > 0) throw new Error("Ödül puanı ayrı Puan Ver ekranından verilir.");
       if (!recordValues.decree_text) throw new Error("Kararname metni zorunludur.");
       if (!recordValues.investigation_id) throw new Error("Ceza girmek için önce soruşturma seçilmelidir.");

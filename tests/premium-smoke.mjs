@@ -58,6 +58,8 @@ const members = [
   baseProfile,
   { ...baseProfile, id: "member-2", email: "deniz@example.test", display_name: "Deniz Çiçek", member_code: "203847", roles: ["discipline_member", "member"], role: "discipline_member", avatar_initials: "DÇ" },
   { ...baseProfile, id: "president-1", email: "baskan@example.test", display_name: "Genel Başkan", member_code: "304756", roles: ["president", "member"], role: "president", avatar_initials: "GB" },
+  { ...baseProfile, id: "aide-1", email: "aide@example.test", display_name: "Oguz Pamir Ozmen", member_code: "405867", roles: ["presidential_aide", "member"], role: "presidential_aide", avatar_initials: "OP" },
+  { ...baseProfile, id: "discipline-chair-target", email: "dk-chair@example.test", display_name: "DK Baskani", member_code: "506978", roles: ["discipline_chair", "member"], role: "discipline_chair", avatar_initials: "DK" },
   { ...baseProfile, id: "system-test", email: "deneme@example.test", display_name: "Kredi Deneme", member_code: null, is_system_account: true, credit_test_access: true },
   { ...baseProfile, id: "admin-hidden", email: "admin.hidden@example.test", display_name: "ADMIN", member_code: null, roles: ["super_admin"], role: "super_admin" }
 ];
@@ -304,7 +306,7 @@ try {
     assert.equal(await portalPage.evaluate(() => getComputedStyle(document.documentElement).colorScheme), "light", "light theme must use a light color scheme");
     assert.equal(await portalPage.locator(".dashboard-hero h2").evaluate((element) => getComputedStyle(element).color), "rgb(16, 36, 59)", "light theme hero text must keep readable contrast");
     await portalPage.screenshot({ path: join(output, `${viewport.name}-portal-light.png`), fullPage: true });
-    assert.equal(await portalPage.locator(".premium-metrics .metric-card").first().locator("strong").innerText(), "03", "dashboard member count must exclude test and technical admin accounts");
+    assert.equal(await portalPage.locator(".premium-metrics .metric-card").first().locator("strong").innerText(), "05", "dashboard member count must exclude test and technical admin accounts");
     await portalPage.locator("[data-theme-select]").selectOption("green");
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "green", "theme selection should apply");
     await portalPage.locator('[data-action="open-notifications"]').click();
@@ -568,6 +570,8 @@ try {
   };
   await openPortal(disciplinePage, disciplineProfile, "discipline");
   await disciplinePage.locator('[data-action="open-discipline"]').click();
+  assert.equal(await disciplinePage.locator('#discipline-member option[value="discipline-chair-target"]').count(), 1, "DK chair should be selectable for point penalties");
+  assert.equal(await disciplinePage.locator('#discipline-member option[value="aide-1"]').count(), 1, "presidential aide should be selectable for discipline action");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-open"]').count(), 1, "unused open investigation should be selectable");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-used"]').count(), 0, "investigation with a penalty must not be selectable again");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-closed"]').count(), 0, "closed investigation must not be selectable");
@@ -590,6 +594,12 @@ try {
   await disciplinePage.locator("#discipline-credit-installments").selectOption("3");
   await disciplinePage.locator("#discipline-effect").selectOption("remove_roles");
   assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), "", "role sanction should still require investigation");
+  await disciplinePage.keyboard.press("Escape");
+  await disciplinePage.goto(`${baseUrl}/#/portal/investigations`);
+  await disciplinePage.waitForSelector(".app-shell");
+  await disciplinePage.locator('[data-action="open-investigation"]').click();
+  assert.equal(await disciplinePage.locator('#investigation-subject option[value="discipline-chair-target"]').count(), 1, "investigation can be opened for DK chair");
+  assert.equal(await disciplinePage.locator('#investigation-subject option[value="aide-1"]').count(), 1, "investigation can be opened for presidential aide");
   await disciplineContext.close();
 
   const accessContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

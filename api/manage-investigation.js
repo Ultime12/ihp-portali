@@ -90,6 +90,12 @@ function canAffectTarget(actorRoles, targetRoles) {
   return targetRank === 0 || targetRank < actorRank;
 }
 
+function canOpenInvestigationFor(actorRoles, targetRoles) {
+  if (actorRoles.includes("super_admin")) return true;
+  if (targetRoles.some((role) => PROTECTED_ROLES.has(role))) return false;
+  return disciplineRank(actorRoles) > 0;
+}
+
 async function fetchSingle(path) {
   const response = await supabaseRequest(path);
   const [row] = await response.json().catch(() => []);
@@ -188,10 +194,13 @@ export default async function handler(request, response) {
     }
 
     const subject = await fetchSingle(
-      `/rest/v1/profiles?id=eq.${encodeURIComponent(subjectProfileId)}&select=id,role,roles,status&limit=1`
+      `/rest/v1/profiles?id=eq.${encodeURIComponent(subjectProfileId)}&select=id,role,roles,status,is_system_account&limit=1`
     );
     if (!subject) return json(response, 404, { error: "Ilgili uye bulunamadi." });
-    if (!canAffectTarget(actor.roles, rolesOf(subject))) {
+    if (subject.status !== "active" || subject.is_system_account) {
+      return json(response, 400, { error: "Sorusturma yalnizca aktif gercek uyeler icin acilabilir." });
+    }
+    if (!canOpenInvestigationFor(actor.roles, rolesOf(subject))) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu sorusturmaya izin vermiyor." });
     }
 
@@ -319,9 +328,9 @@ export default async function handler(request, response) {
   }
 
   const subject = await fetchSingle(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(investigation.subject_profile_id)}&select=id,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(investigation.subject_profile_id)}&select=id,role,roles,status,is_system_account&limit=1`
   );
-  if (subject && !canAffectTarget(actor.roles, rolesOf(subject))) {
+  if (subject && (subject.is_system_account || !canOpenInvestigationFor(actor.roles, rolesOf(subject)))) {
     return json(response, 403, { error: "Disiplin hiyerarsisi bu sorusturmaya izin vermiyor." });
   }
 
