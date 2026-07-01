@@ -1,7 +1,8 @@
 import { randomInt } from "node:crypto";
 import { emailProfile } from "./_mail.js";
 
-const SANCTION_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const DISCIPLINE_DECISION_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const REWARD_ROLES = new Set(["president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin"]);
 const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "party_suspension", "passive_member"]);
 const POINT_MIN = 0;
@@ -55,6 +56,12 @@ async function authenticateActor(request) {
 
 function hasAny(roles, allowed) {
   return roles.some((role) => allowed.has(role));
+}
+
+async function fetchSingle(path) {
+  const response = await supabaseRequest(path);
+  const rows = await response.json().catch(() => []);
+  return response.ok ? rows?.[0] || null : null;
 }
 
 function rolesOf(profile) {
@@ -126,51 +133,9 @@ function suspensionUntil(days) {
 }
 
 function canAffectTarget(actorRoles, targetRoles) {
-  if (actorRoles.includes("super_admin")) return true;
-  if (targetRoles.some((role) => PROTECTED_ROLES.has(role) || role === "discipline_chair")) return false;
-  if (actorRoles.includes("discipline_chair")) {
-    return true;
-  }
-  if (actorRoles.includes("discipline_vice_chair")) {
-    return !targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair"].includes(role));
-  }
-  if (actorRoles.includes("discipline_member")) {
-    return !targetRoles.some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role));
-  }
-  return false;
-}
-
-function disciplineRank(roles) {
-  if (roles.includes("discipline_chair")) return 3;
-  if (roles.includes("discipline_vice_chair")) return 2;
-  if (roles.includes("discipline_member")) return 1;
-  return 0;
-}
-
-const UPPER_POINT_LIMIT_ROLES = new Set([
-  "president",
-  "vice_president",
-  "presidential_aide",
-  "discipline_chair",
-  "discipline_vice_chair"
-]);
-
-function isUpperPointLimitTarget(actorRoles, targetRoles) {
-  const actorRank = disciplineRank(actorRoles);
-  const targetRank = disciplineRank(targetRoles);
   return (
-    targetRoles.some((role) => UPPER_POINT_LIMIT_ROLES.has(role))
-    || (actorRank > 0 && targetRank > 0 && targetRank >= actorRank)
-  );
-}
-
-function isLimitedUpperRankPointPenalty(effect, pointDelta, creditFineAmount, isAuthorityOrStatusEffect) {
-  return (
-    ["none", "points_only"].includes(effect)
-    && pointDelta < 0
-    && pointDelta >= -50
-    && creditFineAmount === 0
-    && !isAuthorityOrStatusEffect
+    hasAny(actorRoles, DISCIPLINE_DECISION_ROLES) &&
+    !targetRoles.some((role) => PROTECTED_ROLES.has(role))
   );
 }
 
@@ -247,9 +212,7 @@ export default async function handler(request, response) {
   }
 
   const actor = await authenticateActor(request);
-  if (!actor || !hasAny(actor.roles, SANCTION_MANAGERS)) {
-    return json(response, 403, { error: "Disiplin yaptirimi uygulama yetkiniz yok." });
-  }
+  if (!actor) return json(response, 401, { error: "Geçerli üye oturumu bulunamadı." });
 
   const {
     memberId,
@@ -285,6 +248,13 @@ export default async function handler(request, response) {
     return json(response, 400, { error: "Pozitif puan yalnizca odul islemiyle verilebilir." });
   }
   const isReward = effect === "reward_points";
+  if (isReward ? !hasAny(actor.roles, REWARD_ROLES) : !hasAny(actor.roles, DISCIPLINE_DECISION_ROLES)) {
+    return json(response, 403, {
+      error: isReward
+        ? "Ödül kararını yalnızca Başkan veya Disiplin Kurulu verebilir."
+        : "Disiplin yaptırımını yalnızca bağımsız Disiplin Kurulu uygulayabilir."
+    });
+  }
   const decreeBody = String(decreeText || reason || "").trim();
   const recordReason = String(description || request.body?.shortReason || (isReward ? "Odul puani" : "Disiplin kararnamesi")).trim();
 
@@ -309,41 +279,36 @@ export default async function handler(request, response) {
   if (!profileResponse.ok || !target) {
     return json(response, 404, { error: "Uye bulunamadi." });
   }
+  if (target.status === "left") {
+    return json(response, 400, {
+      error: "Partiden ayrılan kişi hakkında görev veya puan yaptırımı uygulanamaz; soruşturma yalnızca arşiv amacıyla sonuçlandırılabilir."
+    });
+  }
 
   const targetRoles = rolesOf(target);
   const isCreditFine = creditFineAmount > 0;
-  const isAuthorityOrStatusEffect = ["remove_roles", "suspend_member", "party_suspension", "passive_member"].includes(effect);
   if (!isReward && (!disciplineRecord || !disciplineRecord.investigation_id)) {
     return json(response, 400, { error: "Ceza yaptirimi icin once sorusturmaya bagli disiplin kaydi gerekir." });
   }
-  if (
-    isReward &&
-    !actor.roles.includes("super_admin") &&
-    !actor.roles.includes("president") &&
-    !actor.roles.includes("discipline_chair")
-  ) {
-    return json(response, 403, { error: "Odul puanini yalnizca admin, baskan veya disiplin kurulu baskani verebilir." });
+  if (!isReward) {
+    const investigation = await fetchSingle(
+      `/rest/v1/investigations?id=eq.${encodeURIComponent(disciplineRecord.investigation_id)}&select=id,subject_profile_id,defense_status&limit=1`
+    );
+    if (!investigation || investigation.subject_profile_id !== memberId) {
+      return json(response, 400, { error: "Disiplin kaydının soruşturma bağlantısı geçersiz." });
+    }
+    if (investigation.defense_status === "pending") {
+      return json(response, 400, {
+        error: "Üyenin savunma hakkı tamamlanmadan disiplin yaptırımı uygulanamaz."
+      });
+    }
   }
   if (!isReward) {
-    if (!actor.roles.includes("super_admin") && hasAny(targetRoles, PROTECTED_ROLES)) {
+    if (hasAny(targetRoles, PROTECTED_ROLES)) {
       return json(response, 403, { error: "Admin hesabi disiplin hiyerarsisi disinda korunur." });
     }
-    if (!actor.roles.includes("super_admin") && isAuthorityOrStatusEffect && targetRoles.some((role) => ["president", "vice_president"].includes(role))) {
-      return json(response, 403, { error: "Baskan veya baskan yardimcisina yalnizca puan/para cezasi uygulanabilir." });
-    }
-    const canApplyNormally = canAffectTarget(actor.roles, targetRoles);
-    const upperPointLimitTarget = isUpperPointLimitTarget(actor.roles, targetRoles);
-    if (!actor.roles.includes("super_admin") && upperPointLimitTarget && pointDelta < -50) {
-      return json(response, 400, { error: "Ust rutbe uyelere admin disinda en fazla 50 puan ceza yazilabilir." });
-    }
-    if (
-      !canApplyNormally &&
-      !(
-        upperPointLimitTarget &&
-        isLimitedUpperRankPointPenalty(effect, pointDelta, creditFineAmount, isAuthorityOrStatusEffect)
-      )
-    ) {
-      return json(response, 403, { error: "Disiplin hiyerarsisi bu yaptirima izin vermiyor." });
+    if (!canAffectTarget(actor.roles, targetRoles)) {
+      return json(response, 403, { error: "Bu yaptırım için Disiplin Kurulu yetkisi gerekir." });
     }
   }
 

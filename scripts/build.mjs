@@ -13,6 +13,7 @@ const featureFiles = [
   "logo-report.js",
   "admin-role.js",
   "investigation-transfer.js",
+  "governance.js",
   "agreements-ui.js",
   "agreements-runtime.js",
   "flappy-engine.js",

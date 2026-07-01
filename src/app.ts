@@ -38,7 +38,9 @@ import {
   reviewComplaint,
   reviewApplication,
   deleteOwnAccount,
-  updateRecord
+  updateRecord,
+  governanceAction,
+  agreementAction
 } from "./lib/portal-service.js";
 import { icon } from "./ui/icons.js";
 
@@ -182,7 +184,7 @@ function visibleMembers() {
 }
 
 function isDisciplineRoleManager() {
-  return hasRole("super_admin", "president", "discipline_chair", "discipline_vice_chair");
+  return hasRole("president", "discipline_chair");
 }
 
 function canRemoveDisciplineRole(member) {
@@ -194,12 +196,12 @@ const permissions = {
   members: () => true,
   announce: () => hasRole("super_admin", "president", "vice_president", "presidential_aide", "discipline_chair", "discipline_vice_chair", "spokesperson"),
   disciplineView: () =>
-    hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"),
-  disciplineManage: () => hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"),
-  disciplineCouncil: () => hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"),
+    hasRole("discipline_chair", "discipline_vice_chair", "discipline_member"),
+  disciplineManage: () => hasRole("discipline_chair", "discipline_vice_chair", "discipline_member"),
+  disciplineCouncil: () => hasRole("discipline_chair", "discipline_vice_chair", "discipline_member"),
   presidency: () => hasRole("super_admin", "president", "vice_president", "presidential_aide"),
   admissions: () => true,
-  complaints: () => true,
+  complaints: () => !isTechnicalSuperAdmin(),
   youth: () => hasRole("super_admin", "youth_chair")
 };
 
@@ -211,9 +213,9 @@ const navItems = [
   ["positions", "Görev Dağılımı", "briefcase", () => true],
   ["committees", "Kurullar", "grid", () => true],
   ["announcements", "Duyurular", "bell", () => true],
-  ["discipline", "Disiplin Kayıtları", "shield", () => true],
+  ["discipline", "Disiplin Kayıtları", "shield", () => !isTechnicalSuperAdmin()],
   ["complaints", "Şikayetler", "clipboard", permissions.complaints],
-  ["investigations", "Soruşturmalar", "search", permissions.disciplineCouncil],
+  ["investigations", "Soruşturmalar", "search", () => !isTechnicalSuperAdmin()],
   ["regulation", "Yönetmelik", "book", () => true],
   ["youth", "Gençlik Kolları", "sparkles", () => true],
   ["applications", "Başvurular", "inbox", permissions.admissions],
@@ -317,7 +319,7 @@ function sanctionEffectLabel(effect = "none") {
 }
 
 function canAwardPoints() {
-  return hasRole("super_admin", "president", "discipline_chair");
+  return hasRole("president", "discipline_chair", "discipline_vice_chair", "discipline_member");
 }
 
 const LEADERSHIP_ORDER = [
@@ -367,29 +369,17 @@ function isProtectedInvestigationTarget(profile) {
   return rolesOf(profile).some((role) => ["super_admin"].includes(role));
 }
 
-function isUpperPointLimitTarget(profile) {
-  const roles = rolesOf(profile);
-  const actorRank = disciplineRank(state.profile);
-  const targetRank = disciplineRank(profile);
-  return (
-    roles.some((role) => ["president", "vice_president", "presidential_aide", "discipline_chair", "discipline_vice_chair"].includes(role))
-    || (actorRank > 0 && targetRank > 0 && targetRank >= actorRank)
-  );
-}
-
 function canSetDisciplineRole(member, targetRole) {
   if (!member || member.id === state.profile?.id) return false;
   const currentRank = disciplineRank(member);
   const targetRank = targetRole === "discipline_chair" ? 3 : targetRole === "discipline_vice_chair" ? 2 : targetRole === "discipline_member" ? 1 : 0;
   if (currentRank === targetRank) return false;
-  if (hasRole("super_admin")) return true;
   if (rolesOf(member).includes("super_admin")) return false;
-  if (hasRole("president")) return true;
-  if (hasRole("discipline_chair")) {
-    return currentRank > 0 && currentRank < 3 && targetRank < 3;
+  if (hasRole("president")) {
+    return targetRank === 3 || (currentRank === 3 && targetRank === 0);
   }
-  if (hasRole("discipline_vice_chair")) {
-    return currentRank === 1 && (targetRank === 2 || targetRank === 0);
+  if (hasRole("discipline_chair")) {
+    return currentRank < 3 && targetRank < 3;
   }
   return false;
 }
@@ -397,7 +387,6 @@ function canSetDisciplineRole(member, targetRole) {
 function canDisciplineTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
   if (isTechnicalSuperAdmin(member) || member.is_system_account || isProtectedDisciplineTarget(member)) return false;
-  if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   return true;
 }
@@ -409,7 +398,6 @@ function disciplineTargetMembers() {
 function canInvestigateTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
   if (isTechnicalSuperAdmin(member) || member.is_system_account) return false;
-  if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   if (isProtectedInvestigationTarget(member)) return false;
   return true;
@@ -517,18 +505,18 @@ function canEditRegulations() {
 
 function canReviewApplication(item) {
   if (!item) return false;
-  if (hasRole("super_admin")) return true;
   if (item.claimed_by && item.claimed_by !== state.profile?.id && !hasRole("discipline_chair")) return false;
   const committeeName = targetCommitteeName(item);
   const committeeId = targetCommitteeId(item);
+  if (committeeName === "Disiplin Kurulu") {
+    return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
+  }
+  if (hasRole("super_admin")) return true;
   if (
     (isExecutiveCommittee(committeeName) || currentCommitteeIds().includes(committeeId)) &&
     hasRole("president", "vice_president", "presidential_aide")
   ) {
     return true;
-  }
-  if (committeeName === "Disiplin Kurulu") {
-    return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
   }
   if (committeeName === "Gençlik Kolları") return hasRole("youth_chair");
   return false;
@@ -539,7 +527,7 @@ function canClaimApplication(item) {
     item &&
       !item.claimed_by &&
       targetCommitteeName(item) === "Disiplin Kurulu" &&
-      hasRole("super_admin", "discipline_chair") &&
+      hasRole("discipline_chair") &&
       !["accepted", "rejected"].includes(item.status)
   );
 }
@@ -1476,7 +1464,7 @@ function presidencyPage() {
                     <div class="hierarchy-actions">
                       ${badgeForStatus(member.status)}
                       ${canModerateMember(member) ? `<button class="table-action" type="button" data-action="edit-member" data-id="${esc(member.id)}">${hasRole("super_admin") ? "Profil / rol düzenle" : "Rol / durum yönet"}</button>` : ""}
-                      ${hasRole("super_admin") && member.id !== state.profile?.id ? `<button class="table-action danger-action" type="button" data-action="delete-member" data-id="${esc(member.id)}">Sil</button>` : ""}
+                      ${hasRole("super_admin") && member.id !== state.profile?.id ? `<button class="table-action danger-action" type="button" data-action="delete-member" data-id="${esc(member.id)}">Üyeliği sonlandır</button>` : ""}
                     </div>
                   </article>
                 `
@@ -1601,13 +1589,11 @@ function appealStatusOf(item) {
 function canAppealDiscipline(item) {
   if (!item || item.archived || item.member_id !== state.profile?.id) return false;
   if (item.decision_status !== "decided") return false;
-  if (appealStatusOf(item) !== "none") return false;
-  const createdAt = new Date(item.created_at).valueOf();
-  return Number.isFinite(createdAt) && Date.now() - createdAt <= 3 * 24 * 60 * 60 * 1000;
+  return appealStatusOf(item) === "none";
 }
 
 function canReviewDisciplineAppeal(item) {
-  return Boolean(item && appealStatusOf(item) === "submitted" && hasRole("super_admin", "discipline_chair"));
+  return Boolean(item && appealStatusOf(item) === "submitted" && hasRole("discipline_chair"));
 }
 
 function disciplineRowActions(item) {
@@ -1616,7 +1602,7 @@ function disciplineRowActions(item) {
     if (hasRole("super_admin")) {
       buttons.push(`<button class="table-action" type="button" data-action="edit-discipline" data-id="${esc(item.id)}">Düzelt</button>`);
     }
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-discipline" data-id="${esc(item.id)}">Sil</button>`);
+    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-discipline" data-id="${esc(item.id)}">Arşivle</button>`);
   }
   if (canAppealDiscipline(item)) {
     buttons.push(`<button class="table-action" type="button" data-action="open-discipline-appeal" data-id="${esc(item.id)}">İtiraz et</button>`);
@@ -1637,7 +1623,7 @@ function disciplinePage() {
     ${pageHeader(
       "Gizlilik odaklı kayıtlar",
       permissions.disciplineView() ? "Disiplin kayıtları" : "Disiplin durumum",
-      "Başkan ve başkan yardımcısı disiplin kayıtlarını göremez; kayıtlar yalnızca ilgili üye, disiplin yetkilileri ve sistem yöneticisine açıktır.",
+      "Kayıtlar yalnızca ilgili üye ve yetkili Disiplin Kurulu personeline açıktır.",
       permissions.disciplineManage() || canAwardPoints()
         ? `<div class="inline-actions">${permissions.disciplineManage() ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-discipline">${icon("plus")} Ceza Kararnamesi</button>` : ""}${canAwardPoints() ? `<button class="btn btn-secondary btn-sm" type="button" data-action="open-award-points">${icon("sparkles")} Puan Ver</button>` : ""}</div>`
         : ""
@@ -1803,7 +1789,8 @@ function applicationPersonLabel(item) {
 
 function applicationActions(item) {
   const isOwn = item.applicant_profile_id === state.profile?.id;
-  const claimedByOther = item.claimed_by && item.claimed_by !== state.profile?.id && !hasRole("super_admin", "discipline_chair");
+  const isDisciplineApplication = targetCommitteeName(item) === "Disiplin Kurulu";
+  const claimedByOther = item.claimed_by && item.claimed_by !== state.profile?.id && !hasRole("discipline_chair");
   if (claimedByOther) {
     return `<p class="security-note">Bu başvuru ${esc(item.claimer?.display_name || "başka bir yetkili")} tarafından üstlenildi.</p>`;
   }
@@ -1814,14 +1801,14 @@ function applicationActions(item) {
         <button class="table-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="reviewing">İncelemede</button>
         <button class="table-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="accepted">Onayla</button>
         <button class="table-action danger-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>
-        ${hasRole("super_admin") ? `<button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Sil</button>` : ""}
+        ${hasRole("super_admin") && !isDisciplineApplication ? `<button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Sil</button>` : ""}
       </div>
     `;
   }
   if (isOwn && item.status === "new") {
     return `<div class="inline-actions"><button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Başvuruyu sil</button></div>`;
   }
-  if (hasRole("super_admin")) {
+  if (hasRole("super_admin") && !isDisciplineApplication) {
     return `<div class="inline-actions"><button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Başvuruyu sil</button></div>`;
   }
   return "";
@@ -1831,7 +1818,7 @@ function applicationsPage() {
   const rows = state.cache.applications || [];
   const visibleRows = rows.filter(
     (item) =>
-      hasRole("super_admin") ||
+      (hasRole("super_admin") && targetCommitteeName(item) !== "Disiplin Kurulu") ||
       item.applicant_profile_id === state.profile?.id ||
       item.created_by === state.profile?.id ||
       canReviewApplication(item) ||
@@ -1910,7 +1897,6 @@ function complaintTargetLabel(item) {
 
 function canHandleComplaint(item) {
   if (!item) return false;
-  if (hasRole("super_admin")) return true;
   if (hasRole("discipline_chair")) return true;
   if (item.assigned_to && item.assigned_to !== state.profile?.id) return false;
   return hasRole("discipline_vice_chair", "discipline_member");
@@ -1918,9 +1904,9 @@ function canHandleComplaint(item) {
 
 function canClaimComplaint(item) {
   if (!item || ["resolved", "rejected", "closed"].includes(item.status)) return false;
-  if (!hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
+  if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   if (!item.assigned_to) return true;
-  return item.assigned_to !== state.profile?.id && hasRole("super_admin", "discipline_chair");
+  return item.assigned_to !== state.profile?.id && hasRole("discipline_chair");
 }
 
 function complaintActions(item) {
@@ -1934,10 +1920,7 @@ function complaintActions(item) {
     buttons.push(`<button class="table-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="resolved">Çözüldü</button>`);
     buttons.push(`<button class="table-action danger-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>`);
   }
-  if (hasRole("super_admin")) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-complaint-assignee" data-id="${esc(item.id)}">Sorumluyu degistir</button>`);
-  }
-  if (hasRole("super_admin") || (isOwn && item.status === "new")) {
+  if (isOwn && item.status === "new") {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-complaint" data-id="${esc(item.id)}">Sil</button>`);
   }
   return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
@@ -2117,19 +2100,15 @@ function investigationSubjectLabel(item) {
 function investigationActions(item) {
   const buttons = [];
   if (!item) return "";
-  if (hasRole("super_admin")) {
-    buttons.push(`<button class="table-action" type="button" data-action="edit-investigation" data-id="${esc(item.id)}">Düzenle</button>`);
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-investigation" data-id="${esc(item.id)}">Sil</button>`);
-  }
   if (["cancelled", "closed"].includes(item.status)) return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
   const assignedToOther = item.assigned_to && item.assigned_to !== state.profile?.id;
-  if (!item.assigned_to || (assignedToOther && hasRole("super_admin", "discipline_chair"))) {
+  if (!item.assigned_to || (assignedToOther && hasRole("discipline_chair"))) {
     buttons.push(`<button class="table-action" type="button" data-action="claim-investigation" data-id="${esc(item.id)}">${item.assigned_to ? "Sorumluluğu devral" : "Sorumluluğu al"}</button>`);
   }
-  if (hasRole("super_admin", "discipline_chair") || item.assigned_to === state.profile?.id) {
+  if (hasRole("discipline_chair") || item.assigned_to === state.profile?.id) {
     buttons.push(`<button class="table-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="closed">Kapat</button>`);
   }
-  if (hasRole("super_admin", "discipline_chair")) {
+  if (hasRole("discipline_chair")) {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="cancelled">İptal et</button>`);
   }
   return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
@@ -2150,7 +2129,7 @@ function investigationsPage() {
     <section class="metrics-grid">
       ${metric("Açık", openRows.length, "İnceleme bekleyen", "search")}
       ${metric("Kapatılan", rows.filter((item) => item.status === "closed").length, "Tamamlanan soruşturma", "check")}
-      ${metric("İptal", rows.filter((item) => item.status === "cancelled").length, "DK başkanı/admin iptali", "x")}
+      ${metric("İptal", rows.filter((item) => item.status === "cancelled").length, "DK başkanı iptali", "x")}
       ${metric("Toplam", rows.length, "Soruşturma arşivi", "clipboard")}
     </section>
     <div class="card-grid application-grid">
@@ -2210,7 +2189,7 @@ function openInvestigation() {
 
 function openInvestigationReview(item, status) {
   if (!item) return;
-  const canReview = hasRole("super_admin", "discipline_chair") || item.assigned_to === state.profile?.id;
+  const canReview = hasRole("discipline_chair") || item.assigned_to === state.profile?.id;
   if (!canReview) return;
   modal({
     title: statusLabel(status),
@@ -2432,8 +2411,8 @@ function settingsPage() {
       typeof isSystemProfile === "function" && isSystemProfile(profile)
         ? ""
         : `<section class="panel glass account-danger-zone" style="margin-top:.85rem">
-            <div><span class="panel-kicker">Tehlikeli işlem</span><h3>Portal hesabını kalıcı olarak sil</h3><p>Üyeliğiniz, kredi bakiyeniz, gelirleriniz, çekleriniz ve kişisel kayıtlarınız geri getirilemez biçimde kaldırılır.</p></div>
-            <button class="btn btn-danger btn-sm" type="button" data-action="open-delete-account">Hesabımı sil</button>
+            <div><span class="panel-kicker">Üyelik işlemi</span><h3>Parti üyeliğinden ayrıl</h3><p>Portal erişiminiz kapanır. Ana Yönetmelik gereği kurumsal kararlar ve varsa devam eden soruşturma arşivi korunur.</p></div>
+            <button class="btn btn-danger btn-sm" type="button" data-action="open-delete-account">Üyelikten ayrıl</button>
           </section>`
     }
   `;
@@ -2441,26 +2420,26 @@ function settingsPage() {
 
 function openDeleteAccount() {
   modal({
-    title: "Hesabınızı kalıcı olarak silin",
-    subtitle: "Bu işlem geri alınamaz.",
+    title: "Parti üyeliğinden ayrıl",
+    subtitle: "Portal erişiminiz kapanır; kurumsal arşiv silinmez.",
     body: `
       <form class="form-stack account-delete-form" id="delete-account-form" data-form="delete-account">
         <div class="account-delete-warning" role="alert">
-          <strong>Tüm üyelik ve finans verileriniz silinecek</strong>
+          <strong>Üyeliğiniz sona erecek</strong>
           <ul>
-            <li>Kredi bakiyesi, haftalık gelirler, çekler ve kredi geçmişi kaybolur.</li>
-            <li>Disiplin kayıtları, başvurular, bildirimler ve profiliniz kaldırılır.</li>
-            <li>Aynı hesap daha sonra otomatik olarak geri açılamaz.</li>
+            <li>Portal rolleri ve kurul üyelikleri kaldırılır.</li>
+            <li>Devam eden soruşturma yalnızca olayın kurumsal kaydı için sonuçlandırılabilir.</li>
+            <li>Ayrıldıktan sonra görev veya disiplin puanı yaptırımı uygulanamaz.</li>
           </ul>
         </div>
-        <label class="account-delete-consent"><input type="checkbox" name="acceptDataLoss" data-account-delete-consent /><span>Yukarıdaki verilerin ve bütün gelirlerimin kalıcı olarak kaybolacağını okudum ve kabul ediyorum.</span></label>
-        <div class="form-group"><label for="delete-account-confirmation">Onaylamak için <strong>HESABIMI SİL</strong> yazın</label><input class="field" id="delete-account-confirmation" name="confirmation" autocomplete="off" data-account-delete-text required /></div>
+        <label class="account-delete-consent"><input type="checkbox" name="acceptDataLoss" data-account-delete-consent /><span>Üyeliğimin sona ereceğini ve kurumsal kayıtların Ana Yönetmelik gereği korunacağını okudum.</span></label>
+        <div class="form-group"><label for="delete-account-confirmation">Onaylamak için <strong>ÜYELİKTEN AYRIL</strong> yazın</label><input class="field" id="delete-account-confirmation" name="confirmation" autocomplete="off" data-account-delete-text required /></div>
       </form>
     `,
     actions: `
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
-        <button class="btn btn-danger btn-sm" type="submit" form="delete-account-form" data-delete-account-submit disabled>Hesabımı kalıcı olarak sil</button>
+        <button class="btn btn-danger btn-sm" type="submit" form="delete-account-form" data-delete-account-submit disabled>Üyelikten ayrıl</button>
       </div>
     `
   });
@@ -2963,7 +2942,7 @@ function openDisciplineAppeal(item) {
   if (!canAppealDiscipline(item)) return;
   modal({
     title: "Disiplin kaydına itiraz",
-    subtitle: "İtiraz hakkı karar tarihinden sonraki ilk 3 gün içinde kullanılabilir.",
+    subtitle: "İtiraz hakkınız ana yönetmelik uyarınca dosyaya kaydedilir.",
     body: `
       <form class="form-stack" data-form="discipline-appeal" data-id="${esc(item.id)}">
         <div class="setup-box">
@@ -3166,6 +3145,11 @@ async function submitForm(event) {
         await signOut();
         throw new Error("Hesabınız doğrulandı ancak portal profiliniz bulunamadı. Sistem yöneticisine başvurun.");
       }
+      if (state.profile.status === "left") {
+        await signOut();
+        state.profile = null;
+        throw new Error("Bu hesap parti üyeliğinden ayrılmıştır. Yeniden katılım için Başkanlığa başvurun.");
+      }
       setTheme(state.profile.theme_preference || "dark", false);
       showToast("Giriş başarılı.");
       navigate("portal/overview");
@@ -3218,7 +3202,7 @@ async function submitForm(event) {
       state.cache = {};
       closeModal();
       navigate("home");
-      showToast("Portal hesabınız ve ilişkili verileriniz kalıcı olarak silindi.");
+      showToast("Parti üyeliğiniz sona erdi; kurumsal arşiv Ana Yönetmelik gereği korundu.");
       return;
     }
 
@@ -3244,10 +3228,6 @@ async function submitForm(event) {
         sanctionEffect === "none" && pointDelta !== 0
           ? "points_only"
           : sanctionEffect;
-      const targetMember = disciplineTargetMembers().find((member) => member.id === recordValues.member_id);
-      if (!hasRole("super_admin") && targetMember && isUpperPointLimitTarget(targetMember) && pointDelta < -50) {
-        throw new Error("Ust rutbe uyelere admin disinda en fazla 50 puan ceza yazilabilir.");
-      }
       if (effectiveSanction === "reward_points" || pointDelta > 0) throw new Error("Ödül puanı ayrı Puan Ver ekranından verilir.");
       if (!recordValues.decree_text) throw new Error("Kararname metni zorunludur.");
       if (!recordValues.investigation_id) throw new Error("Ceza girmek için önce soruşturma seçilmelidir.");
@@ -3548,10 +3528,10 @@ async function handleClick(event) {
   if (action === "delete-member") {
     const member = visibleMembers().find((item) => item.id === target.dataset.id);
     if (!member) return;
-    confirmModal("Üye silinsin mi?", `${member.display_name} hesabı ve profil kaydı kaldırılacak.`, async () => {
+    confirmModal("Üyelik sonlandırılsın mı?", `${member.display_name} için portal erişimi kapanacak; kurumsal kayıtlar korunacak.`, async () => {
       await manageMember({ action: "delete", id: member.id });
       closeModal();
-      showToast("Üye silindi.");
+      showToast("Üyelik sonlandırıldı; kurumsal arşiv korundu.");
       await loadPage(route().split("/")[1] || "members");
     });
   }
@@ -3608,18 +3588,13 @@ async function handleClick(event) {
   }
   if (action === "delete-discipline") {
     const id = target.dataset.id;
-    const permanent = hasRole("super_admin");
-    confirmModal(permanent ? "Disiplin kaydı kalıcı silinsin mi?" : "Disiplin kaydı silindi olarak işaretlensin mi?", permanent ? "Bu işlem kaydı kalıcı olarak kaldırır." : "Kayıt kaybolmaz; Silindi etiketiyle arşivlenir.", async () => {
-      if (permanent) {
-        await deleteRecord("discipline_records", id);
-      } else {
-        await updateRecord("discipline_records", id, {
-          archived: true,
-          notes: `Silindi olarak işaretleyen: ${state.profile.display_name} - ${new Date().toLocaleString("tr-TR")}`
-        });
-      }
+    confirmModal("Disiplin kaydı arşivlensin mi?", "Kurumsal kayıt silinmez; arşiv etiketiyle korunur.", async () => {
+      await updateRecord("discipline_records", id, {
+        archived: true,
+        notes: `Arşivleyen: ${state.profile.display_name} - ${new Date().toLocaleString("tr-TR")}`
+      });
       closeModal();
-      showToast(permanent ? "Disiplin kaydı silindi." : "Disiplin kaydı silindi olarak işaretlendi.");
+      showToast("Disiplin kaydı arşivlendi.");
       await loadPage("discipline");
     });
   }
@@ -3885,7 +3860,7 @@ async function handleFilter(event) {
     const consent = form?.querySelector("[data-account-delete-consent]")?.checked === true;
     const phrase = form?.querySelector("[data-account-delete-text]")?.value.trim();
     const submit = document.querySelector("[data-delete-account-submit]");
-    if (submit) submit.disabled = !(consent && phrase === "HESABIMI SİL");
+    if (submit) submit.disabled = !(consent && phrase === "ÜYELİKTEN AYRIL");
     return;
   }
   const input = event.target.closest("[data-filter]");
@@ -3900,8 +3875,9 @@ async function boot() {
   if (getSession()) {
     try {
       state.profile = await getProfile();
-      if (!state.profile) {
+      if (!state.profile || state.profile.status === "left") {
         await signOut();
+        state.profile = null;
       } else {
         setTheme(state.profile.theme_preference || "blue", false);
       }

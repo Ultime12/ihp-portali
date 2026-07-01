@@ -10,7 +10,7 @@ const logoReportDisciplinePages = new Set([
 ]);
 
 function logoReportCanDownload() {
-  return hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member");
+  return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
 }
 
 function logoReportMemberCode(member) {

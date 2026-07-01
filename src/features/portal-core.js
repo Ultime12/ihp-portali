@@ -462,7 +462,7 @@ presidencyPage = function patchedPresidencyPage() {
                       <div class="hierarchy-actions">
                         ${badgeForStatus(member.status)}
                         ${canModerateMember(member) ? `<button class="table-action" type="button" data-action="edit-member" data-id="${esc(member.id)}">${hasRole("super_admin") ? "Profil / rol düzenle" : "Rol / durum yönet"}</button>` : ""}
-                        ${hasRole("super_admin") && member.id !== state.profile?.id ? `<button class="table-action danger-action" type="button" data-action="delete-member" data-id="${esc(member.id)}">Sil</button>` : ""}
+                        ${hasRole("super_admin") && member.id !== state.profile?.id ? `<button class="table-action danger-action" type="button" data-action="delete-member" data-id="${esc(member.id)}">Üyeliği sonlandır</button>` : ""}
                       </div>
                     </article>
                   `
@@ -1237,10 +1237,6 @@ submitForm = async function patchedSubmitForm(event) {
       }
       const sanctionDays = rawSanctionDays ? Number(rawSanctionDays) : null;
       const effectiveSanction = sanctionEffect === "none" && pointDelta !== 0 ? "points_only" : sanctionEffect;
-      const targetMember = disciplineTargetMembers().find((member) => member.id === recordValues.member_id);
-      if (!hasRole("super_admin") && targetMember && isUpperPointLimitTarget(targetMember) && pointDelta < -50) {
-        throw new Error("Ust rutbe uyelere admin disinda en fazla 50 puan ceza yazilabilir.");
-      }
       if (effectiveSanction === "party_suspension" && (!Number.isInteger(sanctionDays) || sanctionDays < 1 || sanctionDays > 365)) {
         throw new Error("Partiden uzaklaştırma için 1-365 gün arası süre girin.");
       }

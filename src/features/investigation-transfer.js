@@ -1,79 +1,152 @@
-const IHP_INVESTIGATION_TRANSFER_PATCH_V1 = true;
+const IHP_INVESTIGATION_TRANSFER_PATCH_V2 = true;
 
-function ihpInvestigationAssigneeProfileV1(item) {
+function ihpInvestigationAssigneeProfileV2(item) {
   const rows = state.cache.members || state.cache.disciplineMembers || [];
   return rows.find((member) => member.id === item?.assigned_to) || null;
 }
 
-function ihpInvestigationCanTakeV1(item) {
+function ihpInvestigationCanTakeV2(item) {
   if (!item || ["cancelled", "closed"].includes(item.status)) return false;
-  if (!item.assigned_to) return hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member");
+  if (!item.assigned_to) return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
   if (item.assigned_to === state.profile?.id) return false;
-  if (hasRole("super_admin")) return true;
-  const assignee = ihpInvestigationAssigneeProfileV1(item);
+  const assignee = ihpInvestigationAssigneeProfileV2(item);
   if (!assignee) return hasRole("discipline_chair");
   const actorRank = disciplineRank(state.profile);
   const assigneeRank = disciplineRank(assignee);
   return actorRank > 0 && assigneeRank > 0 && actorRank > assigneeRank;
 }
 
-function ihpInvestigationTransferTargetsV1(item) {
+function ihpInvestigationTransferTargetsV2(item) {
   if (!item || ["cancelled", "closed"].includes(item.status)) return [];
   const actorRank = disciplineRank(state.profile);
-  if (!hasRole("super_admin") && actorRank < 2) return [];
-  if (item.assigned_to && item.assigned_to !== state.profile?.id && !ihpInvestigationCanTakeV1(item)) return [];
+  if (actorRank < 2) return [];
+  if (item.assigned_to && item.assigned_to !== state.profile?.id && !ihpInvestigationCanTakeV2(item)) return [];
   const rows = state.cache.members || state.cache.disciplineMembers || [];
   return visibleProfiles(rows)
     .filter((member) => member.id !== state.profile?.id && member.id !== item.assigned_to)
+    .filter((member) => !(item.recused_profile_ids || []).includes(member.id))
     .filter((member) => member.status === "active")
     .filter((member) => {
       const rank = disciplineRank(member);
-      if (rank <= 0) return false;
-      if (hasRole("super_admin")) return !rolesOf(member).includes("super_admin");
-      return actorRank > rank;
+      return rank > 0 && actorRank > rank;
     })
     .sort((a, b) => disciplineRank(b) - disciplineRank(a) || a.display_name.localeCompare(b.display_name, "tr"));
 }
 
-function ihpInvestigationCanTransferV1(item) {
-  return ihpInvestigationTransferTargetsV1(item).length > 0;
+function ihpInvestigationCanTransferV2(item) {
+  return ihpInvestigationTransferTargetsV2(item).length > 0;
 }
 
-function ihpInvestigationCanCloseV1(item, status = "closed") {
+function ihpInvestigationCanCloseV2(item, status = "closed") {
   if (!item || ["cancelled", "closed"].includes(item.status)) return false;
   if (item.assigned_to !== state.profile?.id) return false;
-  if (status === "cancelled") return hasRole("super_admin", "discipline_chair");
-  return hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member");
+  if (status === "cancelled") return hasRole("discipline_chair");
+  if (item.defense_status === "pending") return false;
+  return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
+}
+
+function ihpDefenseStatusLabelV2(item) {
+  return {
+    pending: "Savunma bekleniyor",
+    submitted: "Savunma sunuldu",
+    not_submitted: "Savunma sunulmadı"
+  }[item?.defense_status] || "Savunma bekleniyor";
 }
 
 investigationActions = function patchedInvestigationActions(item) {
   const buttons = [];
   if (!item) return "";
-  if (hasRole("super_admin")) {
-    buttons.push(`<button class="table-action" type="button" data-action="edit-investigation" data-id="${esc(item.id)}">Düzenle</button>`);
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-investigation" data-id="${esc(item.id)}">Sil</button>`);
+
+  if (
+    item.subject_profile_id === state.profile?.id &&
+    item.defense_status === "pending" &&
+    !["cancelled", "closed"].includes(item.status)
+  ) {
+    buttons.push(`<button class="table-action" type="button" data-action="submit-investigation-defense" data-id="${esc(item.id)}">Savunmamı sun</button>`);
   }
+
   if (["cancelled", "closed"].includes(item.status)) {
     return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
   }
-  if (!item.assigned_to || ihpInvestigationCanTakeV1(item)) {
+
+  if (item.assigned_to === state.profile?.id && item.defense_status === "pending") {
+    buttons.push(`<button class="table-action" type="button" data-action="close-investigation-defense" data-id="${esc(item.id)}">Savunma sunulmadı</button>`);
+  }
+  if (item.assigned_to === state.profile?.id) {
+    buttons.push(`<button class="table-action" type="button" data-action="recuse-investigation" data-id="${esc(item.id)}">Çıkar çatışması / çekil</button>`);
+  }
+  if (!item.assigned_to || ihpInvestigationCanTakeV2(item)) {
     buttons.push(`<button class="table-action" type="button" data-action="claim-investigation" data-id="${esc(item.id)}">${item.assigned_to ? "Sorumluluğu devral" : "Sorumluluğu al"}</button>`);
   }
-  if (ihpInvestigationCanTransferV1(item)) {
+  if (ihpInvestigationCanTransferV2(item)) {
     buttons.push(`<button class="table-action" type="button" data-action="transfer-investigation" data-id="${esc(item.id)}">Devret</button>`);
   }
-  if (ihpInvestigationCanCloseV1(item, "closed")) {
+  if (ihpInvestigationCanCloseV2(item, "closed")) {
     buttons.push(`<button class="table-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="closed">Kapat</button>`);
   }
-  if (ihpInvestigationCanCloseV1(item, "cancelled")) {
+  if (ihpInvestigationCanCloseV2(item, "cancelled")) {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="cancelled">İptal et</button>`);
   }
   return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
 };
 
+investigationsPage = function patchedMainRegulationInvestigationsPage() {
+  const rows = state.cache.investigations || [];
+  const openRows = rows.filter((item) => ["open", "reviewing"].includes(item.status));
+  return `
+    ${pageHeader(
+      "Soruşturmalar",
+      "Bağımsız inceleme ve savunma hakkı",
+      "Soruşturma Disiplin Kurulu tarafından yürütülür. Hakkında işlem yapılan üye savunmasını bu alandan sunar.",
+      permissions.disciplineManage()
+        ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-investigation">${icon("plus")} Soruşturma Aç</button>`
+        : ""
+    )}
+    <section class="metrics-grid">
+      ${metric("Açık", openRows.length, "İncelemesi süren", "search")}
+      ${metric("Savunma bekleyen", rows.filter((item) => item.defense_status === "pending" && !["closed", "cancelled"].includes(item.status)).length, "Karar öncesi hak", "clipboard")}
+      ${metric("Kapatılan", rows.filter((item) => item.status === "closed").length, "Tamamlanan", "check")}
+      ${metric("Toplam", rows.length, "Kurumsal arşiv", "shield")}
+    </section>
+    <div class="card-grid application-grid">
+      ${
+        rows.length
+          ? rows.map((item) => `
+              <article class="entity-card glass application-card">
+                <div class="entity-top">
+                  ${badge(investigationSubjectLabel(item), "blue")}
+                  ${badgeForStatus(item.status)}
+                </div>
+                <h3 style="margin-top:.85rem">${esc(item.title)}</h3>
+                <p>${esc(item.description || "Açıklama eklenmedi.")}</p>
+                <div class="meta-list">
+                  <div class="meta-row"><span>İlgili üye</span><strong>${esc(investigationSubjectLabel(item))}</strong></div>
+                  <div class="meta-row"><span>Sorumlu soruşturmacı</span><strong>${esc(item.assignee?.display_name || "Atanmadı")}</strong></div>
+                  <div class="meta-row"><span>Savunma</span><strong>${esc(ihpDefenseStatusLabelV2(item))}</strong></div>
+                  ${item.defense_text ? `<div class="meta-row"><span>Savunma metni</span><strong>${esc(item.defense_text)}</strong></div>` : ""}
+                  ${item.defense_note ? `<div class="meta-row"><span>Savunma işlem notu</span><strong>${esc(item.defense_note)}</strong></div>` : ""}
+                  ${item.recusal_note ? `<div class="meta-row"><span>Çekilme kaydı</span><strong>${esc(item.recusal_note)}</strong></div>` : ""}
+                  <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
+                  <div class="meta-row"><span>Kanıt</span><strong>${item.evidence_file ? `<a href="${esc(item.evidence_file)}" download="${esc(item.evidence_filename || "ihp-sorusturma-kanit")}">Dosyayı aç</a>` : esc(item.evidence_note || "Eklenmedi")}</strong></div>
+                  <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
+                </div>
+                ${investigationActions(item)}
+              </article>
+            `).join("")
+          : emptyCard("Soruşturma yok", "Size görünen bir soruşturma kaydı bulunmuyor.")
+      }
+    </div>
+  `;
+};
+
 openInvestigationReview = function patchedOpenInvestigationReview(item, status) {
-  if (!ihpInvestigationCanCloseV1(item, status)) {
-    showToast("Bu işlem için önce soruşturma sorumluluğunu devralmalısınız.", "error");
+  if (!ihpInvestigationCanCloseV2(item, status)) {
+    showToast(
+      item?.defense_status === "pending"
+        ? "Savunma aşaması tamamlanmadan soruşturma kapatılamaz."
+        : "Bu işlem için önce soruşturma sorumluluğunu devralmalısınız.",
+      "error"
+    );
     return;
   }
   modal({
@@ -81,71 +154,57 @@ openInvestigationReview = function patchedOpenInvestigationReview(item, status) 
     subtitle: `${investigationSubjectLabel(item)} hakkındaki soruşturma.`,
     body: `
       <form class="form-stack" data-form="investigation-review" data-id="${esc(item.id)}" data-status="${esc(status)}">
-        <div class="setup-box">
-          <strong>${esc(item.title)}</strong>
-          <p class="security-note">${esc(item.description || "")}</p>
-        </div>
+        <div class="setup-box"><strong>${esc(item.title)}</strong><p class="security-note">${esc(item.description || "")}</p></div>
         <div class="form-group"><label for="investigation-decision-note">Karar / işlem notu</label><textarea class="field" id="investigation-decision-note" name="decisionNote" required maxlength="900">${esc(item.decision_note || "")}</textarea></div>
-        <p class="security-note">Soruşturma ancak sorumluluğu sizdeyken kapatılabilir veya iptal edilebilir.</p>
+        <p class="security-note">Soruşturma yalnızca sorumlu DK görevlisi tarafından ve savunma aşaması tamamlandıktan sonra kapatılabilir.</p>
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Kaydet</button></div>
       </form>
     `
   });
 };
 
-function ihpInvestigationAssignmentTargetsV1(item) {
-  const rows = [
-    ...(state.cache.members || []),
-    ...(state.cache.disciplineMembers || []),
-    ...(item?.assignee ? [item.assignee] : [])
-  ];
-  const seen = new Set();
-  return rows
-    .filter((member) => member?.id && !seen.has(member.id) && seen.add(member.id))
-    .filter((member) => member.status === "active" || member.id === item?.assigned_to)
-    .filter((member) => disciplineRank(member) > 0)
-    .filter((member) => !rolesOf(member).includes("super_admin"))
-    .sort((a, b) => disciplineRank(b) - disciplineRank(a) || a.display_name.localeCompare(b.display_name, "tr"));
+function ihpOpenDefenseV2(item) {
+  modal({
+    title: "Soruşturma savunması",
+    subtitle: "Savunmanız değiştirilemez biçimde dosyaya kaydedilir.",
+    body: `
+      <form class="form-stack" data-form="investigation-defense" data-id="${esc(item.id)}">
+        <div class="setup-box"><strong>${esc(item.title)}</strong><p class="security-note">${esc(item.description || "")}</p></div>
+        <div class="form-group"><label for="investigation-defense-text">Savunma metniniz</label><textarea class="field decree-field" id="investigation-defense-text" name="defenseText" required minlength="20" maxlength="12000" style="min-height:320px"></textarea></div>
+        <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Savunmayı sun</button></div>
+      </form>
+    `
+  });
 }
 
-const ihpInvestigationBaseOpenEditV1 = openInvestigationEdit;
-openInvestigationEdit = function patchedOpenInvestigationEdit(item) {
-  if (!item || !hasRole("super_admin")) return ihpInvestigationBaseOpenEditV1(item);
-  const targets = ihpInvestigationAssignmentTargetsV1(item);
+function ihpOpenCloseDefenseV2(item) {
   modal({
-    title: "Soruşturmayı düzenle",
-    subtitle: "Admin başlığı, kanıtları ve sorumlu soruşturmacıyı değiştirebilir.",
+    title: "Savunma aşamasını kapat",
+    subtitle: "Üyenin savunma sunmadığına ilişkin gerekçe kurumsal kayda yazılır.",
     body: `
-      <form class="form-stack" data-form="investigation-edit" data-id="${esc(item.id)}">
-        <div class="setup-box">
-          <strong>${esc(investigationSubjectLabel(item))}</strong>
-          <p class="security-note">Soruşturmanın konusu değişmez; sorumlu soruşturmacı aktif DK personeli arasından seçilir.</p>
-        </div>
-        <div class="form-group"><label for="investigation-edit-title">Başlık</label><input class="field" id="investigation-edit-title" name="title" required minlength="3" maxlength="140" value="${esc(item.title || "")}" /></div>
-        <div class="form-group">
-          <label for="investigation-edit-assignee">Sorumlu soruşturmacı</label>
-          <select class="field" id="investigation-edit-assignee" name="assignedTo">
-            <option value="">Sorumlu yok</option>
-            ${targets.map((member) => `<option value="${esc(member.id)}" ${item.assigned_to === member.id ? "selected" : ""}>${esc(member.display_name)} · ${esc(disciplineRankLabel(member))}</option>`).join("")}
-          </select>
-          <p class="security-note">Admin gerekirse Ateş’teki soruşturmayı Emir Kaan gibi başka bir DK personeline doğrudan aktarabilir.</p>
-        </div>
-        <div class="form-group"><label for="investigation-edit-description">Açıklama</label><textarea class="field" id="investigation-edit-description" name="description" required minlength="10" maxlength="1600">${esc(item.description || "")}</textarea></div>
-        <div class="form-group"><label for="investigation-edit-evidence-note">Kanıt notu</label><textarea class="field" id="investigation-edit-evidence-note" name="evidenceNote" maxlength="1200">${esc(item.evidence_note || "")}</textarea></div>
-        <div class="form-group">
-          <label for="investigation-edit-evidence-file">Fotoğraf veya dosya</label>
-          <input class="field" id="investigation-edit-evidence-file" type="file" data-evidence-upload data-evidence-target="investigation-edit-evidence-data" data-evidence-name-target="investigation-edit-evidence-name" />
-          <input id="investigation-edit-evidence-data" name="evidenceFile" type="hidden" value="${esc(item.evidence_file || "")}" />
-          <input id="investigation-edit-evidence-name" name="evidenceFilename" type="hidden" value="${esc(item.evidence_filename || "")}" />
-        </div>
-        <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Kaydet</button></div>
+      <form class="form-stack" data-form="investigation-defense-close" data-id="${esc(item.id)}">
+        <div class="form-group"><label for="investigation-defense-close-note">Gerekçe</label><textarea class="field" id="investigation-defense-close-note" name="decisionNote" required minlength="10" maxlength="1200"></textarea></div>
+        <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Aşamayı kapat</button></div>
       </form>
     `
   });
-};
+}
 
-function ihpOpenInvestigationTransferV1(item) {
-  const targets = ihpInvestigationTransferTargetsV1(item);
+function ihpOpenRecusalV2(item) {
+  modal({
+    title: "Dosyadan çekil",
+    subtitle: "Çıkar çatışması kurumsal kayda yazılır ve dosya başka bir DK görevlisine bırakılır.",
+    body: `
+      <form class="form-stack" data-form="investigation-recusal" data-id="${esc(item.id)}">
+        <div class="form-group"><label for="investigation-recusal-note">Çıkar çatışması açıklaması</label><textarea class="field" id="investigation-recusal-note" name="decisionNote" required minlength="10" maxlength="1200"></textarea></div>
+        <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Çekilmeyi kaydet</button></div>
+      </form>
+    `
+  });
+}
+
+function ihpOpenInvestigationTransferV2(item) {
+  const targets = ihpInvestigationTransferTargetsV2(item);
   if (!targets.length) {
     showToast("Devredilebilecek alt rütbeli DK personeli bulunamadı.", "error");
     return;
@@ -155,10 +214,7 @@ function ihpOpenInvestigationTransferV1(item) {
     subtitle: "Sorumluluk yalnızca DK hiyerarşisinde alt rütbeye devredilebilir.",
     body: `
       <form class="form-stack" data-form="investigation-transfer" data-id="${esc(item.id)}">
-        <div class="setup-box">
-          <strong>${esc(item.title)}</strong>
-          <p class="security-note">Mevcut sorumlu: ${esc(item.assignee?.display_name || "Henüz alınmadı")}</p>
-        </div>
+        <div class="setup-box"><strong>${esc(item.title)}</strong><p class="security-note">Mevcut sorumlu: ${esc(item.assignee?.display_name || "Henüz alınmadı")}</p></div>
         <div class="form-group">
           <label for="investigation-transfer-assignee">Devredilecek DK personeli</label>
           <select class="field" id="investigation-transfer-assignee" name="assignedTo" required>
@@ -166,33 +222,44 @@ function ihpOpenInvestigationTransferV1(item) {
             ${targets.map((member) => `<option value="${esc(member.id)}">${esc(member.display_name)} · ${esc(disciplineRankLabel(member))}</option>`).join("")}
           </select>
         </div>
-        <div class="form-group"><label for="investigation-transfer-note">Devir notu</label><textarea class="field" id="investigation-transfer-note" name="decisionNote" maxlength="900" placeholder="Sorumluluk devri nedeni veya kısa not."></textarea></div>
+        <div class="form-group"><label for="investigation-transfer-note">Devir notu</label><textarea class="field" id="investigation-transfer-note" name="decisionNote" maxlength="900"></textarea></div>
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Devret</button></div>
       </form>
     `
   });
 }
 
-const ihpInvestigationBaseSubmitFormV1 = submitForm;
+const ihpInvestigationBaseSubmitFormV2 = submitForm;
 submitForm = async function patchedInvestigationSubmitForm(event) {
   const form = event.target.closest("form[data-form]");
-  if (form?.dataset.form === "investigation-edit" && hasRole("super_admin")) {
+  if (
+    form?.dataset.form === "investigation-defense" ||
+    form?.dataset.form === "investigation-defense-close" ||
+    form?.dataset.form === "investigation-recusal"
+  ) {
     event.preventDefault();
     const submit = form.querySelector('[type="submit"]');
     const values = formData(form);
     if (submit) submit.disabled = true;
     try {
+      const action = form.dataset.form === "investigation-defense"
+        ? "submit_defense"
+        : form.dataset.form === "investigation-defense-close"
+          ? "close_defense"
+          : "recuse";
       await manageInvestigation({
-        action: "update",
+        action,
         id: form.dataset.id,
-        title: values.title,
-        description: values.description,
-        assignedTo: values.assignedTo || null,
-        evidenceNote: values.evidenceNote || "",
-        evidenceFile: values.evidenceFile || "",
-        evidenceFilename: values.evidenceFilename || ""
+        defenseText: values.defenseText || "",
+        decisionNote: values.decisionNote || ""
       });
-      showToast("Soruşturma düzenlendi.");
+      showToast(
+        action === "submit_defense"
+          ? "Savunmanız dosyaya kaydedildi."
+          : action === "close_defense"
+            ? "Savunma aşaması kapatıldı."
+            : "Çıkar çatışması kaydedildi ve dosyadan çekildiniz."
+      );
       closeModal();
       await loadPage("investigations");
     } catch (error) {
@@ -202,8 +269,9 @@ submitForm = async function patchedInvestigationSubmitForm(event) {
     }
     return;
   }
+
   if (!form || form.dataset.form !== "investigation-transfer") {
-    return ihpInvestigationBaseSubmitFormV1(event);
+    return ihpInvestigationBaseSubmitFormV2(event);
   }
   event.preventDefault();
   const submit = form.querySelector('[type="submit"]');
@@ -226,14 +294,32 @@ submitForm = async function patchedInvestigationSubmitForm(event) {
   }
 };
 
-const ihpInvestigationBaseHandleClickV1 = handleClick;
+const ihpInvestigationBaseHandleClickV2 = handleClick;
 handleClick = async function patchedInvestigationHandleClick(event) {
   const target = event.target.closest("[data-action]");
   if (target?.dataset.action === "transfer-investigation") {
     event.preventDefault();
     const item = (state.cache.investigations || []).find((row) => row.id === target.dataset.id);
-    if (item) ihpOpenInvestigationTransferV1(item);
+    if (item) ihpOpenInvestigationTransferV2(item);
     return;
   }
-  return ihpInvestigationBaseHandleClickV1(event);
+  if (target?.dataset.action === "submit-investigation-defense") {
+    event.preventDefault();
+    const item = (state.cache.investigations || []).find((row) => row.id === target.dataset.id);
+    if (item) ihpOpenDefenseV2(item);
+    return;
+  }
+  if (target?.dataset.action === "close-investigation-defense") {
+    event.preventDefault();
+    const item = (state.cache.investigations || []).find((row) => row.id === target.dataset.id);
+    if (item) ihpOpenCloseDefenseV2(item);
+    return;
+  }
+  if (target?.dataset.action === "recuse-investigation") {
+    event.preventDefault();
+    const item = (state.cache.investigations || []).find((row) => row.id === target.dataset.id);
+    if (item) ihpOpenRecusalV2(item);
+    return;
+  }
+  return ihpInvestigationBaseHandleClickV2(event);
 };

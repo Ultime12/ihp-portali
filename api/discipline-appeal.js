@@ -1,8 +1,7 @@
 import { emailProfile } from "./_mail.js";
 
-const APPEAL_MANAGERS = new Set(["super_admin", "discipline_chair"]);
+const APPEAL_MANAGERS = new Set(["discipline_chair"]);
 const VALID_ACTIONS = new Set(["appeal", "accept", "reject"]);
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -143,10 +142,6 @@ export default async function handler(request, response) {
     if (record.archived || record.decision_status !== "decided" || appealStatus !== "none") {
       return json(response, 400, { error: "Bu kayit icin yeni itiraz acilamaz." });
     }
-    const createdAt = new Date(record.created_at).valueOf();
-    if (!Number.isFinite(createdAt) || Date.now() - createdAt > THREE_DAYS_MS) {
-      return json(response, 400, { error: "Itiraz suresi dolmus. Itirazlar ilk 3 gun icinde acilabilir." });
-    }
     const cleanAppeal = String(appealText || "").trim();
     if (cleanAppeal.length < 10) {
       return json(response, 400, { error: "Itiraz gerekcesi en az 10 karakter olmali." });
@@ -173,7 +168,7 @@ export default async function handler(request, response) {
   }
 
   if (!hasAny(actor.roles, APPEAL_MANAGERS)) {
-    return json(response, 403, { error: "Itiraz kararini yalnizca DK baskani veya admin verebilir." });
+    return json(response, 403, { error: "İtiraz kararını yalnızca Disiplin Kurulu Başkanı verebilir." });
   }
   if (appealStatus !== "submitted") {
     return json(response, 400, { error: "Karara baglanacak acik itiraz yok." });

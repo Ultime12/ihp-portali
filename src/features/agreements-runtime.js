@@ -1,60 +1,4 @@
-const IHP_AGREEMENTS_RUNTIME_PATCH_V1 = true;
-
-function openAgreementDecision(item, status) {
-  if (!item || !agreementCanSign(item)) return;
-  const signed = status === "signed";
-  modal({
-    title: signed ? "Antlaşma imzalansın mı?" : "Antlaşma reddedilsin mi?",
-    subtitle: `${agreementTargetLabel(item)} için karar.`,
-    body: `
-      <form class="form-stack" data-form="agreement-decision" data-id="${esc(item.id)}" data-status="${esc(status)}">
-        <div class="setup-box">
-          <strong>${esc(item.title)}</strong>
-          <p class="security-note">${esc(item.proposer?.display_name || "Üye")} tarafından sunuldu. Hedef: ${esc(agreementTargetLabel(item))}</p>
-        </div>
-        <div class="agreement-detail-body">${esc(item.body || "Metin yerine dosya eklenmiş.")}</div>
-        ${item.file_data ? `<a class="agreement-file-link" href="${esc(item.file_data)}" download="${esc(item.file_name || "ihp-antlasma-dosyasi")}">${icon("download")} ${esc(item.file_name || "Dosyayı aç")}</a>` : ""}
-        <div class="form-group">
-          <label for="agreement-decision-note">Karar notu</label>
-          <textarea class="field" id="agreement-decision-note" name="decisionNote" maxlength="900" placeholder="${signed ? "İmzaya dair not ekleyebilirsiniz." : "Reddetme gerekçesini yazın."}"></textarea>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
-          <button class="btn ${signed ? "btn-primary" : "btn-secondary"} btn-sm" type="submit">${signed ? "İmzala" : "Reddet"}</button>
-        </div>
-      </form>
-    `
-  });
-}
-
-function openAgreementDetail(item) {
-  if (!item) return;
-  modal({
-    title: item.title,
-    subtitle: `${agreementTargetLabel(item)} · ${statusLabel(item.status)}`,
-    body: `
-      <div class="meta-list">
-        <div class="meta-row"><span>Sunan</span><strong>${esc(item.proposer?.display_name || "Üye")}</strong></div>
-        <div class="meta-row"><span>Hedef</span><strong>${esc(agreementTargetLabel(item))}</strong></div>
-        <div class="meta-row"><span>Durum</span><strong>${esc(agreementSignerLabel(item))}</strong></div>
-        <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz yok")}</strong></div>
-        <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
-      </div>
-      <div class="agreement-detail-body" style="margin-top:.85rem">${esc(item.body || "Metin yerine dosya eklenmiş.")}</div>
-      ${item.file_data ? `<div style="margin-top:.85rem"><a class="agreement-file-link" href="${esc(item.file_data)}" download="${esc(item.file_name || "ihp-antlasma-dosyasi")}">${icon("download")} ${esc(item.file_name || "Dosyayı aç")}</a></div>` : ""}
-    `,
-    actions: `<div class="modal-actions"><button class="btn btn-primary btn-sm" type="button" data-action="close-modal">Kapat</button></div>`
-  });
-}
-
-function syncAgreementTarget(input) {
-  if (!input) return;
-  const group = document.querySelector("[data-agreement-member-group]");
-  const memberSelect = document.querySelector("[data-agreement-member-select]");
-  const isMember = input.value === "member";
-  if (group) group.hidden = !isMember;
-  if (memberSelect) memberSelect.required = isMember;
-}
+const IHP_AGREEMENTS_RUNTIME_PATCH_V2 = true;
 
 const agreementsBaseBadgeCountForNav = badgeCountForNav;
 badgeCountForNav = function patchedAgreementsBadgeCountForNav(id) {
@@ -68,6 +12,7 @@ badgeCountForNav = function patchedAgreementsBadgeCountForNav(id) {
 const agreementsBaseNotificationCategoryLabel = notificationCategoryLabel;
 notificationCategoryLabel = function patchedAgreementNotificationCategoryLabel(category = "system") {
   if (category === "agreement") return "Antlaşma";
+  if (category === "governance") return "Yürütme Kurulu";
   return agreementsBaseNotificationCategoryLabel(category);
 };
 
@@ -87,18 +32,19 @@ loadPage = async function patchedAgreementsLoadPage(page) {
   state.loading = true;
   render();
   try {
-    const [notifications, agreements, members, committees] = await Promise.all([
+    const [notifications, agreements, delegations, members, committees] = await Promise.all([
       loadNotifications().catch(() => state.cache.notifications || []),
       loadAgreementsLocal(),
+      loadAgreementDelegationsLocal(),
       loadMembers(),
       loadCommittees()
     ]);
     state.cache.notifications = notifications;
     state.cache.agreements = agreements;
     state.cache.agreementBadge = agreements;
+    state.cache.agreementDelegations = delegations;
     state.cache.members = members;
     state.cache.committees = committees;
-    maybeCelebrateRewards();
   } catch (error) {
     showToast(error.message, "error");
   } finally {
@@ -110,157 +56,108 @@ loadPage = async function patchedAgreementsLoadPage(page) {
 const agreementsBaseSubmitForm = submitForm;
 submitForm = async function patchedAgreementsSubmitForm(event) {
   const form = event.target.closest("form[data-form]");
-  if (!form) return;
-
-  if (form.dataset.form === "agreement") {
-    event.preventDefault();
-    const values = formData(form);
-    const submit = form.querySelector('[type="submit"]');
-    if (submit) submit.disabled = true;
-    try {
+  if (!form || !["agreement", "agreement-decision", "agreement-delegation"].includes(form.dataset.form)) {
+    return agreementsBaseSubmitForm(event);
+  }
+  event.preventDefault();
+  const values = formData(form);
+  const submit = form.querySelector('[type="submit"]');
+  if (submit) submit.disabled = true;
+  try {
+    if (form.dataset.form === "agreement") {
       if (!String(values.body || "").trim() && !values.fileData) {
         throw new Error("Antlaşma için metin yazın veya dosya ekleyin.");
       }
       if (values.fileData && !agreementFileAllowed(values.fileName, values.fileData)) {
         throw new Error("Antlaşma dosyası PDF, DOC veya DOCX olmalıdır.");
       }
-      if (values.targetType === "member" && !values.targetProfileId) {
-        throw new Error("Antlaşma sunulacak üyeyi seçin.");
-      }
-
-      const payload = {
+      await agreementAction({
+        action: "create",
         title: values.title,
+        targetType: values.targetType,
+        targetProfileId: values.targetProfileId || null,
+        scope: values.scope,
+        requiresExecutiveApproval: values.requiresExecutiveApproval === "on",
+        purpose: values.purpose,
+        obligations: values.obligations,
+        effectiveAt: values.effectiveAt,
+        expiresAt: values.expiresAt || null,
         body: values.body || "",
-        proposer_id: state.profile.id,
-        target_type: values.targetType || "member",
-        target_profile_id: values.targetType === "member" ? values.targetProfileId : null,
-        target_committee_id:
-          values.targetType === "discipline"
-            ? agreementCommitteeByName("Disiplin Kurulu")
-            : values.targetType === "youth"
-              ? agreementCommitteeByName("Gençlik Kolları")
-              : null,
-        file_name: values.fileName || "",
-        file_mime: agreementFileMime(values.fileData || ""),
-        file_data: values.fileData || "",
-        status: "pending"
-      };
-
-      await agreementsRestRequest("agreements", {
-        method: "POST",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify(payload)
+        fileName: values.fileName || "",
+        fileMime: agreementFileMime(values.fileData || ""),
+        fileData: values.fileData || ""
       });
-      showToast("Antlaşma imzaya sunuldu.");
-      closeModal();
-      await loadPage("agreements");
-    } catch (error) {
-      showToast(error.message, "error");
-    } finally {
-      if (submit) submit.disabled = false;
-    }
-    return;
-  }
-
-  if (form.dataset.form === "agreement-decision") {
-    event.preventDefault();
-    const values = formData(form);
-    const status = form.dataset.status === "signed" ? "signed" : "rejected";
-    const submit = form.querySelector('[type="submit"]');
-    if (submit) submit.disabled = true;
-    try {
-      const payload = {
-        status,
-        decision_note: values.decisionNote || ""
-      };
-      if (status === "signed") {
-        payload.signed_by = state.profile.id;
-        payload.signed_at = new Date().toISOString();
-        payload.rejected_by = null;
-        payload.rejected_at = null;
-      } else {
-        payload.rejected_by = state.profile.id;
-        payload.rejected_at = new Date().toISOString();
-        payload.signed_by = null;
-        payload.signed_at = null;
-      }
-      await agreementsRestRequest(`agreements?id=eq.${encodeURIComponent(form.dataset.id)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify(payload)
+      showToast("Antlaşma yetkili imza akışına gönderildi.");
+    } else if (form.dataset.form === "agreement-decision") {
+      const result = await agreementAction({
+        action: "decide",
+        id: form.dataset.id,
+        decision: form.dataset.status,
+        decisionNote: values.decisionNote || ""
       });
-      showToast(status === "signed" ? "Antlaşma imzalandı." : "Antlaşma reddedildi.");
-      closeModal();
-      await loadPage("agreements");
-    } catch (error) {
-      showToast(error.message, "error");
-    } finally {
-      if (submit) submit.disabled = false;
+      showToast(result.proposal ? "Antlaşma imzalandı ve Yürütme Kurulu onayına gönderildi." : form.dataset.status === "signed" ? "Antlaşma yürürlüğe girdi." : "Antlaşma reddedildi.");
+    } else {
+      await agreementAction({
+        action: "delegate",
+        delegateProfileId: values.delegateProfileId,
+        authorityNote: values.authorityNote,
+        endsAt: values.endsAt || null
+      });
+      showToast("Yazılı imza yetkisi kaydedildi.");
     }
-    return;
+    closeModal();
+    await loadPage("agreements");
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    if (submit) submit.disabled = false;
   }
-
-  return agreementsBaseSubmitForm(event);
 };
 
 const agreementsBaseHandleClick = handleClick;
 handleClick = async function patchedAgreementsHandleClick(event) {
   const target = event.target.closest("[data-action]");
   const action = target?.dataset.action;
-
   if (action === "open-agreement") {
     event.preventDefault();
     openAgreement();
     return;
   }
-
   if (action === "view-agreement") {
     event.preventDefault();
-    const item = (state.cache.agreements || []).find((row) => row.id === target.dataset.id);
-    openAgreementDetail(item);
+    openAgreementDetail((state.cache.agreements || []).find((item) => item.id === target.dataset.id));
     return;
   }
-
   if (action === "open-agreement-decision") {
     event.preventDefault();
-    const item = (state.cache.agreements || []).find((row) => row.id === target.dataset.id);
-    openAgreementDecision(item, target.dataset.status || "signed");
+    openAgreementDecision(
+      (state.cache.agreements || []).find((item) => item.id === target.dataset.id),
+      target.dataset.status || "signed"
+    );
     return;
   }
-
   if (action === "cancel-agreement") {
     event.preventDefault();
     const item = (state.cache.agreements || []).find((row) => row.id === target.dataset.id);
     if (!item || !agreementCanCancel(item)) return;
-    confirmModal("Antlaşma iptal edilsin mi?", "İmzaya sunulan kayıt iptal durumuna alınacak.", async () => {
-      await agreementsRestRequest(`agreements?id=eq.${encodeURIComponent(item.id)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify({ status: "cancelled", decision_note: "Sunan kişi tarafından iptal edildi." })
-      });
+    confirmModal("Antlaşma geri çekilsin mi?", "İmza bekleyen kayıt iptal durumuna alınacak.", async () => {
+      await agreementAction({ action: "cancel", id: item.id });
       closeModal();
-      showToast("Antlaşma iptal edildi.");
+      showToast("Antlaşma geri çekildi.");
       await loadPage("agreements");
     });
     return;
   }
-
-  if (action === "delete-agreement") {
+  if (action === "revoke-agreement-delegation") {
     event.preventDefault();
-    const item = (state.cache.agreements || []).find((row) => row.id === target.dataset.id);
-    if (!item || !agreementCanDelete(item)) return;
-    confirmModal("Antlaşma kalıcı silinsin mi?", "Bu işlem antlaşma kaydını tamamen kaldırır.", async () => {
-      await agreementsRestRequest(`agreements?id=eq.${encodeURIComponent(item.id)}`, {
-        method: "DELETE",
-        headers: { Prefer: "return=minimal" }
-      });
+    confirmModal("İmza yetkisi geri alınsın mı?", "Yönetici artık parti adına yeni antlaşma imzalayamayacak.", async () => {
+      await agreementAction({ action: "revoke_delegate", id: target.dataset.id });
       closeModal();
-      showToast("Antlaşma silindi.");
+      showToast("İmza yetkisi geri alındı.");
       await loadPage("agreements");
     });
     return;
   }
-
   return agreementsBaseHandleClick(event);
 };
 

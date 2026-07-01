@@ -145,6 +145,41 @@ async function mockBackend(page, profile) {
   let creditAccountClosed = false;
   let scheduledTransfers = [];
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  await page.route("**/api/governance", (route) => {
+    const executive = profile.roles.some((role) => ["president", "vice_president", "presidential_aide"].includes(role));
+    route.fulfill({
+      json: {
+        proposals: executive ? [{
+          id: "governance-proposal-1",
+          proposal_type: "executive_decision",
+          title: "Toplantı takvimi kararı",
+          summary: "Yürütme Kurulu toplantı düzeninin resmî kayda alınması.",
+          status: "voting",
+          proposed_by: profile.id,
+          proposer: { id: profile.id, display_name: profile.display_name },
+          eligible_to_vote: true,
+          my_vote: null,
+          my_recusal: null,
+          recusal_count: 0,
+          sponsor_count: 1,
+          yes_count: 0,
+          no_count: 0,
+          abstain_count: 0,
+          required_ratio: 0.5,
+          voting_starts_at: "2026-06-30T12:00:00.000Z",
+          voting_ends_at: "2026-07-04T12:00:00.000Z"
+        }] : [],
+        elections: [],
+        election_results: {},
+        executive_members: executive ? [profile] : [],
+        permissions: {
+          is_executive: executive,
+          is_president: profile.roles.includes("president"),
+          can_propose_regulation: executive
+        }
+      }
+    });
+  });
   await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
   await page.route("https://mock.supabase.test/auth/v1/token?*", (route) => route.fulfill({
     json: {
@@ -388,11 +423,11 @@ try {
   const deletionContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const deletionPage = await deletionContext.newPage();
   await openPortal(deletionPage, baseProfile, "settings");
-  await deletionPage.getByRole("button", { name: "Hesabımı sil", exact: true }).click();
+  await deletionPage.getByRole("button", { name: "Üyelikten ayrıl", exact: true }).click();
   const deleteSubmit = deletionPage.locator("[data-delete-account-submit]");
   assert.equal(await deleteSubmit.isDisabled(), true, "account deletion must be locked initially");
   await deletionPage.locator("[data-account-delete-consent]").check();
-  await deletionPage.locator("[data-account-delete-text]").fill("HESABIMI SİL");
+  await deletionPage.locator("[data-account-delete-text]").fill("ÜYELİKTEN AYRIL");
   assert.equal(await deleteSubmit.isEnabled(), true, "account deletion requires consent and exact phrase");
   await deleteSubmit.click();
   await deletionPage.waitForSelector(".premium-public");
@@ -400,14 +435,14 @@ try {
   await deletionContext.close();
 
   const roleCases = [
-    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null, credential: "member" },
+    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: "Soruşturmalar", credential: "member" },
     { name: "president", roles: ["discipline_chair", "president", "member"], visible: "Başkanlık", hidden: null, credential: "presidency" },
     { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık", credential: "discipline" },
     { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık", credential: "discipline" },
-    { name: "youth-chair", roles: ["youth_chair", "member"], visible: "Gençlik Kolları", hidden: "Soruşturmalar", credential: "youth" },
-    { name: "representative", roles: ["representative", "member"], visible: "Antlaşmalar", hidden: "Soruşturmalar", credential: "executive" },
-    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Soruşturmalar", credential: "member" },
-    { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Soruşturmalar", credential: "member" }
+    { name: "youth-chair", roles: ["youth_chair", "member"], visible: "Gençlik Kolları", hidden: "Başkanlık", credential: "youth" },
+    { name: "representative", roles: ["representative", "member"], visible: "Antlaşmalar", hidden: "Başkanlık", credential: "executive" },
+    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Başkanlık", credential: "member" },
+    { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Başkanlık", credential: "member" }
   ];
 
   for (const roleCase of roleCases) {
@@ -437,6 +472,29 @@ try {
     await context.close();
   }
 
+  const governanceContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const governancePage = await governanceContext.newPage();
+  const governanceErrors = [];
+  governancePage.on("pageerror", (error) => governanceErrors.push(error.message));
+  const governanceProfile = {
+    ...baseProfile,
+    id: "governance-president",
+    email: "governance-president@example.test",
+    roles: ["president", "member"],
+    role: "president",
+    theme_preference: "blue"
+  };
+  await openPortal(governancePage, governanceProfile, "governance");
+  await governancePage.waitForSelector(".governance-card");
+  assert.match(await governancePage.locator(".governance-card").innerText(), /Toplantı takvimi kararı/);
+  assert.equal(
+    await governancePage.getByRole("button", { name: "Çıkar çatışması bildir" }).isVisible(),
+    true,
+    "executive member should be able to record a conflict of interest"
+  );
+  assert.deepEqual(governanceErrors, [], "governance page errors");
+  await governanceContext.close();
+
   const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const adminPage = await adminContext.newPage();
   const adminProfile = { ...baseProfile, id: "admin-credit", email: "admin@example.test", roles: ["super_admin"], role: "super_admin", theme_preference: "blue" };
@@ -457,18 +515,14 @@ try {
   assert.equal(await adminPage.locator("#member-discipline-points").inputValue(), "100");
   await adminPage.keyboard.press("Escape");
   await adminPage.evaluate(() => { location.hash = "#/portal/investigations"; });
-  await adminPage.waitForSelector('[data-action="edit-investigation"][data-id="investigation-open"]');
-  await adminPage.locator('[data-action="edit-investigation"][data-id="investigation-open"]').click();
-  assert.equal(await adminPage.locator("#investigation-edit-assignee").isVisible(), true, "admin should edit investigation assignee");
-  assert.equal(await adminPage.locator('#investigation-edit-assignee option[value="member-2"]').count(), 1, "admin assignment list should include active discipline staff");
-  await adminPage.keyboard.press("Escape");
+  await adminPage.waitForTimeout(150);
+  assert.equal(await adminPage.locator(".application-card").count(), 0, "technical admin must not see investigation records");
+  assert.equal(await adminPage.locator('[data-action="edit-investigation"]').count(), 0, "technical admin must not intervene in an independent investigation");
+  assert.equal(await adminPage.locator('[data-action="delete-investigation"]').count(), 0, "investigation archive must not be deleted by technical admin");
   await adminPage.evaluate(() => { location.hash = "#/portal/complaints"; });
-  await adminPage.waitForSelector('[data-action="open-complaint-assignee"][data-id="complaint-open"]');
-  await adminPage.locator('[data-action="open-complaint-assignee"][data-id="complaint-open"]').click();
-  assert.equal(await adminPage.locator("#complaint-assignee-member").isVisible(), true, "admin should edit complaint assignee");
-  assert.equal(await adminPage.locator('#complaint-assignee-member option[value="member-2"]').count(), 1, "complaint assignee list should include active discipline staff");
-  assert.equal(await adminPage.locator("#complaint-target-member").count(), 0, "complaint admin edit should not expose accused member editing");
-  await adminPage.keyboard.press("Escape");
+  await adminPage.waitForTimeout(150);
+  assert.equal(await adminPage.locator(".application-card").count(), 0, "technical admin must not see discipline complaints");
+  assert.equal(await adminPage.locator('[data-action="open-complaint-assignee"]').count(), 0, "technical admin must not assign discipline complaints");
   await adminContext.close();
 
   const creditOfficerContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

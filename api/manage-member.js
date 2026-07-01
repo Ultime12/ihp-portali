@@ -4,7 +4,7 @@ import creditSystemHandler from "../server/credit-system.js";
 const MANAGER_ROLES = new Set(["super_admin"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin"]);
 const ROLE_MODERATOR_ROLES = new Set(["super_admin", "president", "vice_president"]);
-const DISCIPLINE_ROLE_MANAGERS = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair"]);
+const DISCIPLINE_ROLE_MANAGERS = new Set(["president", "discipline_chair"]);
 const DISCIPLINE_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const SETTABLE_DISCIPLINE_ROLES = new Set(["none", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PARTY_ROLES = new Set([
@@ -240,16 +240,24 @@ function canSetDisciplineRole(actorRoles, targetRoles, targetRole) {
   const currentRank = disciplineRank(targetRoles);
   const nextRank = targetDisciplineRank(targetRole);
   if (currentRank === nextRank) return false;
-  if (actorRoles.includes("super_admin")) return true;
   if (targetRoles.includes("super_admin")) return false;
-  if (actorRoles.includes("president")) return true;
-  if (actorRoles.includes("discipline_chair")) {
-    return currentRank > 0 && currentRank < 3 && nextRank < 3;
+  if (actorRoles.includes("president")) {
+    return nextRank === 3 || (currentRank === 3 && nextRank === 0);
   }
-  if (actorRoles.includes("discipline_vice_chair")) {
-    return currentRank === 1 && (nextRank === 2 || nextRank === 0);
+  if (actorRoles.includes("discipline_chair")) {
+    return currentRank < 3 && nextRank < 3;
   }
   return false;
+}
+
+function disciplineRoleOf(roles) {
+  return roles.find((role) => DISCIPLINE_ROLES.has(role)) || "none";
+}
+
+function disciplineRoleChangeAllowed(actorRoles, currentRoles, requestedRoles) {
+  const currentRole = disciplineRoleOf(currentRoles);
+  const requestedRole = disciplineRoleOf(requestedRoles);
+  return currentRole === requestedRole || canSetDisciplineRole(actorRoles, currentRoles, requestedRole);
 }
 
 function nextRolesWithDisciplineRole(currentRoles, targetRole) {
@@ -342,19 +350,49 @@ export default async function handler(request, response) {
   if (request.body?.module === "account" && action === "self_delete") {
     if (!actor) return json(response, 401, { error: "Oturum gecersiz veya sona ermis." });
     if (actor.profile.is_system_account) return json(response, 403, { error: "Sistem hesaplari bu ekrandan silinemez." });
-    if (request.body?.acceptDataLoss !== true || String(request.body?.confirmation || "").trim() !== "HESABIMI SİL") {
-      return json(response, 400, { error: "Hesap silme metnini okuyup tam olarak onaylamalisiniz." });
+    if (request.body?.acceptDataLoss !== true || String(request.body?.confirmation || "").trim() !== "ÜYELİKTEN AYRIL") {
+      return json(response, 400, { error: "Uyelikten ayrilma metnini okuyup tam olarak onaylamalisiniz." });
     }
-    const deleteResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(actor.authUser.id)}`, {
-      method: "DELETE"
+    const openInvestigationResponse = await supabaseRequest(
+      `/rest/v1/investigations?subject_profile_id=eq.${encodeURIComponent(actor.authUser.id)}&status=in.(open,reviewing)&select=id&limit=1`
+    );
+    const openInvestigations = await openInvestigationResponse.json().catch(() => []);
+    const profileResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(actor.authUser.id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        status: "left",
+        roles: ["member"],
+        role: "member",
+        committee_id: null,
+        suspended_until: null,
+        suspension_note: ""
+      })
     });
-    if (!deleteResponse.ok) {
-      const result = await deleteResponse.json().catch(() => ({}));
-      return json(response, deleteResponse.status, {
-        error: result.msg || result.message || "Hesap silinemedi. Lutfen tekrar deneyin."
+    if (!profileResponse.ok) {
+      const result = await profileResponse.json().catch(() => ({}));
+      return json(response, profileResponse.status, {
+        error: result.message || "Uyelikten ayrilma islemi tamamlanamadi."
       });
     }
-    return json(response, 200, { ok: true });
+    await Promise.all([
+      supabaseRequest(`/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(actor.authUser.id)}`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" }
+      }),
+      supabaseRequest(`/rest/v1/executive_committee_members?profile_id=eq.${encodeURIComponent(actor.authUser.id)}`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" }
+      })
+    ]);
+    await insertAudit(actor.authUser.id, actor.authUser.id, "Uye kendi talebiyle partiden ayrildi", {
+      open_investigation_preserved: Boolean(openInvestigations.length)
+    });
+    return json(response, 200, {
+      ok: true,
+      left: true,
+      investigationPreserved: Boolean(openInvestigations.length)
+    });
   }
   if (!id) return json(response, 400, { error: "Eksik uye islemi." });
 
@@ -373,16 +411,41 @@ export default async function handler(request, response) {
       return json(response, 403, { error: "Uye silmek icin admin yetkisi gerekir." });
     }
     if (id === actor.authUser.id) return json(response, 400, { error: "Kendi hesabinizi silemezsiniz." });
-    const deleteResponse = await supabaseRequest(`/auth/v1/admin/users/${encodeURIComponent(id)}`, {
-      method: "DELETE"
+    const beforeProfile = await getProfileById(id);
+    if (!beforeProfile) return json(response, 404, { error: "Uye bulunamadi." });
+    const leaveResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        status: "left",
+        roles: ["member"],
+        role: "member",
+        committee_id: null,
+        suspended_until: null,
+        suspension_note: ""
+      })
     });
-    if (!deleteResponse.ok) {
-      const result = await deleteResponse.json().catch(() => ({}));
-      return json(response, deleteResponse.status, {
-        error: result.msg || result.message || "Uye silinemedi."
+    if (!leaveResponse.ok) {
+      const result = await leaveResponse.json().catch(() => ({}));
+      return json(response, leaveResponse.status, {
+        error: result.message || "Uyelik sonlandirilamadi."
       });
     }
-    return json(response, 200, { ok: true, message: "Uye silindi." });
+    await Promise.all([
+      supabaseRequest(`/rest/v1/profile_committees?profile_id=eq.${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" }
+      }),
+      supabaseRequest(`/rest/v1/executive_committee_members?profile_id=eq.${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" }
+      })
+    ]);
+    await insertAudit(actor.authUser.id, id, "Uyelik sonlandirildi; kurumsal arsiv korundu", {
+      old_status: beforeProfile.status,
+      new_status: "left"
+    });
+    return json(response, 200, { ok: true, message: "Uyelik sonlandirildi ve kurumsal kayitlar korundu." });
   }
 
   if (action === "remove_discipline_role" || action === "set_discipline_role") {
@@ -444,6 +507,9 @@ export default async function handler(request, response) {
     if (!canModerateProfile(actor.roles, currentRoles, requestedRoles)) {
       return json(response, 403, { error: "Baskanlik hiyerarsisi bu rol degisikligine izin vermiyor." });
     }
+    if (!disciplineRoleChangeAllowed(actor.roles, currentRoles, requestedRoles)) {
+      return json(response, 403, { error: "Disiplin Kurulu atamalari Ana Yonetmelikteki yetki dagilimina uymuyor." });
+    }
 
     const patchResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -492,6 +558,9 @@ export default async function handler(request, response) {
 
   const payload = cleanProfilePayload(request.body, actor.roles);
   if (!payload) return json(response, 400, { error: "Uye bilgileri gecersiz." });
+  if (!disciplineRoleChangeAllowed(actor.roles, rolesOf(beforeProfile), payload.roles)) {
+    return json(response, 403, { error: "Teknik admin Disiplin Kurulunun kurumsal atama yetkisini devralamaz." });
+  }
   const committeeIds = Object.prototype.hasOwnProperty.call(request.body || {}, "committee_ids")
     ? normalizeCommitteeIds(request.body.committee_ids)
     : null;
