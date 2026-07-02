@@ -190,7 +190,10 @@ loginPage = function premiumLoginPage() {
 dashboardPage = function premiumDashboardPage() {
   const data = state.cache.overview || {};
   const profiles = visibleProfiles(data.profiles || []).filter(
-    (profile) => !profile.credit_test_access && !rolesOf(profile).includes("super_admin")
+    (profile) =>
+      profile.status !== "left" &&
+      !profile.credit_test_access &&
+      !rolesOf(profile).includes("super_admin")
   );
   const announcements = (data.announcements || []).filter((item) => item.status === "published");
   const disciplines = data.disciplines || [];

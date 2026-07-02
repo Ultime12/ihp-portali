@@ -84,7 +84,9 @@ function creditTransactionLabel(kind) {
     loan_disbursement: "Kredi kullandırıldı", loan_repayment: "Kredi ödemesi",
     discipline_fine_repayment: "Disiplin para cezası ödemesi",
     balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Yetkili düzeltmesi",
-    game_entry: "Oyun giriş bedeli", game_reward: "Oyun ödülü"
+    game_entry: "Oyun giriş bedeli", game_reward: "Oyun ödülü",
+    assistant_message: "Dijital Asistan mesajı", assistant_weekly: "Dijital Asistan haftalık paket",
+    assistant_refund: "Dijital Asistan iadesi"
   })[kind] || kind;
 }
 
@@ -92,8 +94,8 @@ function creditTransactionDirection(item = {}) {
   if (item.kind === "admin_adjustment") {
     return item.metadata?.direction === "credit" ? "incoming" : "outgoing";
   }
-  if (["transfer_in", "transfer_refund", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward"].includes(item.kind)) return "incoming";
-  if (["transfer_out", "transfer_tax", "transfer_reserve", "cheque_issue", "loan_repayment", "discipline_fine_repayment", "balance_forfeit", "game_entry"].includes(item.kind)) return "outgoing";
+  if (["transfer_in", "transfer_refund", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward", "assistant_refund"].includes(item.kind)) return "incoming";
+  if (["transfer_out", "transfer_tax", "transfer_reserve", "cheque_issue", "loan_repayment", "discipline_fine_repayment", "balance_forfeit", "game_entry", "assistant_message", "assistant_weekly"].includes(item.kind)) return "outgoing";
   return "neutral";
 }
 

@@ -22,7 +22,8 @@ const featureFiles = [
   "game-center.js",
   "credit-system.js",
   "premium-ui.js",
-  "member-identity.js"
+  "member-identity.js",
+  "assistant.js"
 ];
 
 async function copyFile(source, destination) {

@@ -387,7 +387,7 @@ function canSetDisciplineRole(member, targetRole) {
 
 function canDisciplineTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
-  if (isTechnicalSuperAdmin(member) || member.is_system_account || isProtectedDisciplineTarget(member)) return false;
+  if (member.status === "left" || isTechnicalSuperAdmin(member) || member.is_system_account || isProtectedDisciplineTarget(member)) return false;
   if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   return true;
@@ -399,7 +399,7 @@ function disciplineTargetMembers() {
 
 function canInvestigateTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
-  if (isTechnicalSuperAdmin(member) || member.is_system_account) return false;
+  if (member.status === "left" || isTechnicalSuperAdmin(member) || member.is_system_account) return false;
   if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   if (isProtectedInvestigationTarget(member)) return false;
@@ -1126,7 +1126,7 @@ function portalShell(page) {
 
 function dashboardPage() {
   const data = state.cache.overview || {};
-  const profiles = visibleProfiles(data.profiles || []);
+  const profiles = visibleProfiles(data.profiles || []).filter((profile) => profile.status !== "left");
   const announcements = data.announcements || [];
   const disciplines = data.disciplines || [];
   const positions = data.positions || [];
@@ -1981,7 +1981,7 @@ function complaintsPage() {
 
 function openComplaint() {
   const members = (state.cache.complaintMembers || state.cache.members || [])
-    .filter((member) => member.id !== state.profile?.id && !isTechnicalSuperAdmin(member));
+    .filter((member) => member.id !== state.profile?.id && member.status !== "left" && !isTechnicalSuperAdmin(member));
   modal({
     title: "Şikayet yaz",
     subtitle: "Bu kayıt disiplin kurulu yetkililerine gider.",
@@ -2032,7 +2032,7 @@ function openComplaintReview(item, status) {
 }
 
 function canAssignComplaintTo(member) {
-  if (!member || member.is_system_account || isTechnicalSuperAdmin(member)) return false;
+  if (!member || member.status !== "active" || member.is_system_account || isTechnicalSuperAdmin(member)) return false;
   const roles = rolesOf(member);
   return roles.some((role) => ["discipline_chair", "discipline_vice_chair", "discipline_member"].includes(role));
 }
@@ -2073,7 +2073,7 @@ function openComplaintAssigneeEdit(item) {
 function openComplaintTargetEdit(item) {
   if (!item || !hasRole("super_admin")) return;
   const members = visibleProfiles(state.cache.complaintMembers || state.cache.members || [])
-    .filter((member) => member.id !== state.profile?.id);
+    .filter((member) => member.id !== state.profile?.id && member.status !== "left");
   modal({
     title: "Sikayette ilgili uye",
     subtitle: "Admin, sikayetin ilgili uye alanini sorumlulugu bozmadan duzenler.",

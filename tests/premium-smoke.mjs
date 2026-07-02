@@ -60,6 +60,7 @@ const members = [
   { ...baseProfile, id: "president-1", email: "baskan@example.test", display_name: "Genel Başkan", member_code: "304756", roles: ["president", "member"], role: "president", avatar_initials: "GB" },
   { ...baseProfile, id: "aide-1", email: "aide@example.test", display_name: "Oguz Pamir Ozmen", member_code: "405867", roles: ["presidential_aide", "member"], role: "presidential_aide", avatar_initials: "OP" },
   { ...baseProfile, id: "discipline-chair-target", email: "dk-chair@example.test", display_name: "DK Baskani", member_code: "506978", roles: ["discipline_chair", "member"], role: "discipline_chair", avatar_initials: "DK" },
+  { ...baseProfile, id: "departed-member", email: "departed@example.test", display_name: "Ayrilan Uye", member_code: "607089", status: "left", avatar_initials: "AU" },
   { ...baseProfile, id: "system-test", email: "deneme@example.test", display_name: "Kredi Deneme", member_code: null, is_system_account: true, credit_test_access: true },
   { ...baseProfile, id: "admin-hidden", email: "admin.hidden@example.test", display_name: "ADMIN", member_code: null, roles: ["super_admin"], role: "super_admin" }
 ];
@@ -144,7 +145,44 @@ async function mockBackend(page, profile) {
   const approvedGameKeys = new Set();
   let creditAccountClosed = false;
   let scheduledTransfers = [];
+  let assistantHistory = [];
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  await page.route("**/api/assistant", (route) => {
+    const body = JSON.parse(route.request().postData() || "{}");
+    if (body.action === "message") {
+      assistantHistory.push({
+        id: `assistant-${assistantHistory.length + 1}`,
+        question: body.message,
+        answer: "Partinin temel ilkeleri demokrasi, eşitlik, adalet, şeffaflık ve dayanışmadır. [K1]",
+        payment_mode: "per_message",
+        charged_amount: 10000,
+        sources: [{ id: "K1", title: "Yönetmelik: İHP Temel Yönetmeliği", type: "regulation" }],
+        created_at: "2026-07-03T10:00:00.000Z"
+      });
+    }
+    const weeklyActive = body.action === "subscribe_weekly";
+    return route.fulfill({
+      json: {
+        configured: true,
+        settings: {
+          enabled: true,
+          per_message_cost: 10000,
+          weekly_cost: 200000,
+          max_input_chars: 2000
+        },
+        account: {
+          id: "assistant-account",
+          account_code: "IHP777888999",
+          balance: body.action === "message" ? 490000 : weeklyActive ? 300000 : 500000,
+          status: "active"
+        },
+        subscription: weeklyActive
+          ? { paid_at: "2026-07-03T10:00:00.000Z", valid_until: "2026-07-10T10:00:00.000Z" }
+          : null,
+        history: assistantHistory
+      }
+    });
+  });
   await page.route("**/api/governance", (route) => {
     const executive = profile.roles.some((role) => ["president", "vice_president", "presidential_aide"].includes(role));
     route.fulfill({
@@ -405,12 +443,23 @@ try {
     assert.equal(await portalPage.locator(".dashboard-hero h2").evaluate((element) => getComputedStyle(element).color), "rgb(16, 36, 59)", "light theme hero text must keep readable contrast");
     await portalPage.screenshot({ path: join(output, `${viewport.name}-portal-light.png`), fullPage: true });
     assert.equal(await portalPage.locator(".premium-metrics .metric-card").first().locator("strong").innerText(), "05", "dashboard member count must exclude test and technical admin accounts");
+    assert.equal(await portalPage.locator(".ihp-assistant-launcher").isVisible(), true, `${viewport.name}: assistant launcher should be visible`);
+    await portalPage.locator(".ihp-assistant-launcher").click();
+    await portalPage.waitForSelector(".ihp-assistant-panel.open");
+    assert.match(await portalPage.locator(".ihp-assistant-planbar").innerText(), /500[.\s]?000 kredi/i);
+    assert.match(await portalPage.locator(".ihp-assistant-planbar").innerText(), /7 gün/i);
+    await portalPage.locator("[data-assistant-input]").fill("Partinin temel ilkeleri nelerdir?");
+    await portalPage.locator('form[data-form="assistant-message"]').evaluate((form) => form.requestSubmit());
+    await portalPage.getByText(/demokrasi, eşitlik, adalet/i).waitFor();
+    assert.equal(await portalPage.locator(".ihp-assistant-sources span").count(), 1, "assistant response should show its portal source");
+    await portalPage.screenshot({ path: join(output, `${viewport.name}-assistant.png`), fullPage: true });
+    await portalPage.locator('[data-action="assistant-close"]').click();
     await portalPage.locator("[data-theme-select]").selectOption("green");
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "green", "theme selection should apply");
     await portalPage.locator('[data-action="open-notifications"]').click();
-    assert.equal(await portalPage.locator('[role="dialog"]').isVisible(), true, "notifications modal should open");
+    assert.equal(await portalPage.locator('[role="dialog"][aria-modal="true"]').isVisible(), true, "notifications modal should open");
     await portalPage.waitForTimeout(75);
-    assert.equal(await portalPage.evaluate(() => document.querySelector('[role="dialog"]').contains(document.activeElement)), true, "modal should receive focus");
+    assert.equal(await portalPage.evaluate(() => document.querySelector('[role="dialog"][aria-modal="true"]').contains(document.activeElement)), true, "modal should receive focus");
     await portalPage.keyboard.press("Escape");
     await portalPage.evaluate(() => { location.hash = "#/portal/games"; });
     await portalPage.waitForSelector(".arcade-grid");
@@ -720,6 +769,7 @@ try {
   await disciplinePage.locator('[data-action="open-discipline"]').click();
   assert.equal(await disciplinePage.locator('#discipline-member option[value="discipline-chair-target"]').count(), 1, "DK chair should be selectable for point penalties");
   assert.equal(await disciplinePage.locator('#discipline-member option[value="aide-1"]').count(), 1, "presidential aide should be selectable for discipline action");
+  assert.equal(await disciplinePage.locator('#discipline-member option[value="departed-member"]').count(), 0, "departed members must not be discipline targets");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-open"]').count(), 1, "unused open investigation should be selectable");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-used"]').count(), 0, "investigation with a penalty must not be selectable again");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-closed"]').count(), 0, "closed investigation must not be selectable");
@@ -748,6 +798,12 @@ try {
   await disciplinePage.locator('[data-action="open-investigation"]').click();
   assert.equal(await disciplinePage.locator('#investigation-subject option[value="discipline-chair-target"]').count(), 1, "investigation can be opened for DK chair");
   assert.equal(await disciplinePage.locator('#investigation-subject option[value="aide-1"]').count(), 1, "investigation can be opened for presidential aide");
+  assert.equal(await disciplinePage.locator('#investigation-subject option[value="departed-member"]').count(), 0, "departed members must not be investigation targets");
+  await disciplinePage.keyboard.press("Escape");
+  await disciplinePage.goto(`${baseUrl}/#/portal/complaints`);
+  await disciplinePage.waitForSelector(".app-shell");
+  await disciplinePage.locator('[data-action="open-complaint"]').click();
+  assert.equal(await disciplinePage.locator('#complaint-accused option[value="departed-member"]').count(), 0, "departed members must not be complaint targets");
   await disciplineContext.close();
 
   const accessContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -757,6 +813,7 @@ try {
   assert.equal(await accessPage.locator(".app-nav .nav-item").count(), 1, "access account should see one menu item");
   assert.equal(await accessPage.getByText("Geçiş", { exact: true }).first().isVisible(), true);
   assert.equal(await accessPage.locator('[data-action="open-member-credential"]').count(), 0, "system access account should not receive an identity star");
+  assert.equal(await accessPage.locator(".ihp-assistant-launcher").count(), 0, "system access account must not see the assistant");
   await accessContext.close();
 
   console.log(`Premium smoke tests passed. Screenshots: ${output}`);
