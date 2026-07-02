@@ -217,7 +217,7 @@ async function loadIhpAssistant() {
   ui.error = "";
   render();
   try {
-    ui.data = await portalServerRequest("/api/assistant", { action: "status" });
+    ui.data = await portalServerRequest("/api/manage-member", { module: "assistant", action: "status" });
   } catch (error) {
     ui.error = error.message;
   } finally {
@@ -258,7 +258,8 @@ submitForm = async function ihpAssistantSubmitForm(event) {
     if (messages) messages.scrollTop = messages.scrollHeight;
   });
   try {
-    ui.data = await portalServerRequest("/api/assistant", {
+    ui.data = await portalServerRequest("/api/manage-member", {
+      module: "assistant",
       action: "message",
       message
     });
@@ -266,7 +267,7 @@ submitForm = async function ihpAssistantSubmitForm(event) {
   } catch (error) {
     showToast(error.message, "error");
     try {
-      ui.data = await portalServerRequest("/api/assistant", { action: "status" });
+      ui.data = await portalServerRequest("/api/manage-member", { module: "assistant", action: "status" });
     } catch {
       // The original error is already visible to the member.
     }
@@ -326,7 +327,7 @@ handleClick = async function ihpAssistantHandleClick(event) {
         const confirmButton = modalRoot.querySelector('[data-action="confirm-action"]');
         if (confirmButton) confirmButton.disabled = true;
         try {
-          ui.data = await portalServerRequest("/api/assistant", { action: "subscribe_weekly" });
+          ui.data = await portalServerRequest("/api/manage-member", { module: "assistant", action: "subscribe_weekly" });
           closeModal();
           showToast("İHP Dijital Asistan haftalık paketiniz etkinleştirildi.", "success");
           render();

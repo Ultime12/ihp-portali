@@ -1,5 +1,6 @@
 import { emailProfile, sendPortalEmail } from "../server/mail.js";
 import agreementHandler from "../server/agreement-api.js";
+import assistantHandler from "../server/assistant-api.js";
 import creditSystemHandler from "../server/credit-system.js";
 import governanceHandler from "../server/governance-api.js";
 
@@ -332,6 +333,9 @@ async function notify(profileId, actorId, title, body) {
 }
 
 export default async function handler(request, response) {
+  if (request.method === "POST" && request.body?.module === "assistant") {
+    return assistantHandler(request, response);
+  }
   if (request.method === "POST" && request.body?.module === "governance") {
     return governanceHandler(request, response);
   }

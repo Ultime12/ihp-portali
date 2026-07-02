@@ -347,6 +347,17 @@ export default async function handler(request, response) {
     });
   }
   if (request.method !== "POST") return json(response, 405, { error: "Yalnızca POST isteği kabul edilir." });
+  if (request.body?.action === "health") {
+    return json(response, 200, {
+      ready: Boolean(
+        process.env.GEMINI_API_KEY &&
+        process.env.SUPABASE_URL &&
+        process.env.SUPABASE_ANON_KEY &&
+        process.env.SUPABASE_SERVICE_ROLE_KEY
+      ),
+      provider: "Gemini"
+    });
+  }
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return json(response, 500, { error: "Sunucu yapılandırması eksik." });
   }

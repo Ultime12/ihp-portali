@@ -147,42 +147,6 @@ async function mockBackend(page, profile) {
   let scheduledTransfers = [];
   let assistantHistory = [];
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
-  await page.route("**/api/assistant", (route) => {
-    const body = JSON.parse(route.request().postData() || "{}");
-    if (body.action === "message") {
-      assistantHistory.push({
-        id: `assistant-${assistantHistory.length + 1}`,
-        question: body.message,
-        answer: "Partinin temel ilkeleri demokrasi, eşitlik, adalet, şeffaflık ve dayanışmadır. [K1]",
-        payment_mode: "per_message",
-        charged_amount: 10000,
-        sources: [{ id: "K1", title: "Yönetmelik: İHP Temel Yönetmeliği", type: "regulation" }],
-        created_at: "2026-07-03T10:00:00.000Z"
-      });
-    }
-    const weeklyActive = body.action === "subscribe_weekly";
-    return route.fulfill({
-      json: {
-        configured: true,
-        settings: {
-          enabled: true,
-          per_message_cost: 10000,
-          weekly_cost: 200000,
-          max_input_chars: 2000
-        },
-        account: {
-          id: "assistant-account",
-          account_code: "IHP777888999",
-          balance: body.action === "message" ? 490000 : weeklyActive ? 300000 : 500000,
-          status: "active"
-        },
-        subscription: weeklyActive
-          ? { paid_at: "2026-07-03T10:00:00.000Z", valid_until: "2026-07-10T10:00:00.000Z" }
-          : null,
-        history: assistantHistory
-      }
-    });
-  });
   await page.route("**/api/governance", (route) => {
     const executive = profile.roles.some((role) => ["president", "vice_president", "presidential_aide"].includes(role));
     route.fulfill({
@@ -260,6 +224,41 @@ async function mockBackend(page, profile) {
   });
   await page.route("**/api/manage-member", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
+    if (body.module === "assistant") {
+      if (body.action === "message") {
+        assistantHistory.push({
+          id: `assistant-${assistantHistory.length + 1}`,
+          question: body.message,
+          answer: "Partinin temel ilkeleri demokrasi, eşitlik, adalet, şeffaflık ve dayanışmadır. [K1]",
+          payment_mode: "per_message",
+          charged_amount: 10000,
+          sources: [{ id: "K1", title: "Yönetmelik: İHP Temel Yönetmeliği", type: "regulation" }],
+          created_at: "2026-07-03T10:00:00.000Z"
+        });
+      }
+      const weeklyActive = body.action === "subscribe_weekly";
+      return route.fulfill({
+        json: {
+          configured: true,
+          settings: {
+            enabled: true,
+            per_message_cost: 10000,
+            weekly_cost: 200000,
+            max_input_chars: 2000
+          },
+          account: {
+            id: "assistant-account",
+            account_code: "IHP777888999",
+            balance: body.action === "message" ? 490000 : weeklyActive ? 300000 : 500000,
+            status: "active"
+          },
+          subscription: weeklyActive
+            ? { paid_at: "2026-07-03T10:00:00.000Z", valid_until: "2026-07-10T10:00:00.000Z" }
+            : null,
+          history: assistantHistory
+        }
+      });
+    }
     if (body.module === "governance") {
       const executive = profile.roles.some((role) => ["president", "vice_president", "presidential_aide"].includes(role));
       return route.fulfill({
