@@ -2257,6 +2257,11 @@ body::after {
   position: relative;
   z-index: 2;
 }
+.ihp-assistant-head-actions {
+  align-items: center;
+  display: flex;
+  gap: .35rem;
+}
 .ihp-assistant-title {
   align-items: center;
   display: flex;
@@ -2577,8 +2582,13 @@ button.ihp-assistant-plan { cursor: pointer; }
 .ihp-assistant-compose textarea:disabled { cursor: wait; opacity: .58; }
 .ihp-assistant-compose svg { height: 17px; width: 17px; }
 .ihp-assistant-payment-note {
+  align-items: center;
   color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
   font-size: .57rem;
+  gap: .2rem .65rem;
+  justify-content: center;
   line-height: 1.45;
   min-height: 26px;
   padding: 0 1.05rem .72rem;
@@ -2590,6 +2600,17 @@ button.ihp-assistant-plan { cursor: pointer; }
   gap: .3rem;
 }
 .ihp-assistant-payment-note svg { color: #64efb6; height: 12px; width: 12px; }
+.assistant-enabled-setting {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  margin: 0;
+  padding: .85rem;
+}
+.assistant-enabled-setting span {
+  display: grid;
+  gap: .2rem;
+}
+.assistant-enabled-setting small { color: var(--muted); }
 .ihp-assistant-state {
   align-items: center;
   display: flex;

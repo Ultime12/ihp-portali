@@ -23,6 +23,19 @@ function ihpAssistantState() {
   return state.cache.ihpAssistantUi;
 }
 
+function scrollIhpAssistantToBottom({ focus = false } = {}) {
+  const apply = () => {
+    const messages = document.querySelector("[data-assistant-messages]");
+    if (messages) messages.scrollTop = messages.scrollHeight;
+    if (focus) document.querySelector("[data-assistant-input]")?.focus();
+  };
+  requestAnimationFrame(() => {
+    apply();
+    requestAnimationFrame(apply);
+    setTimeout(apply, 90);
+  });
+}
+
 function assistantCredit(value) {
   return `${Number(value || 0).toLocaleString("tr-TR")} kredi`;
 }
@@ -102,7 +115,7 @@ function assistantReadyContent(ui) {
   const subscription = data.subscription;
   const history = Array.isArray(data.history) ? data.history : [];
   const perMessage = Number(settings.per_message_cost ?? 10000);
-  const weekly = Number(settings.weekly_cost ?? 200000);
+  const weekly = Number(settings.weekly_cost ?? 250000);
   const maxChars = Number(settings.max_input_chars || 2000);
 
   if (!data.configured) {
@@ -165,6 +178,7 @@ function assistantReadyContent(ui) {
       ${subscription
         ? `<span>${icon("check")} Bu konuşma haftalık pakete dahil.</span>`
         : `<span>Her başarılı mesaj ${assistantCredit(perMessage)}. Hata olursa otomatik iade edilir.</span>`}
+      <span>Günlük sohbet geçmişi her gece yenilenir.</span>
     </div>
   `;
 }
@@ -177,7 +191,10 @@ function assistantPanelMarkup(ui) {
           <span class="ihp-assistant-orb">İHP</span>
           <div><strong>İHP Dijital Asistan</strong><small><i></i> Portal bilgisiyle çalışan yardımcı</small></div>
         </div>
-        <button class="icon-btn" type="button" data-action="assistant-close" aria-label="Asistanı kapat">${icon("x")}</button>
+        <div class="ihp-assistant-head-actions">
+          ${hasRole("super_admin") && ui.data?.settings ? `<button class="icon-btn" type="button" data-action="assistant-settings" aria-label="Asistan ayarları">${icon("settings")}</button>` : ""}
+          <button class="icon-btn" type="button" data-action="assistant-close" aria-label="Asistanı kapat">${icon("x")}</button>
+        </div>
       </header>
       <div class="ihp-assistant-body">
         ${ui.loading
@@ -223,11 +240,7 @@ async function loadIhpAssistant() {
   } finally {
     ui.loading = false;
     render();
-    requestAnimationFrame(() => {
-      document.querySelector("[data-assistant-input]")?.focus();
-      const messages = document.querySelector("[data-assistant-messages]");
-      if (messages) messages.scrollTop = messages.scrollHeight;
-    });
+    scrollIhpAssistantToBottom({ focus: true });
   }
 }
 
@@ -238,6 +251,33 @@ portalShell = function ihpAssistantPortalShell(page) {
 
 const ihpAssistantBaseSubmitForm = submitForm;
 submitForm = async function ihpAssistantSubmitForm(event) {
+  const settingsForm = event.target.closest('form[data-form="assistant-settings"]');
+  if (settingsForm) {
+    event.preventDefault();
+    if (!hasRole("super_admin")) return;
+    const submit = settingsForm.querySelector('[type="submit"]');
+    if (submit) submit.disabled = true;
+    try {
+      const ui = ihpAssistantState();
+      ui.data = await portalServerRequest("/api/manage-member", {
+        module: "assistant",
+        action: "update_settings",
+        enabled: Boolean(settingsForm.querySelector("[data-assistant-enabled]")?.checked),
+        perMessageCost: Number(settingsForm.querySelector("[data-assistant-message-cost]")?.value),
+        weeklyCost: Number(settingsForm.querySelector("[data-assistant-weekly-cost]")?.value),
+        maxInputChars: Number(settingsForm.querySelector("[data-assistant-max-input]")?.value),
+        maxOutputTokens: Number(settingsForm.querySelector("[data-assistant-max-output]")?.value)
+      });
+      closeModal();
+      showToast("İHP Dijital Asistan paketleri güncellendi.", "success");
+      render();
+    } catch (error) {
+      showToast(error.message, "error");
+      if (submit) submit.disabled = false;
+    }
+    return;
+  }
+
   const form = event.target.closest('form[data-form="assistant-message"]');
   if (!form) return ihpAssistantBaseSubmitForm(event);
   event.preventDefault();
@@ -253,10 +293,7 @@ submitForm = async function ihpAssistantSubmitForm(event) {
   ui.pendingQuestion = message;
   if (input) input.value = "";
   render();
-  requestAnimationFrame(() => {
-    const messages = document.querySelector("[data-assistant-messages]");
-    if (messages) messages.scrollTop = messages.scrollHeight;
-  });
+  scrollIhpAssistantToBottom();
   try {
     ui.data = await portalServerRequest("/api/manage-member", {
       module: "assistant",
@@ -275,11 +312,7 @@ submitForm = async function ihpAssistantSubmitForm(event) {
     ui.sending = false;
     ui.pendingQuestion = "";
     render();
-    requestAnimationFrame(() => {
-      const messages = document.querySelector("[data-assistant-messages]");
-      if (messages) messages.scrollTop = messages.scrollHeight;
-      document.querySelector("[data-assistant-input]")?.focus();
-    });
+    scrollIhpAssistantToBottom({ focus: true });
   }
 };
 
@@ -302,7 +335,11 @@ handleClick = async function ihpAssistantHandleClick(event) {
     const ui = ihpAssistantState();
     ui.open = !ui.open;
     render();
-    if (ui.open && !ui.data && !ui.loading) await loadIhpAssistant();
+    if (ui.open) {
+      scrollIhpAssistantToBottom({ focus: true });
+      if (!ui.data && !ui.loading) await loadIhpAssistant();
+      scrollIhpAssistantToBottom({ focus: true });
+    }
     return;
   }
   if (action === "assistant-close") {
@@ -316,10 +353,48 @@ handleClick = async function ihpAssistantHandleClick(event) {
     await loadIhpAssistant();
     return;
   }
+  if (action === "assistant-settings") {
+    event.preventDefault();
+    if (!hasRole("super_admin")) return;
+    const settings = ihpAssistantState().data?.settings || {};
+    modal({
+      title: "Dijital Asistan ayarları",
+      subtitle: "Paketler ve kullanım sınırları",
+      body: `
+        <form class="form-stack" data-form="assistant-settings">
+          <label class="setting-row assistant-enabled-setting">
+            <span><strong>Asistan kullanımı</strong><small>Tüm üyeler için sistemi aç veya kapat</small></span>
+            <input type="checkbox" data-assistant-enabled ${settings.enabled ? "checked" : ""} />
+          </label>
+          <div class="form-grid">
+            <label>Mesaj başına ücret
+              <input class="field" data-assistant-message-cost type="number" min="0" max="9007199254740991" step="1" value="${Number(settings.per_message_cost ?? 10000)}" required />
+            </label>
+            <label>7 günlük paket
+              <input class="field" data-assistant-weekly-cost type="number" min="0" max="9007199254740991" step="1" value="${Number(settings.weekly_cost ?? 250000)}" required />
+            </label>
+          </div>
+          <div class="form-grid">
+            <label>En uzun kullanıcı mesajı
+              <input class="field" data-assistant-max-input type="number" min="100" max="6000" step="100" value="${Number(settings.max_input_chars || 2000)}" required />
+            </label>
+            <label>En uzun asistan cevabı
+              <input class="field" data-assistant-max-output type="number" min="400" max="8000" step="100" value="${Number(settings.max_output_tokens || 6000)}" required />
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
+            <button class="btn btn-primary btn-sm" type="submit">Ayarları kaydet</button>
+          </div>
+        </form>
+      `
+    });
+    return;
+  }
   if (action === "assistant-weekly") {
     event.preventDefault();
     const ui = ihpAssistantState();
-    const weeklyCost = Number(ui.data?.settings?.weekly_cost ?? 200000);
+    const weeklyCost = Number(ui.data?.settings?.weekly_cost ?? 250000);
     confirmModal(
       "Haftalık asistan paketini aç",
       `${assistantCredit(weeklyCost)} bakiyenizden kesilir ve paket 7 gün boyunca etkin olur. Bu ödeme tamamlandıktan sonra geri alınamaz.`,
@@ -341,3 +416,10 @@ handleClick = async function ihpAssistantHandleClick(event) {
   }
   return ihpAssistantBaseHandleClick(event);
 };
+
+document.addEventListener("keydown", (event) => {
+  const input = event.target.closest?.("[data-assistant-input]");
+  if (!input || event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  input.form?.requestSubmit();
+});

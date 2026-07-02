@@ -229,7 +229,10 @@ async function mockBackend(page, profile) {
         assistantHistory.push({
           id: `assistant-${assistantHistory.length + 1}`,
           question: body.message,
-          answer: "Partinin temel ilkeleri demokrasi, eşitlik, adalet, şeffaflık ve dayanışmadır. [K1]",
+          answer: Array.from(
+            { length: 18 },
+            (_, index) => `${index + 1}. Partinin temel ilkeleri demokrasi, eşitlik, adalet, şeffaflık ve dayanışmadır. [K1]`
+          ).join("\n"),
           payment_mode: "per_message",
           charged_amount: 10000,
           sources: [{ id: "K1", title: "Yönetmelik: İHP Temel Yönetmeliği", type: "regulation" }],
@@ -243,8 +246,9 @@ async function mockBackend(page, profile) {
           settings: {
             enabled: true,
             per_message_cost: 10000,
-            weekly_cost: 200000,
-            max_input_chars: 2000
+            weekly_cost: 250000,
+            max_input_chars: 2000,
+            max_output_tokens: 6000
           },
           account: {
             id: "assistant-account",
@@ -446,12 +450,21 @@ try {
     await portalPage.locator(".ihp-assistant-launcher").click();
     await portalPage.waitForSelector(".ihp-assistant-panel.open");
     assert.match(await portalPage.locator(".ihp-assistant-planbar").innerText(), /500[.\s]?000 kredi/i);
-    assert.match(await portalPage.locator(".ihp-assistant-planbar").innerText(), /7 gün/i);
+    assert.match(await portalPage.locator(".ihp-assistant-planbar").innerText(), /250[.\s]?000 kredi/i);
     await portalPage.locator("[data-assistant-input]").fill("Partinin temel ilkeleri nelerdir?");
-    await portalPage.locator('form[data-form="assistant-message"]').evaluate((form) => form.requestSubmit());
+    await portalPage.locator("[data-assistant-input]").press("Enter");
     await portalPage.getByText(/demokrasi, eşitlik, adalet/i).waitFor();
     assert.equal(await portalPage.locator(".ihp-assistant-sources span").count(), 1, "assistant response should show its portal source");
+    const assistantBottomDistance = async () => portalPage.locator("[data-assistant-messages]").evaluate(
+      (element) => element.scrollHeight - element.scrollTop - element.clientHeight
+    );
+    assert.ok(await assistantBottomDistance() < 4, `${viewport.name}: assistant should stay at the bottom after sending`);
     await portalPage.screenshot({ path: join(output, `${viewport.name}-assistant.png`), fullPage: true });
+    await portalPage.locator('[data-action="assistant-close"]').click();
+    await portalPage.locator(".ihp-assistant-launcher").click();
+    await portalPage.waitForSelector(".ihp-assistant-panel.open");
+    await portalPage.waitForTimeout(150);
+    assert.ok(await assistantBottomDistance() < 4, `${viewport.name}: assistant should stay at the bottom after reopening`);
     await portalPage.locator('[data-action="assistant-close"]').click();
     await portalPage.locator("[data-theme-select]").selectOption("green");
     assert.equal(await portalPage.locator("html").getAttribute("data-theme"), "green", "theme selection should apply");
@@ -585,6 +598,14 @@ try {
   const adminPage = await adminContext.newPage();
   const adminProfile = { ...baseProfile, id: "admin-credit", email: "admin@example.test", roles: ["super_admin"], role: "super_admin", theme_preference: "blue" };
   await openPortal(adminPage, adminProfile, "credit-management");
+  await adminPage.locator(".ihp-assistant-launcher").click();
+  await adminPage.waitForSelector('[data-action="assistant-settings"]');
+  await adminPage.locator('[data-action="assistant-settings"]').click();
+  assert.equal(await adminPage.locator("[data-assistant-weekly-cost]").inputValue(), "250000", "admin should manage the weekly assistant package");
+  assert.equal(await adminPage.locator("[data-assistant-message-cost]").inputValue(), "10000", "admin should manage the per-message assistant package");
+  assert.equal(await adminPage.locator("[data-assistant-max-output]").inputValue(), "6000", "admin should manage the assistant response length");
+  await adminPage.keyboard.press("Escape");
+  await adminPage.locator('[data-action="assistant-close"]').click();
   assert.equal(await adminPage.locator(".credit-settings-panel").isVisible(), true, "admin should see credit settings");
   assert.equal(await adminPage.locator("[data-credit-weekly-next]").count(), 1, "admin should configure the weekly allowance start time");
   assert.equal(await adminPage.locator(".credit-transaction-amount.incoming").count(), 1, "incoming credit should have positive styling");

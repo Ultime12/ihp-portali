@@ -17,6 +17,32 @@ const ROLE_LABELS = {
   member: "Üye"
 };
 
+const PARTY_ROLE_GUIDE = [
+  "GENEL BAŞKANLIK HİYERARŞİSİ",
+  "1. Başkan: Partinin en yüksek siyasi makamıdır. Genel yönetimi, kadro ve rol atamalarını, Yürütme Kurulunu ve başkanlığa bağlı birimleri yönetir.",
+  "2. Başkan Yardımcısı: Başkanın ardından gelir; başkanlık işlerinde yetkilidir ve kendi sınırları içinde üye ve rol süreçlerini yönetebilir.",
+  "3. Başkan Yaveri: Başkanlık koordinasyonu ve verilen görevlerin takibinde Başkan ile Başkan Yardımcısına destek olur.",
+  "",
+  "DİSİPLİN KURULU HİYERARŞİSİ (KENDİ İÇİNDE AYRI ZİNCİR)",
+  "1. Disiplin Kurulu Başkanı: Kurulun en üst makamıdır; soruşturma, şikâyet, disiplin kararı, itiraz ve kurul personeli süreçlerini yönetir.",
+  "2. Disiplin Kurulu Başkan Yardımcısı: Başkanın altındadır; alt rütbedeki kurul üyelerini yönetebilir fakat Kurul Başkanının yetkisine dokunamaz.",
+  "3. Disiplin Kurulu Üyesi: Yetkisi ölçüsünde şikâyet ve soruşturma sorumluluğu alır, inceleme yapar ve disiplin işlemlerine katılır.",
+  "",
+  "GENÇLİK KOLLARI HİYERARŞİSİ (KENDİ İÇİNDE AYRI ZİNCİR)",
+  "1. Gençlik Kolları Başkanı: Gençlik Kolları çalışmalarını ve kadrosunu yönetir.",
+  "2. Gençlik Kolları Üyesi: Gençlik Kolları çalışmalarına katılır ve verilen görevleri yürütür.",
+  "",
+  "DİĞER GÖREVLER",
+  "Parti Sözcüsü: Parti adına duyuru ve resmî iletişim görevlerini yürütür; Sosyal Medya Başkanlığıyla ilişkilidir.",
+  "Kredi İşleri Sorumlusu: Kredi hesapları ve başvuruları yönetir; kendi bakiyesini veya kendi kredi başvurusunu onaylayamaz.",
+  "Baş Temsilci: Temsilci kadrosunun üst görevlisidir; temsilci atama ve koordinasyonunda yetkilidir.",
+  "Temsilci: Üyeleri veya bağlı grubu temsil eder ve kendisine verilen temsil görevlerini yürütür.",
+  "Üye: Partinin temel üyelik statüsüdür; portalın genel üye haklarından yararlanır.",
+  "",
+  "TEKNİK ROL",
+  "Admin: Parti rütbesi değildir. Teknik hata, veri ve yetki sorunlarını çözmek için tam moderasyon erişimi olan sistem yöneticisidir."
+];
+
 const STOP_WORDS = new Set([
   "acaba", "ama", "bana", "ben", "beni", "benim", "bir", "biri", "biz", "bu", "da", "daha",
   "de", "diye", "en", "gibi", "hangi", "icin", "ile", "ise", "kim", "mi", "mu", "mı", "mü",
@@ -136,6 +162,30 @@ function roleSummary(profile) {
   return `${profile.display_name}: ${labels.join(", ") || "Üye"}`;
 }
 
+function istanbulDayStartIso(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Istanbul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return new Date(`${values.year}-${values.month}-${values.day}T00:00:00+03:00`).toISOString();
+}
+
+async function purgeExpiredAssistantHistory() {
+  const dayStart = istanbulDayStartIso();
+  const response = await supabaseRequest(
+    `/rest/v1/assistant_requests?created_at=lt.${encodeURIComponent(dayStart)}&status=neq.reserved`,
+    {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" }
+    }
+  );
+  if (!response.ok) throw new Error("Günlük sohbet geçmişi yenilenemedi.");
+  return dayStart;
+}
+
 async function portalKnowledge(actor, question) {
   const [regulations, announcements, committees, positions, members, proposals, elections] = await Promise.all([
     rows("/rest/v1/regulations?select=title,content,sort_order,updated_at&order=sort_order.asc"),
@@ -200,6 +250,9 @@ async function portalKnowledge(actor, question) {
     "AKTİF ÜYELER VE GÖREVLERİ",
     ...members.map(roleSummary),
     "",
+    "RÜTBE, HİYERARŞİ VE GÖREV REHBERİ",
+    ...PARTY_ROLE_GUIDE,
+    "",
     "KARARLAR",
     ...proposals.map((item) => `${item.title} | ${item.status} | ${trimText(item.summary, 1200)}`),
     "",
@@ -217,11 +270,12 @@ async function portalKnowledge(actor, question) {
 }
 
 async function assistantStatus(profileId) {
+  const dayStart = await purgeExpiredAssistantHistory();
   const [settingsRows, accountRows, subscriptionRows, history] = await Promise.all([
-    rows("/rest/v1/assistant_settings?id=eq.main&select=enabled,per_message_cost,weekly_cost,max_input_chars&limit=1"),
+    rows("/rest/v1/assistant_settings?id=eq.main&select=enabled,per_message_cost,weekly_cost,max_input_chars,max_output_tokens&limit=1"),
     rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=id,account_code,balance,status&limit=1`),
     rows(`/rest/v1/assistant_subscriptions?profile_id=eq.${encodeURIComponent(profileId)}&select=paid_at,valid_until&limit=1`),
-    rows(`/rest/v1/assistant_requests?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.completed&select=id,question,answer,payment_mode,charged_amount,sources,created_at&order=created_at.desc&limit=20`)
+    rows(`/rest/v1/assistant_requests?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.completed&created_at=gte.${encodeURIComponent(dayStart)}&select=id,question,answer,payment_mode,charged_amount,sources,created_at&order=created_at.desc&limit=20`)
   ]);
   const subscription = subscriptionRows[0] || null;
   return {
@@ -236,7 +290,11 @@ async function assistantStatus(profileId) {
 function systemInstruction(context) {
   return [
     "Sen İHP Dijital Asistanısın. İstiklal Hürriyet Partisi öğrenci topluluğu portalında Türkçe yanıt verirsin.",
-    "Yanıtların kısa, açık, kurumsal ve yardımcı olsun. Kullanıcı özellikle istemedikçe uzun metin yazma.",
+    "Yanıtların açık, kurumsal ve yardımcı olsun.",
+    "Kullanıcı rütbeleri, yönetmeliği, hiyerarşiyi, görevleri veya bir süreci açıklamanı isterse kapsamlı cevap ver; başlıklar, numaralı sıralama ve görev açıklamaları kullan.",
+    "Kullanıcı ayrıntı istediğinde cevabı gereksiz yere kısaltma ve önemli makamları atlama.",
+    "Kullanıcı kararname, sözleşme, tutanak, dilekçe, rapor veya başka bir resmî metin isterse; başlık, tarih ve sayı alanları, taraflar veya muhatap, dayanak, gerekçe, karar/hüküm maddeleri, yürürlük ve imza bölümleriyle tamamlanmış, düzenlenebilir bir taslak hazırla. Uzunluk gerekliyse metni yarıda kesme.",
+    "Birbirinden bağımsız kurulları tek bir yanlış hiyerarşi gibi gösterme; genel başkanlık, Disiplin Kurulu ve Gençlik Kolları zincirlerini ayrı açıkla.",
     "Partiye ilişkin olgusal cevaplarda yalnızca aşağıdaki PORTAL BAĞLAMI içindeki bilgileri kullan.",
     "Bağlamda bulunmayan bir parti bilgisini uydurma; 'Portal kayıtlarında bu bilgi bulunmuyor.' de.",
     "Kaynak kullandığında ilgili cümlenin sonuna [K1] biçiminde kaynak kimliğini ekle.",
@@ -260,7 +318,7 @@ function historyContents(history, question) {
   return contents;
 }
 
-async function askGemini(instruction, history, question) {
+async function askGemini(instruction, history, question, maxOutputTokens = 6000) {
   const configuredModels = [
     process.env.GEMINI_MODEL,
     "gemini-3.5-flash",
@@ -288,7 +346,7 @@ async function askGemini(instruction, history, question) {
             generationConfig: {
               temperature: 0.25,
               topP: 0.85,
-              maxOutputTokens: 1200
+              maxOutputTokens
             }
           })
         }
@@ -310,7 +368,7 @@ async function askGemini(instruction, history, question) {
         error.status = 422;
         throw error;
       }
-      return { answer: trimText(answer, 16000), model };
+      return { answer: trimText(answer, 60000), model };
     } catch (error) {
       if (error.name === "AbortError") {
         const timeoutError = new Error("Asistan yanıt süresini aştı. Lütfen tekrar deneyin.");
@@ -379,6 +437,45 @@ export default async function handler(request, response) {
       return json(response, 200, await assistantStatus(actor.profile.id));
     }
 
+    if (action === "update_settings") {
+      if (!actor.roles.includes("super_admin")) {
+        return json(response, 403, { error: "Yalnızca Admin asistan ayarlarını değiştirebilir." });
+      }
+      const perMessageCost = Number(request.body?.perMessageCost);
+      const weeklyCost = Number(request.body?.weeklyCost);
+      const maxInputChars = Number(request.body?.maxInputChars);
+      const maxOutputTokens = Number(request.body?.maxOutputTokens);
+      if (
+        !Number.isSafeInteger(perMessageCost) ||
+        perMessageCost < 0 ||
+        !Number.isSafeInteger(weeklyCost) ||
+        weeklyCost < 0 ||
+        !Number.isInteger(maxInputChars) ||
+        maxInputChars < 100 ||
+        maxInputChars > 6000 ||
+        !Number.isInteger(maxOutputTokens) ||
+        maxOutputTokens < 400 ||
+        maxOutputTokens > 8000
+      ) {
+        return json(response, 400, { error: "Asistan paket ayarları geçersiz." });
+      }
+      const update = await supabaseRequest("/rest/v1/assistant_settings?id=eq.main", {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          enabled: request.body?.enabled === true,
+          per_message_cost: perMessageCost,
+          weekly_cost: weeklyCost,
+          max_input_chars: maxInputChars,
+          max_output_tokens: maxOutputTokens,
+          updated_by: actor.profile.id,
+          updated_at: new Date().toISOString()
+        })
+      });
+      if (!update.ok) throw new Error("Asistan ayarları kaydedilemedi.");
+      return json(response, 200, await assistantStatus(actor.profile.id));
+    }
+
     if (action === "message") {
       const status = await assistantStatus(actor.profile.id);
       const maximum = Number(status.settings?.max_input_chars || 2000);
@@ -399,7 +496,8 @@ export default async function handler(request, response) {
         const result = await askGemini(
           systemInstruction(knowledge.context),
           status.history || [],
-          question
+          question,
+          Number(status.settings?.max_output_tokens || 6000)
         );
         const completed = await rpc("complete_assistant_message", {
           p_profile_id: actor.profile.id,
