@@ -1,4 +1,4 @@
-import { sendPortalEmail } from "./_mail.js";
+import { sendPortalEmail } from "../server/mail.js";
 
 const MANAGER_ROLES = new Set(["super_admin", "president", "vice_president", "presidential_aide"]);
 const PARTY_ROLES = new Set([

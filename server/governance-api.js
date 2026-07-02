@@ -4,7 +4,7 @@ import {
   proposalOutcome,
   supermajoritySize,
   supportThreshold
-} from "../server/governance-rules.js";
+} from "./governance-rules.js";
 
 const PROPOSAL_TYPES = new Set([
   "executive_decision",

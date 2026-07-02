@@ -1,4 +1,4 @@
-import { emailProfile } from "./_mail.js";
+import { emailProfile } from "../server/mail.js";
 
 const INVESTIGATION_MANAGERS = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin"]);

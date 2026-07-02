@@ -1,4 +1,4 @@
-import { emailProfile } from "./_mail.js";
+import { emailProfile } from "../server/mail.js";
 
 const COMPLAINT_MANAGERS = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const OVERRIDE_MANAGERS = new Set(["discipline_chair"]);

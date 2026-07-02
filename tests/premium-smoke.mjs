@@ -222,6 +222,44 @@ async function mockBackend(page, profile) {
   });
   await page.route("**/api/manage-member", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
+    if (body.module === "governance") {
+      const executive = profile.roles.some((role) => ["president", "vice_president", "presidential_aide"].includes(role));
+      return route.fulfill({
+        json: {
+          proposals: executive ? [{
+            id: "governance-proposal-1",
+            proposal_type: "executive_decision",
+            title: "Toplantı takvimi kararı",
+            summary: "Yürütme Kurulu toplantı düzeninin resmî kayda alınması.",
+            status: "voting",
+            proposed_by: profile.id,
+            proposer: { id: profile.id, display_name: profile.display_name },
+            eligible_to_vote: true,
+            my_vote: null,
+            my_recusal: null,
+            recusal_count: 0,
+            sponsor_count: 1,
+            yes_count: 0,
+            no_count: 0,
+            abstain_count: 0,
+            required_ratio: 0.5,
+            voting_starts_at: "2026-06-30T12:00:00.000Z",
+            voting_ends_at: "2026-07-04T12:00:00.000Z"
+          }] : [],
+          elections: [],
+          election_results: {},
+          executive_members: executive ? [profile] : [],
+          permissions: {
+            is_executive: executive,
+            is_president: profile.roles.includes("president"),
+            can_propose_regulation: executive
+          }
+        }
+      });
+    }
+    if (body.module === "agreement") {
+      return route.fulfill({ json: { ok: true } });
+    }
     if (body.module === "credit" && body.action === "decide_game_charge") {
       if (body.approve) approvedGameKeys.add("snake");
       return route.fulfill({ json: {

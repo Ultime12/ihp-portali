@@ -1,4 +1,4 @@
-import { emailProfile } from "./_mail.js";
+import { emailProfile } from "../server/mail.js";
 
 const VALID_DECISIONS = new Set(["reviewing", "accepted", "rejected"]);
 const REQUESTABLE_ROLES = new Set([

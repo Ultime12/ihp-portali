@@ -1,5 +1,7 @@
-import { emailProfile, sendPortalEmail } from "./_mail.js";
+import { emailProfile, sendPortalEmail } from "../server/mail.js";
+import agreementHandler from "../server/agreement-api.js";
 import creditSystemHandler from "../server/credit-system.js";
+import governanceHandler from "../server/governance-api.js";
 
 const MANAGER_ROLES = new Set(["super_admin"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin"]);
@@ -329,6 +331,12 @@ async function notify(profileId, actorId, title, body) {
 }
 
 export default async function handler(request, response) {
+  if (request.method === "POST" && request.body?.module === "governance") {
+    return governanceHandler(request, response);
+  }
+  if (request.method === "POST" && request.body?.module === "agreement") {
+    return agreementHandler(request, response);
+  }
   if (request.method === "GET" || (request.method === "POST" && request.body?.module === "credit")) {
     return creditSystemHandler(request, response);
   }

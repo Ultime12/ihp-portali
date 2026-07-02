@@ -1,4 +1,4 @@
-import { emailProfile } from "./_mail.js";
+import { emailProfile } from "../server/mail.js";
 
 function json(response, status, body) {
   return response.status(status).json(body);

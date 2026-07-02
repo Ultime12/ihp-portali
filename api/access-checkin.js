@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { emailProfile } from "./_mail.js";
+import { emailProfile } from "../server/mail.js";
 
 const ENTRY_ACCOUNT_EMAIL = "giris@tfo.k12.tr";
 

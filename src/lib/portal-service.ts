@@ -202,15 +202,15 @@ export async function applyDisciplineSanction(payload: Record<string, any>) {
 }
 
 export async function governanceAction(payload: Record<string, any>) {
-  return serverRequest("/api/governance", {
+  return serverRequest("/api/manage-member", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ module: "governance", ...payload })
   });
 }
 
 export async function agreementAction(payload: Record<string, any>) {
-  return serverRequest("/api/agreement", {
+  return serverRequest("/api/manage-member", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ module: "agreement", ...payload })
   });
 }

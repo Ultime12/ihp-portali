@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { emailProfile } from "./_mail.js";
+import { emailProfile } from "../server/mail.js";
 
 const DISCIPLINE_DECISION_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const REWARD_ROLES = new Set(["president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);

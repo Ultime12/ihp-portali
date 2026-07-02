@@ -1,4 +1,4 @@
-import { emailProfile } from "./_mail.js";
+import { emailProfile } from "../server/mail.js";
 
 const APPEAL_MANAGERS = new Set(["discipline_chair"]);
 const VALID_ACTIONS = new Set(["appeal", "accept", "reject"]);
