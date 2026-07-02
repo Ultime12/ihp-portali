@@ -48,7 +48,7 @@ function governanceCanPropose() {
 
 function governanceCanFinalize(proposal) {
   return Boolean(
-    governanceCanPropose() &&
+    (governanceCanPropose() || governanceData().permissions?.is_admin) &&
     proposal.status === "voting" &&
     proposal.voting_ends_at &&
     Date.now() >= new Date(proposal.voting_ends_at).valueOf()
@@ -65,10 +65,10 @@ function governanceProposalActions(proposal) {
     buttons.push(`<button class="table-action" type="button" data-action="governance-support" data-id="${esc(proposal.id)}">Teklifi destekle</button>`);
   }
   if (
-    proposal.status === "collecting_support" &&
-    proposal.proposed_by === state.profile?.id
+    ["collecting_support", "voting"].includes(proposal.status) &&
+    (proposal.proposed_by === state.profile?.id || governanceData().permissions?.is_admin)
   ) {
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="governance-cancel" data-id="${esc(proposal.id)}">Geri çek</button>`);
+    buttons.push(`<button class="table-action danger-action" type="button" data-action="governance-cancel" data-id="${esc(proposal.id)}">${governanceData().permissions?.is_admin ? "Teknik olarak iptal et" : "Geri çek"}</button>`);
   }
   if (proposal.status === "voting" && proposal.eligible_to_vote && !proposal.my_vote && !proposal.my_recusal) {
     buttons.push(`<button class="table-action" type="button" data-action="governance-vote" data-vote="yes" data-id="${esc(proposal.id)}">Kabul</button>`);
@@ -112,16 +112,17 @@ function governanceProposalCard(proposal) {
 
 function governanceElectionActions(election) {
   const buttons = [];
-  if (election.phase === "nominations" && !election.is_candidate) {
+  const isAdmin = Boolean(governanceData().permissions?.is_admin);
+  if (election.phase === "nominations" && !election.is_candidate && !isAdmin) {
     buttons.push(`<button class="table-action" type="button" data-action="governance-nominate" data-id="${esc(election.id)}">Aday ol</button>`);
   }
-  if (election.phase === "nominations" && election.is_candidate) {
+  if (election.phase === "nominations" && election.is_candidate && !isAdmin) {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="governance-withdraw" data-id="${esc(election.id)}">Adaylıktan çekil</button>`);
   }
-  if (election.phase === "voting" && !election.my_ballot && election.candidates?.length) {
+  if (election.phase === "voting" && !election.my_ballot && election.candidates?.length && !isAdmin) {
     buttons.push(`<button class="table-action" type="button" data-action="governance-election-vote" data-id="${esc(election.id)}">Oy kullan</button>`);
   }
-  if (election.phase === "awaiting_result" && governanceCanPropose()) {
+  if (election.phase === "awaiting_result" && (governanceCanPropose() || isAdmin)) {
     buttons.push(`<button class="table-action" type="button" data-action="governance-election-finalize" data-id="${esc(election.id)}">Sonucu ilan et</button>`);
   }
   return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";

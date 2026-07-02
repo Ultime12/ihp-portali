@@ -184,7 +184,7 @@ function visibleMembers() {
 }
 
 function isDisciplineRoleManager() {
-  return hasRole("president", "discipline_chair");
+  return hasRole("super_admin", "president", "discipline_chair");
 }
 
 function canRemoveDisciplineRole(member) {
@@ -196,12 +196,12 @@ const permissions = {
   members: () => true,
   announce: () => hasRole("super_admin", "president", "vice_president", "presidential_aide", "discipline_chair", "discipline_vice_chair", "spokesperson"),
   disciplineView: () =>
-    hasRole("discipline_chair", "discipline_vice_chair", "discipline_member"),
-  disciplineManage: () => hasRole("discipline_chair", "discipline_vice_chair", "discipline_member"),
-  disciplineCouncil: () => hasRole("discipline_chair", "discipline_vice_chair", "discipline_member"),
+    hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"),
+  disciplineManage: () => hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"),
+  disciplineCouncil: () => hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"),
   presidency: () => hasRole("super_admin", "president", "vice_president", "presidential_aide"),
   admissions: () => true,
-  complaints: () => !isTechnicalSuperAdmin(),
+  complaints: () => true,
   youth: () => hasRole("super_admin", "youth_chair")
 };
 
@@ -213,9 +213,9 @@ const navItems = [
   ["positions", "Görev Dağılımı", "briefcase", () => true],
   ["committees", "Kurullar", "grid", () => true],
   ["announcements", "Duyurular", "bell", () => true],
-  ["discipline", "Disiplin Kayıtları", "shield", () => !isTechnicalSuperAdmin()],
+  ["discipline", "Disiplin Kayıtları", "shield", () => true],
   ["complaints", "Şikayetler", "clipboard", permissions.complaints],
-  ["investigations", "Soruşturmalar", "search", () => !isTechnicalSuperAdmin()],
+  ["investigations", "Soruşturmalar", "search", () => true],
   ["regulation", "Yönetmelik", "book", () => true],
   ["youth", "Gençlik Kolları", "sparkles", () => true],
   ["applications", "Başvurular", "inbox", permissions.admissions],
@@ -319,7 +319,7 @@ function sanctionEffectLabel(effect = "none") {
 }
 
 function canAwardPoints() {
-  return hasRole("president", "discipline_chair", "discipline_vice_chair", "discipline_member");
+  return hasRole("super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member");
 }
 
 const LEADERSHIP_ORDER = [
@@ -375,6 +375,7 @@ function canSetDisciplineRole(member, targetRole) {
   const targetRank = targetRole === "discipline_chair" ? 3 : targetRole === "discipline_vice_chair" ? 2 : targetRole === "discipline_member" ? 1 : 0;
   if (currentRank === targetRank) return false;
   if (rolesOf(member).includes("super_admin")) return false;
+  if (hasRole("super_admin")) return true;
   if (hasRole("president")) {
     return targetRank === 3 || (currentRank === 3 && targetRank === 0);
   }
@@ -387,6 +388,7 @@ function canSetDisciplineRole(member, targetRole) {
 function canDisciplineTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
   if (isTechnicalSuperAdmin(member) || member.is_system_account || isProtectedDisciplineTarget(member)) return false;
+  if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   return true;
 }
@@ -398,6 +400,7 @@ function disciplineTargetMembers() {
 function canInvestigateTarget(member) {
   if (!member || member.id === state.profile?.id) return false;
   if (isTechnicalSuperAdmin(member) || member.is_system_account) return false;
+  if (hasRole("super_admin")) return true;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   if (isProtectedInvestigationTarget(member)) return false;
   return true;
@@ -505,13 +508,13 @@ function canEditRegulations() {
 
 function canReviewApplication(item) {
   if (!item) return false;
+  if (hasRole("super_admin")) return true;
   if (item.claimed_by && item.claimed_by !== state.profile?.id && !hasRole("discipline_chair")) return false;
   const committeeName = targetCommitteeName(item);
   const committeeId = targetCommitteeId(item);
   if (committeeName === "Disiplin Kurulu") {
     return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
   }
-  if (hasRole("super_admin")) return true;
   if (
     (isExecutiveCommittee(committeeName) || currentCommitteeIds().includes(committeeId)) &&
     hasRole("president", "vice_president", "presidential_aide")
@@ -527,7 +530,7 @@ function canClaimApplication(item) {
     item &&
       !item.claimed_by &&
       targetCommitteeName(item) === "Disiplin Kurulu" &&
-      hasRole("discipline_chair") &&
+      hasRole("super_admin", "discipline_chair") &&
       !["accepted", "rejected"].includes(item.status)
   );
 }
@@ -1593,7 +1596,7 @@ function canAppealDiscipline(item) {
 }
 
 function canReviewDisciplineAppeal(item) {
-  return Boolean(item && appealStatusOf(item) === "submitted" && hasRole("discipline_chair"));
+  return Boolean(item && appealStatusOf(item) === "submitted" && hasRole("super_admin", "discipline_chair"));
 }
 
 function disciplineRowActions(item) {
@@ -1601,6 +1604,7 @@ function disciplineRowActions(item) {
   if (permissions.disciplineManage() && !item.archived) {
     if (hasRole("super_admin")) {
       buttons.push(`<button class="table-action" type="button" data-action="edit-discipline" data-id="${esc(item.id)}">Düzelt</button>`);
+      buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-discipline-permanent" data-id="${esc(item.id)}">Kalıcı sil</button>`);
     }
     buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-discipline" data-id="${esc(item.id)}">Arşivle</button>`);
   }
@@ -1623,7 +1627,7 @@ function disciplinePage() {
     ${pageHeader(
       "Gizlilik odaklı kayıtlar",
       permissions.disciplineView() ? "Disiplin kayıtları" : "Disiplin durumum",
-      "Kayıtlar yalnızca ilgili üye ve yetkili Disiplin Kurulu personeline açıktır.",
+      "Kayıtlar yalnızca ilgili üye, yetkili Disiplin Kurulu personeli ve teknik Admin tarafından görülebilir.",
       permissions.disciplineManage() || canAwardPoints()
         ? `<div class="inline-actions">${permissions.disciplineManage() ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-discipline">${icon("plus")} Ceza Kararnamesi</button>` : ""}${canAwardPoints() ? `<button class="btn btn-secondary btn-sm" type="button" data-action="open-award-points">${icon("sparkles")} Puan Ver</button>` : ""}</div>`
         : ""
@@ -1790,7 +1794,7 @@ function applicationPersonLabel(item) {
 function applicationActions(item) {
   const isOwn = item.applicant_profile_id === state.profile?.id;
   const isDisciplineApplication = targetCommitteeName(item) === "Disiplin Kurulu";
-  const claimedByOther = item.claimed_by && item.claimed_by !== state.profile?.id && !hasRole("discipline_chair");
+  const claimedByOther = item.claimed_by && item.claimed_by !== state.profile?.id && !hasRole("super_admin", "discipline_chair");
   if (claimedByOther) {
     return `<p class="security-note">Bu başvuru ${esc(item.claimer?.display_name || "başka bir yetkili")} tarafından üstlenildi.</p>`;
   }
@@ -1801,14 +1805,14 @@ function applicationActions(item) {
         <button class="table-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="reviewing">İncelemede</button>
         <button class="table-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="accepted">Onayla</button>
         <button class="table-action danger-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>
-        ${hasRole("super_admin") && !isDisciplineApplication ? `<button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Sil</button>` : ""}
+        ${hasRole("super_admin") ? `<button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Sil</button>` : ""}
       </div>
     `;
   }
   if (isOwn && item.status === "new") {
     return `<div class="inline-actions"><button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Başvuruyu sil</button></div>`;
   }
-  if (hasRole("super_admin") && !isDisciplineApplication) {
+  if (hasRole("super_admin")) {
     return `<div class="inline-actions"><button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Başvuruyu sil</button></div>`;
   }
   return "";
@@ -1818,7 +1822,7 @@ function applicationsPage() {
   const rows = state.cache.applications || [];
   const visibleRows = rows.filter(
     (item) =>
-      (hasRole("super_admin") && targetCommitteeName(item) !== "Disiplin Kurulu") ||
+      hasRole("super_admin") ||
       item.applicant_profile_id === state.profile?.id ||
       item.created_by === state.profile?.id ||
       canReviewApplication(item) ||
@@ -1897,6 +1901,7 @@ function complaintTargetLabel(item) {
 
 function canHandleComplaint(item) {
   if (!item) return false;
+  if (hasRole("super_admin")) return true;
   if (hasRole("discipline_chair")) return true;
   if (item.assigned_to && item.assigned_to !== state.profile?.id) return false;
   return hasRole("discipline_vice_chair", "discipline_member");
@@ -1904,6 +1909,7 @@ function canHandleComplaint(item) {
 
 function canClaimComplaint(item) {
   if (!item || ["resolved", "rejected", "closed"].includes(item.status)) return false;
+  if (hasRole("super_admin")) return item.assigned_to !== state.profile?.id;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   if (!item.assigned_to) return true;
   return item.assigned_to !== state.profile?.id && hasRole("discipline_chair");
@@ -1920,6 +1926,10 @@ function complaintActions(item) {
     buttons.push(`<button class="table-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="resolved">Çözüldü</button>`);
     buttons.push(`<button class="table-action danger-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>`);
   }
+  if (hasRole("super_admin")) {
+    buttons.push(`<button class="table-action" type="button" data-action="open-complaint-assignee" data-id="${esc(item.id)}">Sorumluyu değiştir</button>`);
+    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-complaint" data-id="${esc(item.id)}">Kalıcı sil</button>`);
+  }
   if (isOwn && item.status === "new") {
     buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-complaint" data-id="${esc(item.id)}">Sil</button>`);
   }
@@ -1933,7 +1943,7 @@ function complaintsPage() {
       "Şikayetler",
       "Disiplin kuruluna bildirim",
       "Üyeler şikayet yazabilir. Disiplin kurulu üyeleri şikayeti üstlenebilir; disiplin kurulu başkanı gerekirse sorumluluğu doğrudan devralabilir.",
-      `<button class="btn btn-primary btn-sm" type="button" data-action="open-complaint">${icon("plus")} Şikayet Yaz</button>`
+      isTechnicalSuperAdmin() ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-complaint">${icon("plus")} Şikayet Yaz</button>`
     )}
     <div class="card-grid application-grid">
       ${
@@ -3595,6 +3605,16 @@ async function handleClick(event) {
       });
       closeModal();
       showToast("Disiplin kaydı arşivlendi.");
+      await loadPage("discipline");
+    });
+  }
+  if (action === "delete-discipline-permanent") {
+    const id = target.dataset.id;
+    if (!hasRole("super_admin")) return;
+    confirmModal("Disiplin kaydı kalıcı silinsin mi?", "Bu teknik düzeltme geri alınamaz.", async () => {
+      await deleteRecord("discipline_records", id);
+      closeModal();
+      showToast("Disiplin kaydı kalıcı olarak silindi.");
       await loadPage("discipline");
     });
   }

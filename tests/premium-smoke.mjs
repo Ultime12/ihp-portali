@@ -473,7 +473,7 @@ try {
   await deletionContext.close();
 
   const roleCases = [
-    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: "Soruşturmalar", credential: "member" },
+    { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null, credential: "member" },
     { name: "president", roles: ["discipline_chair", "president", "member"], visible: "Başkanlık", hidden: null, credential: "presidency" },
     { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık", credential: "discipline" },
     { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık", credential: "discipline" },
@@ -554,13 +554,14 @@ try {
   await adminPage.keyboard.press("Escape");
   await adminPage.evaluate(() => { location.hash = "#/portal/investigations"; });
   await adminPage.waitForTimeout(150);
-  assert.equal(await adminPage.locator(".application-card").count(), 0, "technical admin must not see investigation records");
-  assert.equal(await adminPage.locator('[data-action="edit-investigation"]').count(), 0, "technical admin must not intervene in an independent investigation");
-  assert.equal(await adminPage.locator('[data-action="delete-investigation"]').count(), 0, "investigation archive must not be deleted by technical admin");
+  assert.equal(await adminPage.locator(".application-card").count(), 3, "technical admin should see all investigation records");
+  assert.equal(await adminPage.locator('[data-action="edit-investigation"]').count(), 3, "technical admin should be able to correct investigations");
+  assert.equal(await adminPage.locator('[data-action="delete-investigation"]').count(), 3, "technical admin should be able to permanently delete investigations");
   await adminPage.evaluate(() => { location.hash = "#/portal/complaints"; });
   await adminPage.waitForTimeout(150);
-  assert.equal(await adminPage.locator(".application-card").count(), 0, "technical admin must not see discipline complaints");
-  assert.equal(await adminPage.locator('[data-action="open-complaint-assignee"]').count(), 0, "technical admin must not assign discipline complaints");
+  assert.equal(await adminPage.locator(".application-card").count(), 1, "technical admin should see all discipline complaints");
+  assert.equal(await adminPage.locator('[data-action="open-complaint-assignee"]').count(), 1, "technical admin should assign discipline complaints");
+  assert.equal(await adminPage.locator('[data-action="delete-complaint"]').count(), 1, "technical admin should permanently delete discipline complaints");
   await adminContext.close();
 
   const creditOfficerContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });

@@ -1,7 +1,7 @@
 import { emailProfile } from "../server/mail.js";
 
-const COMPLAINT_MANAGERS = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
-const OVERRIDE_MANAGERS = new Set(["discipline_chair"]);
+const COMPLAINT_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const OVERRIDE_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const VALID_STATUSES = new Set(["new", "reviewing", "resolved", "rejected", "closed"]);
 
 function json(response, status, body) {

@@ -1,8 +1,8 @@
 import { randomInt } from "node:crypto";
 import { emailProfile } from "../server/mail.js";
 
-const DISCIPLINE_DECISION_ROLES = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
-const REWARD_ROLES = new Set(["president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const DISCIPLINE_DECISION_ROLES = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const REWARD_ROLES = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin"]);
 const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "party_suspension", "passive_member"]);
 const POINT_MIN = 0;
@@ -133,6 +133,9 @@ function suspensionUntil(days) {
 }
 
 function canAffectTarget(actorRoles, targetRoles) {
+  if (actorRoles.includes("super_admin")) {
+    return !targetRoles.some((role) => PROTECTED_ROLES.has(role));
+  }
   return (
     hasAny(actorRoles, DISCIPLINE_DECISION_ROLES) &&
     !targetRoles.some((role) => PROTECTED_ROLES.has(role))

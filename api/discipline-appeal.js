@@ -1,6 +1,6 @@
 import { emailProfile } from "../server/mail.js";
 
-const APPEAL_MANAGERS = new Set(["discipline_chair"]);
+const APPEAL_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const VALID_ACTIONS = new Set(["appeal", "accept", "reject"]);
 
 function json(response, status, body) {
@@ -168,7 +168,7 @@ export default async function handler(request, response) {
   }
 
   if (!hasAny(actor.roles, APPEAL_MANAGERS)) {
-    return json(response, 403, { error: "İtiraz kararını yalnızca Disiplin Kurulu Başkanı verebilir." });
+    return json(response, 403, { error: "İtiraz kararını Disiplin Kurulu Başkanı veya teknik Admin verebilir." });
   }
   if (appealStatus !== "submitted") {
     return json(response, 400, { error: "Karara baglanacak acik itiraz yok." });

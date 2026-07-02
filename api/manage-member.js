@@ -243,6 +243,7 @@ function canSetDisciplineRole(actorRoles, targetRoles, targetRole) {
   const nextRank = targetDisciplineRank(targetRole);
   if (currentRank === nextRank) return false;
   if (targetRoles.includes("super_admin")) return false;
+  if (isTechnicalSuperAdminRoles(actorRoles)) return true;
   if (actorRoles.includes("president")) {
     return nextRank === 3 || (currentRank === 3 && nextRank === 0);
   }
@@ -567,7 +568,7 @@ export default async function handler(request, response) {
   const payload = cleanProfilePayload(request.body, actor.roles);
   if (!payload) return json(response, 400, { error: "Uye bilgileri gecersiz." });
   if (!disciplineRoleChangeAllowed(actor.roles, rolesOf(beforeProfile), payload.roles)) {
-    return json(response, 403, { error: "Teknik admin Disiplin Kurulunun kurumsal atama yetkisini devralamaz." });
+    return json(response, 403, { error: "Disiplin Kurulu rol değişikliği mevcut hiyerarşiye uymuyor." });
   }
   const committeeIds = Object.prototype.hasOwnProperty.call(request.body || {}, "committee_ids")
     ? normalizeCommitteeIds(request.body.committee_ids)

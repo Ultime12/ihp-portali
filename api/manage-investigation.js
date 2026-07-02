@@ -1,6 +1,6 @@
 import { emailProfile } from "../server/mail.js";
 
-const INVESTIGATION_MANAGERS = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const INVESTIGATION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin"]);
 const VALID_ACTIONS = new Set([
   "create",
@@ -11,7 +11,9 @@ const VALID_ACTIONS = new Set([
   "cancelled",
   "submit_defense",
   "close_defense",
-  "recuse"
+  "recuse",
+  "update",
+  "delete"
 ]);
 
 function json(response, status, body) {
@@ -50,9 +52,9 @@ async function authenticateActor(request) {
     `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,role,roles,status,is_system_account&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
-  if (!profile || profile.status === "left" || profile.is_system_account) return null;
-
+  if (!profile) return null;
   const roles = Array.isArray(profile.roles) && profile.roles.length ? profile.roles : [profile.role];
+  if (profile.status === "left" || (profile.is_system_account && !roles.includes("super_admin"))) return null;
   return { authUser, profile, roles };
 }
 
@@ -74,6 +76,7 @@ function disciplineRank(roles) {
 }
 
 function canTakeResponsibility(actorRoles, assigneeRoles) {
+  if (actorRoles.includes("super_admin")) return true;
   if (!assigneeRoles?.length) return actorRoles.includes("discipline_chair");
   if (assigneeRoles.includes("super_admin")) return false;
   const actorRank = disciplineRank(actorRoles);
@@ -82,6 +85,7 @@ function canTakeResponsibility(actorRoles, assigneeRoles) {
 }
 
 function canDelegateResponsibility(actorRoles, targetRoles) {
+  if (actorRoles.includes("super_admin")) return disciplineRank(targetRoles) > 0;
   const actorRank = disciplineRank(actorRoles);
   const targetRank = disciplineRank(targetRoles);
   return actorRank > 0 && targetRank > 0 && actorRank > targetRank;
@@ -89,6 +93,7 @@ function canDelegateResponsibility(actorRoles, targetRoles) {
 
 function canAffectTarget(actorRoles, targetRoles) {
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role))) return false;
+  if (actorRoles.includes("super_admin")) return true;
   const actorRank = disciplineRank(actorRoles);
   const targetRank = disciplineRank(targetRoles);
   if (!actorRank) return false;
@@ -97,6 +102,7 @@ function canAffectTarget(actorRoles, targetRoles) {
 
 function canOpenInvestigationFor(actorRoles, targetRoles) {
   if (targetRoles.some((role) => PROTECTED_ROLES.has(role))) return false;
+  if (actorRoles.includes("super_admin")) return true;
   return disciplineRank(actorRoles) > 0;
 }
 
@@ -250,6 +256,48 @@ export default async function handler(request, response) {
   if (!id) return json(response, 400, { error: "Sorusturma id eksik." });
   const investigation = await fetchSingle(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
   if (!investigation) return json(response, 404, { error: "Sorusturma bulunamadi." });
+  const isAdmin = actor.roles.includes("super_admin");
+
+  if (action === "delete") {
+    if (!isAdmin) return json(response, 403, { error: "Soruşturmayı yalnızca teknik Admin kalıcı olarak silebilir." });
+    const deleteResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" }
+    });
+    if (!deleteResponse.ok) {
+      const result = await deleteResponse.json().catch(() => ({}));
+      return json(response, deleteResponse.status, { error: result.message || "Soruşturma silinemedi." });
+    }
+    await audit(actor.authUser.id, id, "Soruşturma teknik Admin tarafından kalıcı olarak silindi");
+    return json(response, 200, { ok: true, deleted: true });
+  }
+
+  if (action === "update") {
+    if (!isAdmin) return json(response, 403, { error: "Soruşturmayı yalnızca teknik Admin düzeltebilir." });
+    const title = String(body.title || "").trim();
+    const description = String(body.description || "").trim();
+    if (title.length < 3 || description.length < 10) {
+      return json(response, 400, { error: "Soruşturma başlığı veya açıklaması eksik." });
+    }
+    const patch = {
+      title: title.slice(0, 140),
+      description: description.slice(0, 1600),
+      evidence_note: String(body.evidenceNote || "").slice(0, 1200),
+      evidence_file: String(body.evidenceFile || ""),
+      evidence_filename: String(body.evidenceFilename || "").slice(0, 180)
+    };
+    const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return json(response, updateResponse.status, { error: updated?.message || "Soruşturma düzeltilemedi." });
+    }
+    await audit(actor.authUser.id, id, "Soruşturma teknik Admin tarafından düzeltildi");
+    return json(response, 200, { ok: true, investigation: updated?.[0] || null });
+  }
 
   if (action === "submit_defense") {
     if (investigation.subject_profile_id !== actor.authUser.id) {
@@ -320,7 +368,7 @@ export default async function handler(request, response) {
   }
 
   if (action === "close_defense") {
-    if (investigation.assigned_to !== actor.authUser.id || investigation.defense_status !== "pending") {
+    if ((!isAdmin && investigation.assigned_to !== actor.authUser.id) || investigation.defense_status !== "pending") {
       return json(response, 403, { error: "Savunma aşamasını yalnızca sorumlu soruşturmacı kapatabilir." });
     }
     const defenseNote = String(body.decisionNote || "").trim();
@@ -387,11 +435,11 @@ export default async function handler(request, response) {
     if (!canDelegateResponsibility(actor.roles, targetAssigneeRoles)) {
       return json(response, 403, { error: "Sorumluluk yalnizca DK hiyerarsisinde alt rutbeye devredilebilir." });
     }
-  } else if (investigation.assigned_to !== actor.authUser.id) {
+  } else if (!isAdmin && investigation.assigned_to !== actor.authUser.id) {
     return json(response, 403, { error: "Bu islem icin once sorusturma sorumlulugunu devralmalisiniz." });
   }
 
-  if (action === "cancelled" && !actor.roles.includes("discipline_chair")) {
+  if (action === "cancelled" && !actor.roles.some((role) => ["super_admin", "discipline_chair"].includes(role))) {
     return json(response, 403, { error: "Sorusturmayi yalnizca Disiplin Kurulu baskani iptal edebilir." });
   }
   if (action === "closed" && investigation.defense_status === "pending") {

@@ -116,7 +116,7 @@ async function authenticateActor(request) {
   const profile = await fetchOne(
     `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,display_name,email,role,roles,status,is_system_account&limit=1`
   );
-  if (!profile || profile.status !== "active" || profile.is_system_account) return null;
+  if (!profile || profile.status !== "active" || (profile.is_system_account && !hasRole(profile, "super_admin"))) return null;
   return { authUser, profile };
 }
 
@@ -428,6 +428,7 @@ async function listData(actor, members) {
     permissions: {
       is_executive: isExecutive(actor, members),
       is_president: hasRole(actor.profile, "president"),
+      is_admin: hasRole(actor.profile, "super_admin"),
       can_propose_regulation: isExecutive(actor, members)
     }
   };
@@ -447,6 +448,7 @@ export default async function handler(request, response) {
     if (!ACTIONS.has(action)) return json(response, 400, { error: "Yönetişim işlemi geçersiz." });
     const members = await executiveMembers();
     const actorIsExecutive = isExecutive(actor, members);
+    const actorIsAdmin = hasRole(actor.profile, "super_admin");
 
     if (action === "list") {
       return json(response, 200, await listData(actor, members));
@@ -609,7 +611,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "finalize") {
-      if (!actorIsExecutive) return json(response, 403, { error: "Kararı yalnızca Yürütme Kurulu sonuçlandırabilir." });
+      if (!actorIsExecutive && !actorIsAdmin) return json(response, 403, { error: "Kararı yalnızca Yürütme Kurulu veya teknik Admin sonuçlandırabilir." });
       const proposal = await fetchOne(
         `/rest/v1/governance_proposals?id=eq.${encodeURIComponent(body.id || "")}&select=*&limit=1`
       );
@@ -622,8 +624,12 @@ export default async function handler(request, response) {
       const proposal = await fetchOne(
         `/rest/v1/governance_proposals?id=eq.${encodeURIComponent(body.id || "")}&select=*&limit=1`
       );
-      if (!proposal || proposal.status !== "collecting_support" || proposal.proposed_by !== actor.authUser.id) {
-        return json(response, 403, { error: "Yalnızca kendi destek aşamasındaki teklifinizi geri çekebilirsiniz." });
+      if (
+        !proposal ||
+        !["collecting_support", "voting"].includes(proposal.status) ||
+        (proposal.proposed_by !== actor.authUser.id && !actorIsAdmin)
+      ) {
+        return json(response, 403, { error: "Bu teklifi geri çekme veya teknik olarak iptal etme yetkiniz yok." });
       }
       await writeRows(`/rest/v1/governance_proposals?id=eq.${encodeURIComponent(proposal.id)}`, {
         method: "PATCH",
@@ -644,6 +650,7 @@ export default async function handler(request, response) {
     const phase = electionPhase(election);
 
     if (action === "nominate") {
+      if (actorIsAdmin) return json(response, 403, { error: "Teknik Admin seçimlerde aday olamaz." });
       if (phase !== "nominations") return json(response, 400, { error: "Adaylık başvuruları açık değil." });
       try {
         await writeRows("/rest/v1/election_candidates", {
@@ -665,6 +672,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "withdraw") {
+      if (actorIsAdmin) return json(response, 403, { error: "Teknik Admin seçim adayı değildir." });
       if (phase !== "nominations") return json(response, 400, { error: "Adaylıktan çekilme süresi kapandı." });
       await writeRows(
         `/rest/v1/election_candidates?election_id=eq.${encodeURIComponent(election.id)}&profile_id=eq.${encodeURIComponent(actor.authUser.id)}`,
@@ -678,6 +686,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "vote_election") {
+      if (actorIsAdmin) return json(response, 403, { error: "Teknik Admin seçmen değildir." });
       if (phase !== "voting") return json(response, 400, { error: "Oy verme süresi açık değil." });
       const candidateId = String(body.candidateId || "");
       const candidate = await fetchOne(
@@ -702,7 +711,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "finalize_election") {
-      if (!actorIsExecutive) return json(response, 403, { error: "Seçim sonucunu Yürütme Kurulu ilan edebilir." });
+      if (!actorIsExecutive && !actorIsAdmin) return json(response, 403, { error: "Seçim sonucunu Yürütme Kurulu veya teknik Admin ilan edebilir." });
       if (Date.now() < new Date(election.voting_ends_at).valueOf()) {
         return json(response, 400, { error: "Oy verme süresi henüz bitmedi." });
       }

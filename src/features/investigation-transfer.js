@@ -7,6 +7,7 @@ function ihpInvestigationAssigneeProfileV2(item) {
 
 function ihpInvestigationCanTakeV2(item) {
   if (!item || ["cancelled", "closed"].includes(item.status)) return false;
+  if (hasRole("super_admin")) return item.assigned_to !== state.profile?.id;
   if (!item.assigned_to) return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
   if (item.assigned_to === state.profile?.id) return false;
   const assignee = ihpInvestigationAssigneeProfileV2(item);
@@ -18,8 +19,9 @@ function ihpInvestigationCanTakeV2(item) {
 
 function ihpInvestigationTransferTargetsV2(item) {
   if (!item || ["cancelled", "closed"].includes(item.status)) return [];
+  const isAdmin = hasRole("super_admin");
   const actorRank = disciplineRank(state.profile);
-  if (actorRank < 2) return [];
+  if (!isAdmin && actorRank < 2) return [];
   if (item.assigned_to && item.assigned_to !== state.profile?.id && !ihpInvestigationCanTakeV2(item)) return [];
   const rows = state.cache.members || state.cache.disciplineMembers || [];
   return visibleProfiles(rows)
@@ -28,7 +30,7 @@ function ihpInvestigationTransferTargetsV2(item) {
     .filter((member) => member.status === "active")
     .filter((member) => {
       const rank = disciplineRank(member);
-      return rank > 0 && actorRank > rank;
+      return rank > 0 && (isAdmin || actorRank > rank);
     })
     .sort((a, b) => disciplineRank(b) - disciplineRank(a) || a.display_name.localeCompare(b.display_name, "tr"));
 }
@@ -39,6 +41,9 @@ function ihpInvestigationCanTransferV2(item) {
 
 function ihpInvestigationCanCloseV2(item, status = "closed") {
   if (!item || ["cancelled", "closed"].includes(item.status)) return false;
+  if (hasRole("super_admin")) {
+    return status === "cancelled" || item.defense_status !== "pending";
+  }
   if (item.assigned_to !== state.profile?.id) return false;
   if (status === "cancelled") return hasRole("discipline_chair");
   if (item.defense_status === "pending") return false;
@@ -56,6 +61,10 @@ function ihpDefenseStatusLabelV2(item) {
 investigationActions = function patchedInvestigationActions(item) {
   const buttons = [];
   if (!item) return "";
+  if (hasRole("super_admin")) {
+    buttons.push(`<button class="table-action" type="button" data-action="edit-investigation" data-id="${esc(item.id)}">Düzelt</button>`);
+    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-investigation" data-id="${esc(item.id)}">Kalıcı sil</button>`);
+  }
 
   if (
     item.subject_profile_id === state.profile?.id &&

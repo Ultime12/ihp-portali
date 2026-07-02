@@ -97,6 +97,7 @@ function agreementHasActiveDelegation(profileId = state.profile?.id) {
 
 function agreementCanSign(item) {
   if (!item || item.status !== "pending") return false;
+  if (hasRole("super_admin")) return true;
   if (item.target_type === "member") return item.target_profile_id === state.profile?.id;
   if (item.target_type === "discipline") return hasRole("discipline_chair");
   if (item.target_type === "youth") return hasRole("youth_chair");
@@ -105,7 +106,7 @@ function agreementCanSign(item) {
 }
 
 function agreementCanCancel(item) {
-  return Boolean(item && item.status === "pending" && item.proposer_id === state.profile?.id);
+  return Boolean(item && item.status === "pending" && (item.proposer_id === state.profile?.id || hasRole("super_admin")));
 }
 
 function agreementNeedsMySignature(item) {
@@ -365,4 +366,3 @@ function syncAgreementTarget(input) {
   if (group) group.hidden = !isMember;
   if (memberSelect) memberSelect.required = isMember;
 }
-

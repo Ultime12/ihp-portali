@@ -88,7 +88,7 @@ async function authenticateActor(request) {
   const profile = await one(
     `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,display_name,role,roles,status,is_system_account&limit=1`
   );
-  if (!profile || profile.status !== "active" || profile.is_system_account) return null;
+  if (!profile || profile.status !== "active" || (profile.is_system_account && !hasRole(profile, "super_admin"))) return null;
   return { authUser, profile };
 }
 
@@ -111,6 +111,7 @@ async function activeDelegation(profileId) {
 }
 
 async function canSign(actor, agreement) {
+  if (hasRole(actor.profile, "super_admin")) return true;
   if (agreement.target_type === "member") return agreement.target_profile_id === actor.authUser.id;
   if (agreement.target_type === "discipline") return hasRole(actor.profile, "discipline_chair");
   if (agreement.target_type === "youth") return hasRole(actor.profile, "youth_chair");
@@ -239,7 +240,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "delegate") {
-      if (!hasRole(actor.profile, "president")) {
+      if (!hasRole(actor.profile, "president", "super_admin")) {
         return json(response, 403, { error: "Parti adına imza yetkisini yalnızca Başkan devredebilir." });
       }
       const delegate = await one(
@@ -269,7 +270,7 @@ export default async function handler(request, response) {
     }
 
     if (action === "revoke_delegate") {
-      if (!hasRole(actor.profile, "president")) {
+      if (!hasRole(actor.profile, "president", "super_admin")) {
         return json(response, 403, { error: "İmza yetkisini yalnızca Başkan geri alabilir." });
       }
       await write(`/rest/v1/agreement_delegations?id=eq.${encodeURIComponent(body.id || "")}&revoked_at=is.null`, {
@@ -286,7 +287,7 @@ export default async function handler(request, response) {
     if (!agreement) return json(response, 404, { error: "Antlaşma bulunamadı." });
 
     if (action === "cancel") {
-      if (agreement.status !== "pending" || agreement.proposer_id !== actor.authUser.id) {
+      if (agreement.status !== "pending" || (agreement.proposer_id !== actor.authUser.id && !hasRole(actor.profile, "super_admin"))) {
         return json(response, 403, { error: "Yalnızca kendi imza bekleyen antlaşmanızı geri çekebilirsiniz." });
       }
       await write(`/rest/v1/agreements?id=eq.${encodeURIComponent(agreement.id)}`, {
