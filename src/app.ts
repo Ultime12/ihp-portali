@@ -145,9 +145,10 @@ function canModerateMember(member) {
   if (!member || member.id === state.profile?.id) return false;
   if (hasRole("super_admin")) return true;
   const targetRoles = rolesOf(member);
+  if (hasRole("president")) return !targetRoles.includes("super_admin");
   if (targetRoles.some((role) => ["super_admin", "president"].includes(role))) return false;
   if (hasRole("vice_president") && targetRoles.includes("vice_president")) return false;
-  return hasRole("president", "vice_president");
+  return hasRole("vice_president");
 }
 
 function canEditMembers() {
@@ -377,7 +378,7 @@ function canSetDisciplineRole(member, targetRole) {
   if (rolesOf(member).includes("super_admin")) return false;
   if (hasRole("super_admin")) return true;
   if (hasRole("president")) {
-    return targetRank === 3 || (currentRank === 3 && targetRank === 0);
+    return true;
   }
   if (hasRole("discipline_chair")) {
     return currentRank < 3 && targetRank < 3;
@@ -2707,7 +2708,7 @@ function openMemberEditor(member) {
     ? ROLE_OPTIONS
     : ROLE_OPTIONS.filter(([value]) =>
         hasRole("president")
-          ? !["super_admin", "president"].includes(value)
+          ? value !== "super_admin"
           : !["super_admin", "president", "vice_president", "credit_officer"].includes(value)
       );
   modal({

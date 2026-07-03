@@ -225,6 +225,21 @@ async function mockBackend(page, profile) {
   await page.route("**/api/manage-member", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
     if (body.module === "assistant") {
+      if (body.action === "discipline_analysis") {
+        return route.fulfill({
+          json: {
+            recommendation: {
+              recordType: "Kınama",
+              pointDelta: -15,
+              sanctionEffect: "points_only",
+              suspensionDays: 0,
+              creditFineAmount: 0,
+              creditFineInstallments: 1,
+              model: "gemini-2.5-flash"
+            }
+          }
+        });
+      }
       if (body.action === "message") {
         assistantHistory.push({
           id: `assistant-${assistantHistory.length + 1}`,
@@ -571,6 +586,29 @@ try {
     await context.close();
   }
 
+  const presidentRoleContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const presidentRolePage = await presidentRoleContext.newPage();
+  const presidentRoleProfile = {
+    ...baseProfile,
+    id: "president-role-manager",
+    email: "president.roles@example.test",
+    roles: ["president", "member"],
+    role: "president",
+    theme_preference: "blue"
+  };
+  await openPortal(presidentRolePage, presidentRoleProfile, "presidency");
+  assert.equal(
+    await presidentRolePage.locator('[data-action="edit-member"][data-id="president-1"]').count(),
+    1,
+    "president should be able to manage another party-rank holder"
+  );
+  await presidentRolePage.locator('[data-action="edit-member"][data-id="president-1"]').click();
+  assert.equal(await presidentRolePage.locator('input[name="roles"][value="president"]').count(), 1, "president should be able to assign the president rank");
+  assert.equal(await presidentRolePage.locator('input[name="roles"][value="discipline_vice_chair"]').count(), 1, "president should be able to assign any discipline rank");
+  assert.equal(await presidentRolePage.locator('input[name="roles"][value="super_admin"]').count(), 0, "technical Admin role must remain unavailable to the president");
+  await presidentRolePage.keyboard.press("Escape");
+  await presidentRoleContext.close();
+
   const governanceContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const governancePage = await governanceContext.newPage();
   const governanceErrors = [];
@@ -793,6 +831,17 @@ try {
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-open"]').count(), 1, "unused open investigation should be selectable");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-used"]').count(), 0, "investigation with a penalty must not be selectable again");
   assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-closed"]').count(), 0, "closed investigation must not be selectable");
+  assert.equal(await disciplinePage.locator('[data-action="discipline-ai-analyze"]').isVisible(), true, "discipline form should offer AI penalty analysis");
+  await disciplinePage.locator("#discipline-member").selectOption("member-2");
+  await disciplinePage.locator("#discipline-investigation").selectOption("investigation-open");
+  await disciplinePage.locator("#discipline-reason").fill("Görev ihlali");
+  await disciplinePage.locator("#discipline-description").fill("Soruşturmadaki olay ve savunma birlikte değerlendirilmiştir.");
+  await disciplinePage.locator("#discipline-decree").fill("İlgili olay, savunma ve yönetmelik hükümleri değerlendirilerek karar verilmiştir.");
+  const initialDisciplineType = await disciplinePage.locator("#discipline-type").inputValue();
+  await disciplinePage.locator('[data-action="discipline-ai-analyze"]').click();
+  await disciplinePage.locator("[data-discipline-ai-result] strong").getByText("Kınama", { exact: true }).waitFor();
+  assert.match(await disciplinePage.locator("[data-discipline-ai-result]").innerText(), /-15 disiplin puanı/i);
+  assert.equal(await disciplinePage.locator("#discipline-type").inputValue(), initialDisciplineType, "AI recommendation must not change the selected penalty");
   const suspensionField = disciplinePage.locator("[data-discipline-suspension]");
   assert.equal(await suspensionField.isHidden(), true, "suspension duration should start hidden");
   await disciplinePage.locator("#discipline-effect").selectOption("party_suspension");

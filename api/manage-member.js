@@ -209,13 +209,14 @@ function isProtectedForVice(profile) {
 
 function canModerateProfile(actorRoles, targetRoles, requestedRoles) {
   if (isTechnicalSuperAdminRoles(actorRoles)) return true;
+  if (actorRoles.includes("president")) {
+    return !targetRoles.includes("super_admin") && !requestedRoles.includes("super_admin");
+  }
   if (targetRoles.some((role) => ["super_admin", "president"].includes(role))) return false;
   if (actorRoles.includes("vice_president") && targetRoles.includes("vice_president")) return false;
   if (requestedRoles.includes("credit_officer") && !actorRoles.some((role) => ["super_admin", "president"].includes(role))) return false;
 
-  const forbidden = actorRoles.includes("president")
-    ? new Set(["super_admin", "president"])
-    : new Set(["super_admin", "president", "vice_president"]);
+  const forbidden = new Set(["super_admin", "president", "vice_president"]);
   return !requestedRoles.some((role) => forbidden.has(role));
 }
 
@@ -246,7 +247,7 @@ function canSetDisciplineRole(actorRoles, targetRoles, targetRole) {
   if (targetRoles.includes("super_admin")) return false;
   if (isTechnicalSuperAdminRoles(actorRoles)) return true;
   if (actorRoles.includes("president")) {
-    return nextRank === 3 || (currentRank === 3 && nextRank === 0);
+    return true;
   }
   if (actorRoles.includes("discipline_chair")) {
     return currentRank < 3 && nextRank < 3;
@@ -538,6 +539,11 @@ export default async function handler(request, response) {
       return json(response, patchResponse.status, {
         error: patched?.message || "Rol ve durum guncellenemedi."
       });
+    }
+    const currentDisciplineRole = disciplineRoleOf(currentRoles);
+    const requestedDisciplineRole = disciplineRoleOf(requestedRoles);
+    if (currentDisciplineRole !== requestedDisciplineRole) {
+      await setDisciplineCommitteeMembership(id, requestedDisciplineRole, actor.authUser.id);
     }
 
     await insertAudit(actor.authUser.id, id, "Baskanlik panelinden rol ve durum guncellendi", {

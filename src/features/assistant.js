@@ -58,6 +58,56 @@ function assistantSourceMarkup(sources = []) {
   `;
 }
 
+function disciplineEffectRecommendationLabel(effect) {
+  return ({
+    none: "Sadece kayıt oluştur",
+    points_only: "Yalnızca puan uygula",
+    remove_roles: "Yetkilerini al, üye olarak bırak",
+    suspend_member: "Üyeliği askıya al",
+    party_suspension: "Süreli partiden uzaklaştır",
+    passive_member: "Pasif üyeliğe çek"
+  })[effect] || effect;
+}
+
+function disciplineAiRecommendationMarkup(recommendation) {
+  const details = [
+    Number(recommendation.pointDelta) < 0 ? `${Number(recommendation.pointDelta)} disiplin puanı` : "Puan kesintisi yok",
+    disciplineEffectRecommendationLabel(recommendation.sanctionEffect),
+    Number(recommendation.suspensionDays) > 0 ? `${Number(recommendation.suspensionDays)} gün` : "",
+    Number(recommendation.creditFineAmount) > 0
+      ? `${Number(recommendation.creditFineAmount).toLocaleString("tr-TR")} kredi para cezası · ${Number(recommendation.creditFineInstallments)} taksit`
+      : ""
+  ].filter(Boolean);
+  return `
+    <span>Önerilen ceza</span>
+    <strong>${esc(recommendation.recordType)}</strong>
+    <p>${details.map(esc).join(" · ")}</p>
+    <small>Bu yalnızca karar desteğidir. Form alanları değiştirilmedi; son karar yetkiliye aittir.</small>
+  `;
+}
+
+const ihpAssistantBaseOpenDiscipline = openDiscipline;
+openDiscipline = function ihpAssistantOpenDiscipline(item = null) {
+  ihpAssistantBaseOpenDiscipline(item);
+  const form = modalRoot.querySelector('form[data-form="discipline"]');
+  const actions = form?.querySelector(".modal-actions");
+  if (!form || !actions || form.querySelector("[data-discipline-ai-panel]")) return;
+  actions.insertAdjacentHTML(
+    "beforebegin",
+    `<section class="discipline-ai-panel" data-discipline-ai-panel>
+      <div class="discipline-ai-intro">
+        <span class="discipline-ai-mark">${icon("sparkles")}</span>
+        <div>
+          <strong>Yapay zekâ ceza önerisi</strong>
+          <p>Olayı, savunmayı, kararname taslağını ve yönetmelikleri inceler; yalnızca önerilen cezayı gösterir.</p>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="discipline-ai-analyze">Yapay zekâyla analiz et</button>
+      </div>
+      <div class="discipline-ai-result" data-discipline-ai-result aria-live="polite" hidden></div>
+    </section>`
+  );
+};
+
 function assistantMessageMarkup(item) {
   const charged = Number(item.charged_amount || 0);
   return `
@@ -330,6 +380,46 @@ handleClick = async function ihpAssistantHandleClick(event) {
   }
 
   const action = target?.dataset.action;
+  if (action === "discipline-ai-analyze") {
+    event.preventDefault();
+    const form = target.closest('form[data-form="discipline"]');
+    const result = form?.querySelector("[data-discipline-ai-result]");
+    if (!form || !result) return;
+    const memberId = form.querySelector('[name="member_id"]')?.value || "";
+    const investigationId = form.querySelector('[name="investigation_id"]')?.value || "";
+    const reason = form.querySelector('[name="reason"]')?.value.trim() || "";
+    const description = form.querySelector('[name="description"]')?.value.trim() || "";
+    const decreeText = form.querySelector('[name="decree_text"]')?.value.trim() || "";
+    if (!memberId || !investigationId || reason.length < 2 || description.length < 10 || decreeText.length < 10) {
+      showToast("Analizden önce üye, soruşturma, sebep, açıklama ve kararname taslağını doldurun.", "error");
+      return;
+    }
+    target.disabled = true;
+    result.hidden = false;
+    result.classList.add("is-loading");
+    result.innerHTML = `<span class="ihp-assistant-loader"></span><strong>Olay ve yönetmelikler analiz ediliyor</strong>`;
+    try {
+      const response = await portalServerRequest("/api/manage-member", {
+        module: "assistant",
+        action: "discipline_analysis",
+        disciplineRecordId: form.dataset.id || "",
+        memberId,
+        investigationId,
+        reason,
+        description,
+        decreeText
+      });
+      result.classList.remove("is-loading");
+      result.innerHTML = disciplineAiRecommendationMarkup(response.recommendation || {});
+    } catch (error) {
+      result.classList.remove("is-loading");
+      result.innerHTML = `<span>Analiz tamamlanamadı</span><strong>${esc(error.message)}</strong>`;
+      showToast(error.message, "error");
+    } finally {
+      target.disabled = false;
+    }
+    return;
+  }
   if (action === "assistant-toggle") {
     event.preventDefault();
     const ui = ihpAssistantState();
