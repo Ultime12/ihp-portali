@@ -473,12 +473,19 @@ try {
     const assistantBottomDistance = async () => portalPage.locator("[data-assistant-messages]").evaluate(
       (element) => element.scrollHeight - element.scrollTop - element.clientHeight
     );
+    await portalPage.waitForFunction(() => {
+      const element = document.querySelector("[data-assistant-messages]");
+      return element && element.scrollHeight - element.scrollTop - element.clientHeight < 4;
+    });
     assert.ok(await assistantBottomDistance() < 4, `${viewport.name}: assistant should stay at the bottom after sending`);
     await portalPage.screenshot({ path: join(output, `${viewport.name}-assistant.png`), fullPage: true });
     await portalPage.locator('[data-action="assistant-close"]').click();
     await portalPage.locator(".ihp-assistant-launcher").click();
     await portalPage.waitForSelector(".ihp-assistant-panel.open");
-    await portalPage.waitForTimeout(150);
+    await portalPage.waitForFunction(() => {
+      const element = document.querySelector("[data-assistant-messages]");
+      return element && element.scrollHeight - element.scrollTop - element.clientHeight < 4;
+    });
     assert.ok(await assistantBottomDistance() < 4, `${viewport.name}: assistant should stay at the bottom after reopening`);
     await portalPage.locator('[data-action="assistant-close"]').click();
     await portalPage.locator("[data-theme-select]").selectOption("green");

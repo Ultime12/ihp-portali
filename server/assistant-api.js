@@ -138,27 +138,69 @@ function keywords(question) {
   return [...new Set(
     normalize(question)
       .split(/\s+/)
-      .filter((word) => word.length > 2 && !STOP_WORDS.has(word))
+      .filter((word) => (/^\d{1,3}$/.test(word) || word.length > 2) && !STOP_WORDS.has(word))
   )].slice(0, 18);
 }
 
-function rankDocuments(documents, question, limit) {
+function referencedArticleNumbers(question) {
+  return [...String(question || "").matchAll(/\b(?:madde|md)\s*[:.]?\s*(\d{1,3})\b/gi)]
+    .map((match) => match[1]);
+}
+
+export function rankDocuments(documents, question, limit) {
   const terms = keywords(question);
+  const articleNumbers = referencedArticleNumbers(question);
   return documents
     .map((document, index) => {
       const title = normalize(document.title);
       const text = normalize(document.text);
-      const score = terms.reduce(
+      const keywordScore = terms.reduce(
         (total, term) =>
           total +
           (title.includes(term) ? 8 : 0) +
           Math.min(4, text.split(term).length - 1),
         0
       );
+      const articleScore = articleNumbers.reduce(
+        (total, articleNumber) =>
+          total + (new RegExp(`\\bmadde\\s+${articleNumber}\\b`, "i").test(text) ? 80 : 0),
+        0
+      );
+      const score = keywordScore + articleScore;
       return { ...document, score, index };
     })
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .slice(0, limit);
+}
+
+function splitLongText(value, maximum = 4800, overlap = 600) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  if (text.length <= maximum) return [text];
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(text.length, start + maximum);
+    if (end < text.length) {
+      const paragraphEnd = text.lastIndexOf("\n", end);
+      if (paragraphEnd > start + Math.floor(maximum * 0.6)) end = paragraphEnd;
+    }
+    chunks.push(text.slice(start, end).trim());
+    if (end >= text.length) break;
+    start = Math.max(start + 1, end - overlap);
+  }
+  return chunks.filter(Boolean);
+}
+
+export function regulationDocuments(regulations = []) {
+  return regulations.flatMap((item) => {
+    const chunks = splitLongText(item.content);
+    return chunks.map((text, index) => ({
+      title: `Yönetmelik: ${item.title}${chunks.length > 1 ? ` · Bölüm ${index + 1}/${chunks.length}` : ""}`,
+      text,
+      type: "regulation"
+    }));
+  });
 }
 
 function trimText(value, maximum = 4000) {
@@ -206,18 +248,14 @@ async function portalKnowledge(actor, question) {
     rows("/rest/v1/elections?status=neq.cancelled&select=title,description,status,nomination_starts_at,nomination_ends_at,voting_starts_at,voting_ends_at,result_announced_at&order=created_at.desc&limit=10")
   ]);
 
-  const regulationDocuments = regulations.map((item) => ({
-    title: `Yönetmelik: ${item.title}`,
-    text: trimText(item.content, 6000),
-    type: "regulation"
-  }));
+  const regulationDocumentChunks = regulationDocuments(regulations);
   const announcementDocuments = announcements.map((item) => ({
     title: `Duyuru: ${item.title}`,
     text: trimText(`${item.category || "Genel"} | ${item.content}`, 2500),
     type: "announcement"
   }));
   const selected = [
-    ...rankDocuments(regulationDocuments, question, 7),
+    ...rankDocuments(regulationDocumentChunks, question, 8),
     ...rankDocuments(announcementDocuments, question, 5)
   ];
 
@@ -273,7 +311,7 @@ async function portalKnowledge(actor, question) {
   ].join("\n");
 
   return {
-    context: trimText(context, 36000),
+    context: trimText(context, 80000),
     sources: sourceList
   };
 }
