@@ -320,9 +320,9 @@ function historyContents(history, question) {
 
 async function askGemini(instruction, history, question, maxOutputTokens = 6000) {
   const configuredModels = [
+    "gemini-2.5-flash",
     process.env.GEMINI_MODEL,
-    "gemini-3.5-flash",
-    "gemini-2.5-flash"
+    "gemini-3.5-flash"
   ].filter(Boolean);
   const models = [...new Set(configuredModels)];
   let lastError = null;
@@ -355,7 +355,7 @@ async function askGemini(instruction, history, question, maxOutputTokens = 6000)
       if (!response.ok) {
         lastError = new Error(payload?.error?.message || "Gemini yanıt vermedi.");
         lastError.status = response.status;
-        if (response.status === 404) continue;
+        if ([404, 429, 503].includes(response.status)) continue;
         throw lastError;
       }
       const answer = (payload.candidates?.[0]?.content?.parts || [])
@@ -376,7 +376,7 @@ async function askGemini(instruction, history, question, maxOutputTokens = 6000)
         throw timeoutError;
       }
       lastError = error;
-      if (error.status !== 404) throw error;
+      if (![404, 429, 503].includes(error.status)) throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -401,7 +401,8 @@ export default async function handler(request, response) {
         process.env.SUPABASE_ANON_KEY &&
         process.env.SUPABASE_SERVICE_ROLE_KEY
       ),
-      provider: "Gemini"
+      provider: "Gemini",
+      primaryModel: "gemini-2.5-flash"
     });
   }
   if (request.method !== "POST") return json(response, 405, { error: "Yalnızca POST isteği kabul edilir." });
@@ -413,7 +414,8 @@ export default async function handler(request, response) {
         process.env.SUPABASE_ANON_KEY &&
         process.env.SUPABASE_SERVICE_ROLE_KEY
       ),
-      provider: "Gemini"
+      provider: "Gemini",
+      primaryModel: "gemini-2.5-flash"
     });
   }
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
