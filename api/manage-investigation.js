@@ -1,4 +1,5 @@
 import { emailProfile } from "../server/mail.js";
+import { sendDisciplineMailboxMessage } from "../server/mailbox-api.js";
 
 const INVESTIGATION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin"]);
@@ -134,7 +135,7 @@ function isAssignableInvestigator(profile) {
   return disciplineRank(roles) > 0 && !roles.includes("super_admin");
 }
 
-async function notify(profileId, actorId, title, body) {
+async function notify(profileId, actorId, title, body, { idempotencyKey = "" } = {}) {
   if (!profileId) return;
   await supabaseRequest("/rest/v1/notifications", {
     method: "POST",
@@ -145,16 +146,26 @@ async function notify(profileId, actorId, title, body) {
       title,
       body,
       category: "discipline",
-      link: "#/portal/investigations"
+      link: "https://dk.ihp.org.tr/#/portal/investigations"
     })
   }).catch(() => undefined);
-  await emailProfile(supabaseRequest, profileId, {
-    subject: title,
-    title,
-    body,
-    actionUrl: "#/portal/investigations",
-    actionLabel: "Sorusturmalari ac"
-  }).catch(() => undefined);
+  await Promise.allSettled([
+    emailProfile(supabaseRequest, profileId, {
+      from: "İHP Disiplin Kurulu <dk@ihp.org.tr>",
+      subject: `İHP Disiplin Kurulu: ${title}`,
+      title,
+      body,
+      actionUrl: "https://dk.ihp.org.tr/#/portal/investigations",
+      actionLabel: "Soruşturma kaydını aç",
+      senderLabel: "İHP Disiplin Kurulu",
+      idempotencyKey,
+      force: true
+    }),
+    sendDisciplineMailboxMessage(profileId, {
+      subject: `İHP Disiplin Kurulu: ${title}`,
+      body
+    })
+  ]);
 }
 
 async function audit(actorId, investigationId, summary, details = {}) {
@@ -213,6 +224,9 @@ export default async function handler(request, response) {
     if (subject.status !== "active" || subject.is_system_account) {
       return json(response, 400, { error: "Sorusturma yalnizca aktif gercek uyeler icin acilabilir." });
     }
+    if (subject.id === actor.authUser.id) {
+      return json(response, 400, { error: "Kisi kendi hakkinda sorusturma acamaz." });
+    }
     if (!canOpenInvestigationFor(actor.roles, rolesOf(subject))) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu sorusturmaya izin vermiyor." });
     }
@@ -223,8 +237,8 @@ export default async function handler(request, response) {
       body: JSON.stringify({
         subject_profile_id: subjectProfileId,
         opened_by: actor.authUser.id,
-        assigned_to: actor.authUser.id,
-        assigned_at: new Date().toISOString(),
+        assigned_to: null,
+        assigned_at: null,
         status: "open",
         title: title.slice(0, 140),
         description: description.slice(0, 1600),
@@ -246,8 +260,19 @@ export default async function handler(request, response) {
     await notify(
       subjectProfileId,
       actor.authUser.id,
-      "Hakkınızda soruşturma açıldı - savunma hakkınız hazır",
-      `${title}. Soruşturmalar bölümünden savunmanızı sunabilirsiniz.`
+      "Hakkınızda soruşturma açıldı",
+      [
+        `Dosya başlığı: ${title}`,
+        `Açılış tarihi: ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}`,
+        `Durum: Açık - savunma bekleniyor`,
+        "",
+        "Olay ve inceleme özeti:",
+        description,
+        body.evidenceNote ? `\nKanıt notu:\n${String(body.evidenceNote).slice(0, 1200)}` : "",
+        "",
+        "Savunmanızı ve dosyanın güncel durumunu Disiplin Kurulu sisteminden görüntüleyebilirsiniz."
+      ].filter(Boolean).join("\n"),
+      { idempotencyKey: investigation?.id ? `investigation-opened-${investigation.id}` : "" }
     );
     return json(response, 200, { ok: true, investigation });
   }
@@ -331,6 +356,12 @@ export default async function handler(request, response) {
     return json(response, 200, { ok: true, investigation: updated?.[0] || null });
   }
 
+  if (!isAdmin && investigation.subject_profile_id === actor.authUser.id) {
+    return json(response, 403, {
+      error: "Kendi hakkinizdaki sorusturmanin sorumlulugunu alamaz veya bu dosyada kurul islemi yapamazsiniz."
+    });
+  }
+
   if (["cancelled", "closed"].includes(investigation.status)) {
     return json(response, 400, { error: "Kapanmis sorusturma guncellenemez." });
   }
@@ -405,6 +436,11 @@ export default async function handler(request, response) {
 
   const assignedToOther = investigation.assigned_to && investigation.assigned_to !== actor.authUser.id;
   const currentAssigneeRoles = assignedToOther ? await fetchProfileRoles(investigation.assigned_to) : [];
+  const legacyOpeningAssignment = Boolean(
+    assignedToOther &&
+    investigation.status === "open" &&
+    investigation.assigned_to === investigation.opened_by
+  );
 
   if (action === "claim") {
     if ((investigation.recused_profile_ids || []).includes(actor.authUser.id)) {
@@ -413,7 +449,7 @@ export default async function handler(request, response) {
     if (investigation.assigned_to === actor.authUser.id) {
       return json(response, 400, { error: "Bu sorusturma zaten sizin sorumlulugunuzda." });
     }
-    if (assignedToOther && !canTakeResponsibility(actor.roles, currentAssigneeRoles)) {
+    if (assignedToOther && !legacyOpeningAssignment && !canTakeResponsibility(actor.roles, currentAssigneeRoles)) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu sorumlulugu devralmaya izin vermiyor." });
     }
   } else if (action === "transfer") {

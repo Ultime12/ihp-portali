@@ -249,9 +249,110 @@ export async function restRequest(path: string, options: RequestInit = {}): Prom
   return payload;
 }
 
-export async function serverRequest(path: string, options: RequestInit = {}): Promise<any> {
+async function storageRequest(
+  path: string,
+  options: RequestInit = {},
+  retry = true
+): Promise<Response> {
   const token = await getAccessToken();
-  const response = await fetch(path, {
+  if (!token) throw new Error("Bu iÅŸlem iÃ§in oturum aÃ§manÄ±z gerekiyor.");
+
+  const response = await fetch(`${runtimeConfig.supabaseUrl}/storage/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: runtimeConfig.supabaseAnonKey,
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {})
+    }
+  });
+
+  if (response.status === 401 && retry) {
+    const refreshed = await refreshSession();
+    if (refreshed?.access_token) {
+      return storageRequest(path, options, false);
+    }
+  }
+
+  return response;
+}
+
+export async function uploadStorageObject(
+  bucket: string,
+  objectPath: string,
+  file: File,
+  contentType = file.type || "application/octet-stream"
+) {
+  const response = await storageRequest(
+    `object/${encodeURIComponent(bucket)}/${objectPath.split("/").map(encodeURIComponent).join("/")}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": contentType,
+        "x-upsert": "false"
+      },
+      body: file
+    }
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message || payload.error || "Dosya yÃ¼klenemedi.");
+  }
+  return payload;
+}
+
+export async function downloadStorageObject(bucket: string, objectPath: string) {
+  const response = await storageRequest(
+    `object/authenticated/${encodeURIComponent(bucket)}/${objectPath.split("/").map(encodeURIComponent).join("/")}`
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.message || payload.error || "Dosya indirilemedi.");
+  }
+  return response.blob();
+}
+
+export async function createSignedStorageUrl(
+  bucket: string,
+  objectPath: string,
+  expiresIn = 3600
+) {
+  const response = await storageRequest(
+    `object/sign/${encodeURIComponent(bucket)}/${objectPath.split("/").map(encodeURIComponent).join("/")}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expiresIn })
+    }
+  );
+  const payload = await response.json().catch(() => ({}));
+  const signedPath = payload.signedURL || payload.signedUrl;
+  if (!response.ok || !signedPath) {
+    throw new Error(payload.message || payload.error || "Belge bağlantısı oluşturulamadı.");
+  }
+  return signedPath.startsWith("http")
+    ? signedPath
+    : `${runtimeConfig.supabaseUrl}/storage/v1${signedPath}`;
+}
+
+export async function removeStorageObject(bucket: string, objectPath: string) {
+  const response = await storageRequest(`object/${encodeURIComponent(bucket)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefixes: [objectPath] })
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.message || payload.error || "Dosya kaldÄ±rÄ±lamadÄ±.");
+  }
+}
+
+export async function serverRequest(path: string, options: RequestInit = {}): Promise<any> {
+  const proxy = (globalThis as typeof globalThis & { __IHP_SERVER_PROXY__?: string })
+    .__IHP_SERVER_PROXY__;
+  const requestPath = proxy
+    ? `${proxy}?target=${encodeURIComponent(path)}`
+    : path;
+  const send = (token: string) => fetch(requestPath, {
     ...options,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -259,6 +360,17 @@ export async function serverRequest(path: string, options: RequestInit = {}): Pr
       ...(options.headers || {})
     }
   });
+
+  let token = await getAccessToken();
+  let response = await send(token);
+  if (response.status === 401) {
+    const refreshed = await refreshSession();
+    if (refreshed?.access_token) {
+      token = refreshed.access_token;
+      response = await send(token);
+    }
+  }
+
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "İşlem tamamlanamadı.");
   return payload;

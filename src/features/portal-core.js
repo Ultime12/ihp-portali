@@ -3,7 +3,6 @@ const IHP_ACCESS_FEATURE_PATCH_V1 = false;
 
 const ENTRY_ACCOUNT_EMAIL = "giris@tfo.k12.tr";
 const OBSOLETE_QUERY_PAGE = "member" + "-query";
-const EXECUTIVE_CORE_ROLES = ["president", "vice_president", "presidential_aide"];
 
 function isEntryEmail(email = "") {
   return String(email || "").toLocaleLowerCase("tr") === ENTRY_ACCOUNT_EMAIL;
@@ -138,18 +137,10 @@ brand = function patchedBrand() {
 };
 
 async function portalServerRequest(path, payload = {}) {
-  const token = getSession()?.access_token || "";
-  const response = await fetch(path, {
+  return serverRequest(path, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
     body: JSON.stringify(payload)
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || "İşlem tamamlanamadı.");
-  return body;
 }
 
 async function portalRestRequest(path, options = {}) {
@@ -329,11 +320,17 @@ function executiveExtraIds() {
 }
 
 function isCoreExecutiveMember(member) {
-  return rolesOf(member).some((role) => EXECUTIVE_CORE_ROLES.includes(role));
+  return rolesOf(member).some((role) => [
+    "president",
+    "vice_president",
+    "presidential_aide"
+  ].includes(role));
 }
 
 function isExecutiveMember(member) {
-  return !isSystemProfile(member) && (isCoreExecutiveMember(member) || executiveExtraIds().has(member.id));
+  return !isSystemProfile(member) && (
+    isCoreExecutiveMember(member) || executiveExtraIds().has(member.id)
+  );
 }
 
 function sortedByName(rows) {
@@ -360,7 +357,7 @@ function executiveManagerPanel() {
   const manualRows = (state.cache.executiveExtras || []).filter((row) => row.profile && !isSystemProfile(row.profile));
   return `
     <section class="panel glass" style="margin-bottom:.85rem">
-      <div class="panel-head"><h3>Yürütme Kurulu özel üyeleri</h3><span>Başkanın ayrıca seçtiği kişiler</span></div>
+      <div class="panel-head"><h3>Yürütme Kurulu üyeleri</h3><span>Başkanlık tarafından açıkça atanan kişiler</span></div>
       <form class="executive-manager" data-form="executive-member">
         <div class="form-group">
           <label for="executive-member-id">Yürütmeye eklenecek kişi</label>
@@ -407,7 +404,7 @@ presidencyPage = function patchedPresidencyPage() {
     ${pageHeader(
       "Başkanlık",
       "Yönetim ve rol düzeni",
-      "Yürütme Kurulu sadece Başkan, Başkan Yardımcısı, Başkan Yaveri ve başkanın ayrıca eklediği kişilerden oluşur.",
+      "Başkan, Başkan Yardımcısı ve Başkan Yaveri otomatik; diğer yürütme üyeleri başkanlık tarafından atanır.",
       canManageMembers()
         ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-invite">${icon("userPlus")} Üye Ekle</button>`
         : ""
@@ -1215,6 +1212,7 @@ submitForm = async function patchedSubmitForm(event) {
     const submit = form.querySelector('[type="submit"]');
     if (submit) submit.disabled = true;
     try {
+      const attachments = validatedCaseAttachmentFiles(form);
       const {
         sanction_effect: sanctionEffect = "none",
         point_delta: rawPointDelta = "0",
@@ -1266,9 +1264,12 @@ submitForm = async function patchedSubmitForm(event) {
         const rows = await createDisciplineRecord(payload);
         savedRecord = rows?.[0] || null;
       }
+      const disciplineRecordId = savedRecord?.id || form.dataset.id;
+      if (!disciplineRecordId) throw new Error("Disiplin kaydı oluşturuldu ancak dosya kimliği alınamadı.");
+      await uploadCaseAttachments("discipline", disciplineRecordId, attachments);
       if (shouldApply) {
         await applyDisciplineSanction({
-          disciplineRecordId: savedRecord?.id || form.dataset.id,
+          disciplineRecordId,
           memberId: payload.member_id,
           effect: effectiveSanction,
           pointDelta,

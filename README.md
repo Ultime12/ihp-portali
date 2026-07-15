@@ -30,6 +30,27 @@ cd dist
 python -m http.server 4173
 ```
 
+## E-posta
+
+Portal bildirimleri Resend üzerinden `bildirim@ihp.org.tr` adresiyle gönderilir. `RESEND_API_KEY`, `MAIL_FROM` ve `SITE_URL` yalnızca Vercel ortam değişkenlerinde tutulmalıdır. Alan adı Resend içinde doğrulanana kadar `MAIL_ENABLED=false`, doğrulama tamamlandıktan sonra `MAIL_ENABLED=true` kullanılmalıdır.
+
+Her gerçek üyeye giriş e-postasından bağımsız bir `@ihp.org.tr` kurumsal posta adresi atanır. Üyeler posta kutusuna mevcut portal oturumuyla erişir; ayrı bir webmail şifresi oluşturulmaz. İHP adresleri arasındaki iletiler Supabase üzerinde kotasız saklanır. Dış e-postalar Resend üzerinden gönderilir, `email.received` webhook'u ile `POST /api/resend-webhook` uç noktasına alınır ve yalnızca düz metin olarak portal posta kutusuna kaydedilir. Webhook doğrulaması için `RESEND_WEBHOOK_SECRET` yalnızca Vercel sunucu ortamında tutulmalıdır.
+
+Gelen posta için kullanılan MX kayıtları, web sitesinin A ve CNAME kayıtlarından bağımsızdır. DNS GüzelHosting tarafından yönetildiği için mail sağlayıcısının MX ve TXT kayıtları GüzelHosting DNS paneline eklenir.
+
+## Ayrı Disiplin Kurulu Sitesi
+
+`ihp-dk.vercel.app`, ana portal ile aynı Supabase Auth ve veritabanını kullanır. Üyelerin ana portalda oluşturduğu şikayetler DK sitesinde aynı kayıt üzerinden işlenir.
+
+DK üretim paketini hazırlamak için:
+
+```powershell
+npm run check:dk
+npm run package:dk
+```
+
+Hazırlanan `.vercel/dk-deploy` paketinde yalnızca DK statik çıktısı ile `config`, `dk-proxy` ve `client-error` fonksiyonları bulunur. Ayrıcalıklı DK işlemleri, kullanıcı oturumu korunarak ana portal API'sine sunucudan sunucuya iletilir; service-role ve Gemini anahtarları ikinci projede tutulmaz.
+
 ## Güvenlik
 
 - Tarayıcıya yalnızca Supabase anonim anahtarı aktarılır.

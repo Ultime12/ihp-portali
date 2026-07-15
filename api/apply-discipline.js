@@ -1,8 +1,9 @@
 import { randomInt } from "node:crypto";
 import { emailProfile } from "../server/mail.js";
+import { sendDisciplineMailboxMessage } from "../server/mailbox-api.js";
 
 const DISCIPLINE_DECISION_ROLES = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
-const REWARD_ROLES = new Set(["super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+const REWARD_ROLES = new Set(["super_admin", "discipline_chair"]);
 const PROTECTED_ROLES = new Set(["super_admin"]);
 const VALID_EFFECTS = new Set(["none", "points_only", "reward_points", "remove_roles", "suspend_member", "party_suspension", "passive_member"]);
 const POINT_MIN = 0;
@@ -142,7 +143,7 @@ function canAffectTarget(actorRoles, targetRoles) {
   );
 }
 
-async function notify(profileId, actorId, title, body, category = "discipline") {
+async function notify(profileId, actorId, title, body, category = "discipline", idempotencyKey = "") {
   await supabaseRequest("/rest/v1/notifications", {
     method: "POST",
     headers: { Prefer: "return=minimal" },
@@ -152,16 +153,26 @@ async function notify(profileId, actorId, title, body, category = "discipline") 
       title,
       body,
       category,
-      link: "#/portal/discipline"
+      link: "https://dk.ihp.org.tr/#/portal/discipline"
     })
   }).catch(() => undefined);
-  await emailProfile(supabaseRequest, profileId, {
-    subject: title,
-    title,
-    body,
-    actionUrl: "#/portal/discipline",
-    actionLabel: "Disiplin kaydini ac"
-  }).catch(() => undefined);
+  await Promise.allSettled([
+    emailProfile(supabaseRequest, profileId, {
+      from: "İHP Disiplin Kurulu <dk@ihp.org.tr>",
+      subject: `İHP Disiplin Kurulu: ${title}`,
+      title,
+      body,
+      actionUrl: "https://dk.ihp.org.tr/#/portal/discipline",
+      actionLabel: "Disiplin kaydını aç",
+      senderLabel: "İHP Disiplin Kurulu",
+      idempotencyKey,
+      force: true
+    }),
+    sendDisciplineMailboxMessage(profileId, {
+      subject: `İHP Disiplin Kurulu: ${title}`,
+      body
+    })
+  ]);
 }
 
 async function rpc(name, body) {
@@ -254,7 +265,7 @@ export default async function handler(request, response) {
   if (isReward ? !hasAny(actor.roles, REWARD_ROLES) : !hasAny(actor.roles, DISCIPLINE_DECISION_ROLES)) {
     return json(response, 403, {
       error: isReward
-        ? "Ödül kararını yalnızca Başkan veya Disiplin Kurulu verebilir."
+        ? "Pozitif disiplin puanını yalnızca Disiplin Kurulu Başkanı veya Admin verebilir."
         : "Disiplin yaptırımını yalnızca bağımsız Disiplin Kurulu uygulayabilir."
     });
   }
@@ -466,23 +477,41 @@ export default async function handler(request, response) {
       actor.authUser.id,
       "Tebrikler! Odul puani kazandiniz",
       `+${pointDelta} puan kazandiniz. Guncel disiplin puaniniz: ${pointsAfter}. Kararname: ${reason}`,
-      "reward"
+      "reward",
+      savedDisciplineRecord?.id ? `discipline-reward-${savedDisciplineRecord.id}` : ""
     );
   } else {
-    const pointText = pointDelta < 0
-      ? ` ${Math.abs(pointDelta)} puan dusuldu. Guncel disiplin puaniniz: ${pointsAfter}.`
-      : "";
-    const suspensionText = effect === "party_suspension"
-      ? ` Partiden uzaklastirma suresi: ${sanctionDays} gun. Bitis: ${new Date(sanctionUntil).toLocaleDateString("tr-TR")}.`
-      : "";
-    const fineText = creditFineAmount > 0
-      ? ` ${creditFineAmount} kredi para cezasi kredi hesabinizda ${creditFineInstallments} taksit borc olarak gorunecek.`
-      : "";
+    const effectLabels = {
+      none: "Kararname kaydı",
+      points_only: "Disiplin puanı yaptırımı",
+      remove_roles: "Yetki ve rol yaptırımı",
+      suspend_member: "Üyelik askıya alma",
+      party_suspension: "Süreli uzaklaştırma",
+      passive_member: "Pasif üyelik"
+    };
+    const detailLines = [
+      `Kayıt türü: ${recordType || disciplineRecord?.record_type || "Disiplin işlemi"}`,
+      `Uygulanan işlem: ${effectLabels[effect] || effect}`,
+      `Karar tarihi: ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}`,
+      pointDelta < 0 ? `Disiplin puanı: ${pointsBefore} → ${pointsAfter} (${pointDelta})` : "",
+      effect === "party_suspension" ? `Uzaklaştırma süresi: ${sanctionDays} gün` : "",
+      sanctionUntil ? `Uzaklaştırma bitişi: ${new Date(sanctionUntil).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}` : "",
+      creditFineAmount > 0 ? `Kredi para cezası: ${creditFineAmount.toLocaleString("tr-TR")} kredi / ${creditFineInstallments} taksit` : "",
+      "",
+      `Gerekçe: ${recordReason}`,
+      "",
+      "Kararname metni:",
+      decreeBody,
+      "",
+      "Kaydın güncel durumu ve varsa itiraz süreci Disiplin Kurulu sisteminde görüntülenebilir."
+    ].filter((line) => line !== "");
     await notify(
       memberId,
       actor.authUser.id,
-      "Disiplin yaptirimi uygulandi",
-      `${effect === "remove_roles" ? "Yetkileriniz guncellendi" : "Uyelik durumunuz veya disiplin puaniniz guncellendi"}.${pointText}${suspensionText}${fineText} Kararname: ${reason}`
+      "Hakkınızda disiplin kararnamesi kaydedildi",
+      detailLines.join("\n"),
+      "discipline",
+      (savedDisciplineRecord?.id || disciplineRecordId) ? `discipline-decision-${savedDisciplineRecord?.id || disciplineRecordId}` : ""
     );
   }
 

@@ -30,6 +30,20 @@ const paths = {
   clipboard: '<rect width="14" height="18" x="5" y="3" rx="2"/><path d="M9 3h6v4H9z"/>',
   userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>',
   archive: '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>'
+  ,star: '<path d="m12 2.5 2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.32l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94z"/>'
+  ,trash: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 15H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/>'
+  ,clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+  ,paperclip: '<path d="m21.44 11.05-8.49 8.49a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.66 5.65l-9.2 9.2a2 2 0 0 1-2.83-2.83l8.49-8.48"/>'
+  ,edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4z"/>'
+  ,reply: '<path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>'
+  ,refresh: '<path d="M20 6v5h-5"/><path d="M4 18v-5h5"/><path d="M18.5 9a7 7 0 0 0-12-2L4 11"/><path d="M5.5 15a7 7 0 0 0 12 2l2.5-4"/>'
+  ,send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>'
+  ,chevronDown: '<path d="m6 9 6 6 6-6"/>'
+  ,bold: '<path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/>'
+  ,italic: '<path d="M10 4h8"/><path d="M6 20h8"/><path d="m14 4-4 16"/>'
+  ,underline: '<path d="M6 3v7a6 6 0 0 0 12 0V3"/><path d="M4 21h16"/>'
+  ,list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>'
+  ,indent: '<path d="M3 8h11"/><path d="M3 12h11"/><path d="M3 16h11"/><path d="m17 8 4 4-4 4"/>'
 };
 
 export function icon(name: string, className = "icon") {

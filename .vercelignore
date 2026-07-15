@@ -1,0 +1,8 @@
+# The DK and Finance gateways are deployed only with their standalone projects.
+api/dk-proxy.js
+
+dist-dk/
+dist-finance/
+dist-mail/
+test-results/
+supabase/.temp/

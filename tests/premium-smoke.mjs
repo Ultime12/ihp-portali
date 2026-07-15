@@ -65,6 +65,8 @@ const members = [
   { ...baseProfile, id: "admin-hidden", email: "admin.hidden@example.test", display_name: "ADMIN", member_code: null, roles: ["super_admin"], role: "super_admin" }
 ];
 
+const complaintRequestUrls = [];
+
 function tablePayload(table, url, profile) {
   const query = url.search;
   if (table === "profiles" && query.includes(`id=eq.${profile.id}`)) return [profile];
@@ -106,6 +108,16 @@ function tablePayload(table, url, profile) {
     }];
   }
   if (table === "notifications") return [{ id: "n1", title: "Portal bildirimi", body: "Yeni duyuru yayınlandı.", category: "system", created_at: "2026-06-18T17:00:00.000Z", read_at: null }];
+  if (table === "regulations") return [{
+    id: "regulation-1",
+    title: "Temel Yönetmelik",
+    content: "Madde 1\nTopluluk işleyişi bu metinle düzenlenir.",
+    sort_order: 1,
+    pdf_path: "admin-credit/regulation-1/temel-yonetmelik.pdf",
+    pdf_file_name: "Temel Yönetmelik.pdf",
+    pdf_byte_size: 125000,
+    pdf_uploaded_at: "2026-07-12T18:00:00.000Z"
+  }];
   if (table === "applications") return [{ id: "ap1", status: "new", created_at: "2026-06-18T12:00:00.000Z" }];
   if (table === "complaints") return [{
     id: "complaint-open",
@@ -146,7 +158,63 @@ async function mockBackend(page, profile) {
   let creditAccountClosed = false;
   let scheduledTransfers = [];
   let assistantHistory = [];
+  const mailbox = {
+    mailbox: { address: "uye@ihp.org.tr", displayName: profile.display_name, status: "active" },
+    inbox: [{
+      id: "mail-inbox-1",
+      sender_profile_id: "member-2",
+      recipient_profile_id: profile.id,
+      sender_address: "deniz@ihp.org.tr",
+      recipient_address: "uye@ihp.org.tr",
+      subject: "Kurul toplantısı",
+      body_text: "Toplantı saati 18.00 olarak belirlendi.",
+      direction: "internal",
+      delivery_status: "received",
+      attachment_count: 0,
+      read_at: null,
+      created_at: "2026-07-10T15:00:00.000Z"
+    }],
+    sent: [],
+    directory: [{ id: "member-2", display_name: "Deniz Çiçek", portal_email: "deniz@ihp.org.tr" }],
+    unreadCount: 1,
+    settings: {
+      domain: "ihp.org.tr",
+      externalSendingEnabled: true,
+      memberDailyExternalLimit: 5,
+      memberExternalUsedToday: 0,
+      maxSubjectChars: 160,
+      maxBodyChars: 10000
+    }
+  };
   await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  await page.route("**/api/mailbox", async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: mailbox });
+    const body = JSON.parse(route.request().postData() || "{}");
+    if (body.action === "read") {
+      const message = mailbox.inbox.find((item) => item.id === body.id);
+      if (message && !message.read_at) {
+        message.read_at = new Date().toISOString();
+        mailbox.unreadCount = Math.max(0, mailbox.unreadCount - 1);
+      }
+      return route.fulfill({ json: { message } });
+    }
+    const message = {
+      id: `mail-sent-${mailbox.sent.length + 1}`,
+      sender_profile_id: profile.id,
+      recipient_profile_id: "member-2",
+      sender_address: "uye@ihp.org.tr",
+      recipient_address: body.to,
+      subject: body.subject,
+      body_text: body.body,
+      direction: "internal",
+      delivery_status: "received",
+      attachment_count: 0,
+      read_at: null,
+      created_at: new Date().toISOString()
+    };
+    mailbox.sent.unshift(message);
+    return route.fulfill({ json: { ok: true, message } });
+  });
   await page.route("**/api/governance", (route) => {
     const executive = profile.roles.some((role) => ["president", "vice_president", "presidential_aide"].includes(role));
     route.fulfill({
@@ -182,7 +250,15 @@ async function mockBackend(page, profile) {
       }
     });
   });
-  await page.route("**/api/config", (route) => route.fulfill({ json: { configured: true, supabaseUrl: "https://mock.supabase.test", supabaseAnonKey: "publishable-test" } }));
+  await page.route("**/api/config", (route) => route.fulfill({ json: {
+    configured: true,
+    supabaseUrl: "https://mock.supabase.test",
+    supabaseAnonKey: "publishable-test",
+    pushConfigured: true,
+    vapidPublicKey: "BEl62iUYgUivxIkv69yViEuiBIa40HI0wM4i-6Yfzq3n18xP-Sdr6uzYt5B5_9rC0rJAYgH4z4xHBLh8s8G4w0s",
+    passkeysEnabled: true
+  } }));
+  await page.route("https://mock.supabase.test/auth/v1/passkeys", (route) => route.fulfill({ json: [] }));
   await page.route("https://mock.supabase.test/auth/v1/token?*", (route) => route.fulfill({
     json: {
       access_token: "refreshed-access-token",
@@ -192,6 +268,14 @@ async function mockBackend(page, profile) {
     }
   }));
   await page.route("https://mock.supabase.test/auth/v1/logout", (route) => route.fulfill({ status: 204, body: "" }));
+  await page.route("https://mock.supabase.test/storage/v1/object/sign/regulation-documents/**", (route) => route.fulfill({
+    json: { signedURL: "/object/sign/regulation-documents/mock-regulation.pdf?token=test" }
+  }));
+  await page.route("https://mock.supabase.test/storage/v1/object/sign/regulation-documents/mock-regulation.pdf?token=test", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/pdf",
+    body: "%PDF-1.4\n%%EOF"
+  }));
   await page.route("**/api/flappy-session", async (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
     if (body.module === "game_center") {
@@ -224,6 +308,96 @@ async function mockBackend(page, profile) {
   });
   await page.route("**/api/manage-member", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
+    const marketFixture = () => {
+      const instruments = [
+        ["THYAO.IS", "THYAO", "Türk Hava Yolları", 318.5],
+        ["TUPRS.IS", "TUPRS", "Tüpraş", 146.7],
+        ["GARAN.IS", "GARAN", "Garanti BBVA", 132.2],
+        ["ASELS.IS", "ASELS", "Aselsan", 179.4],
+        ["BIMAS.IS", "BIMAS", "BİM Mağazalar", 514.5],
+        ["KCHOL.IS", "KCHOL", "Koç Holding", 167.8]
+      ].map(([symbol, code, name, price], index) => ({
+        symbol,
+        code,
+        name,
+        price,
+        previousClose: price - 2.5,
+        change: 2.5,
+        changePercent: 1.25 + index / 10,
+        high: price + 7,
+        low: price - 8,
+        marketState: "REGULAR",
+        updatedAt: "2026-07-06T16:00:00.000Z"
+      }));
+      const selected = instruments.find((item) => item.symbol === body.symbol) || instruments[0];
+      return {
+        unit: "İHP kredi",
+        source: "Yahoo Finance",
+        refreshSeconds: 60,
+        selectedSymbol: selected.symbol,
+        updatedAt: "2026-07-06T16:00:00.000Z",
+        instruments,
+        series: Array.from({ length: 24 }, (_, index) => ({
+          timestamp: Date.UTC(2026, 6, 1, 10 + index),
+          value: selected.price - 5 + Math.sin(index / 2.4) * 4 + index * .25
+        }))
+      };
+    };
+    if (body.module === "market") {
+      return route.fulfill({ json: marketFixture() });
+    }
+    if (body.module === "finance") {
+      const market = marketFixture();
+      return route.fulfill({
+        json: {
+          creditAccount: { id: "funded-account", account_code: "IHP111222333", balance: 500, status: "active" },
+          account: {
+            id: "finance-account",
+            profile_id: profile.id,
+            credit_account_id: "funded-account",
+            cash_balance: 2500,
+            portfolio_fee_consent_at: "2026-07-01T09:00:00.000Z",
+            portfolio_fee_last_charged_at: "2026-07-01T09:00:00.000Z",
+            portfolio_fee_debt: 0
+          },
+          positions: [{
+            id: "finance-position",
+            finance_account_id: "finance-account",
+            symbol: "THYAO.IS",
+            quantity: 2,
+            average_cost: 300,
+            current_price: 318.5,
+            market_value: 637,
+            cost_value: 600,
+            profit: 37,
+            instrument: market.instruments[0]
+          }],
+          transactions: [{
+            id: "finance-transaction",
+            finance_account_id: "finance-account",
+            kind: "buy",
+            symbol: "THYAO.IS",
+            quantity: 2,
+            unit_price: 300,
+            amount: 600,
+            cash_balance_after: 2500,
+            created_at: "2026-07-06T15:00:00.000Z"
+          }],
+          totals: { marketValue: 637, costValue: 600, profit: 37, totalValue: 3137 },
+          fee: {
+            weeklyRatePercent: 10,
+            consentRequired: false,
+            consentedAt: "2026-07-01T09:00:00.000Z",
+            lastChargedAt: "2026-07-01T09:00:00.000Z",
+            nextChargeAt: "2026-07-08T09:00:00.000Z",
+            debt: 0,
+            basis: 3100,
+            weeklyEstimate: 310
+          },
+          market
+        }
+      });
+    }
     if (body.module === "assistant") {
       if (body.action === "discipline_analysis") {
         return route.fulfill({
@@ -396,6 +570,7 @@ async function mockBackend(page, profile) {
   await page.route("https://mock.supabase.test/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     const table = url.pathname.split("/").pop();
+    if (table === "complaints") complaintRequestUrls.push({ profileId: profile.id, url: url.toString() });
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(tablePayload(table, url, profile)) });
   });
 }
@@ -495,6 +670,9 @@ try {
     await portalPage.waitForTimeout(75);
     assert.equal(await portalPage.evaluate(() => document.querySelector('[role="dialog"][aria-modal="true"]').contains(document.activeElement)), true, "modal should receive focus");
     await portalPage.keyboard.press("Escape");
+    const externalMail = portalPage.locator('[data-page="mail-external"]');
+    assert.equal(await externalMail.count(), 0, `${viewport.name}: main portal must not expose the mail application`);
+    assert.equal(await portalPage.locator(".mail-workspace, .mail-product-shell").count(), 0, `${viewport.name}: mail UI must not be embedded in the main portal`);
     await portalPage.evaluate(() => { location.hash = "#/portal/games"; });
     await portalPage.waitForSelector(".arcade-grid");
     assert.equal(await portalPage.getByRole("button", { name: "Kredi hesabı aç" }).count(), 3, `${viewport.name}: paid games must require a credit account`);
@@ -558,11 +736,11 @@ try {
   const roleCases = [
     { name: "admin", roles: ["super_admin"], visible: "Sistem", hidden: null, credential: "member" },
     { name: "president", roles: ["discipline_chair", "president", "member"], visible: "Başkanlık", hidden: null, credential: "presidency" },
-    { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Disiplin İşlemleri", hidden: "Başkanlık", credential: "discipline" },
-    { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Soruşturmalar", hidden: "Başkanlık", credential: "discipline" },
+    { name: "discipline-chair", roles: ["discipline_chair", "member"], visible: "Şikayetler", hidden: "Disiplin İşlemleri", credential: "discipline" },
+    { name: "discipline-member", roles: ["discipline_member", "member"], visible: "Şikayetler", hidden: "Soruşturmalar", credential: "discipline" },
     { name: "youth-chair", roles: ["youth_chair", "member"], visible: "Gençlik Kolları", hidden: "Başkanlık", credential: "youth" },
     { name: "representative", roles: ["representative", "member"], visible: "Antlaşmalar", hidden: "Başkanlık", credential: "executive" },
-    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Kredi Yönetimi", hidden: "Başkanlık", credential: "member" },
+    { name: "credit-officer", roles: ["credit_officer", "member"], visible: "Antlaşmalar", hidden: "Başkanlık", credential: "member" },
     { name: "member", roles: ["member"], visible: "Antlaşmalar", hidden: "Başkanlık", credential: "member" }
   ];
 
@@ -593,8 +771,42 @@ try {
     await context.close();
   }
 
+  for (const mobileCase of [
+    { name: "member", profile: baseProfile, appCount: 3 },
+    {
+      name: "discipline",
+      profile: {
+        ...baseProfile,
+        id: "mobile-discipline",
+        email: "mobile.discipline@example.test",
+        role: "discipline_member",
+        roles: ["discipline_member", "member"]
+      },
+      appCount: 4
+    }
+  ]) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await openPortal(page, mobileCase.profile, "mobile");
+    await page.waitForSelector(".pwa-mobile-hero");
+    assert.equal(await page.locator(".pwa-app-card").count(), mobileCase.appCount, `${mobileCase.name}: role-aware app count`);
+    assert.equal(await page.locator(".pwa-setting-card").count(), 2, `${mobileCase.name}: mobile settings cards`);
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      true,
+      `${mobileCase.name}: mobile center horizontal overflow`
+    );
+    assert.deepEqual(errors, [], `${mobileCase.name}: mobile center page errors`);
+    await page.screenshot({ path: join(output, `mobile-center-${mobileCase.name}.png`), fullPage: true });
+    await context.close();
+  }
+
   const presidentRoleContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const presidentRolePage = await presidentRoleContext.newPage();
+  const presidentRoleErrors = [];
+  presidentRolePage.on("pageerror", (error) => presidentRoleErrors.push(error.message));
   const presidentRoleProfile = {
     ...baseProfile,
     id: "president-role-manager",
@@ -604,6 +816,9 @@ try {
     theme_preference: "blue"
   };
   await openPortal(presidentRolePage, presidentRoleProfile, "presidency");
+  assert.match(await presidentRolePage.locator(".app-content").innerText(), /Çekirdek başkanlık rolü/);
+  assert.match(await presidentRolePage.locator(".app-content").innerText(), /Genel Başkan/);
+  assert.deepEqual(presidentRoleErrors, [], "presidency page must render without missing core-member helpers");
   assert.equal(
     await presidentRolePage.locator('[data-action="edit-member"][data-id="president-1"]').count(),
     1,
@@ -642,7 +857,7 @@ try {
   const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const adminPage = await adminContext.newPage();
   const adminProfile = { ...baseProfile, id: "admin-credit", email: "admin@example.test", roles: ["super_admin"], role: "super_admin", theme_preference: "blue" };
-  await openPortal(adminPage, adminProfile, "credit-management");
+  await openPortal(adminPage, adminProfile, "overview");
   await adminPage.locator(".ihp-assistant-launcher").click();
   await adminPage.waitForSelector('[data-action="assistant-settings"]');
   await adminPage.locator('[data-action="assistant-settings"]').click();
@@ -651,15 +866,7 @@ try {
   assert.equal(await adminPage.locator("[data-assistant-max-output]").inputValue(), "6000", "admin should manage the assistant response length");
   await adminPage.keyboard.press("Escape");
   await adminPage.locator('[data-action="assistant-close"]').click();
-  assert.equal(await adminPage.locator(".credit-settings-panel").isVisible(), true, "admin should see credit settings");
-  assert.equal(await adminPage.locator("[data-credit-weekly-next]").count(), 1, "admin should configure the weekly allowance start time");
-  assert.equal(await adminPage.locator(".credit-transaction-amount.incoming").count(), 1, "incoming credit should have positive styling");
-  assert.equal(await adminPage.locator(".credit-transaction-amount.outgoing").count(), 1, "outgoing credit should have negative styling");
-  assert.equal(await adminPage.locator('[data-action="open-credit-adjustment"]').isVisible(), true, "admin should see balance adjustment action");
-  await adminPage.locator('[data-action="open-credit-adjustment"]').click();
-  assert.equal(await adminPage.locator("#credit-adjust-amount").isVisible(), true, "admin balance adjustment modal should open");
-  assert.equal(await adminPage.locator("#credit-adjust-amount").getAttribute("max"), null, "credit balance adjustment must not have the old hard cap");
-  await adminPage.keyboard.press("Escape");
+  assert.equal(await adminPage.getByText("Kredi Yönetimi", { exact: true }).count(), 0, "finance management must stay outside the main portal");
   await adminPage.evaluate(() => { location.hash = "#/portal/presidency"; });
   await adminPage.waitForSelector(".hierarchy-list");
   await adminPage.locator('[data-action="edit-member"]').first().click();
@@ -668,35 +875,37 @@ try {
   await adminPage.keyboard.press("Escape");
   await adminPage.evaluate(() => { location.hash = "#/portal/investigations"; });
   await adminPage.waitForTimeout(150);
-  assert.equal(await adminPage.locator(".application-card").count(), 3, "technical admin should see all investigation records");
-  assert.equal(await adminPage.locator('[data-action="edit-investigation"]').count(), 3, "technical admin should be able to correct investigations");
-  assert.equal(await adminPage.locator('[data-action="delete-investigation"]').count(), 3, "technical admin should be able to permanently delete investigations");
+  assert.equal(new URL(adminPage.url()).hash, "#/portal/overview", "main portal must redirect hidden discipline routes");
   await adminPage.evaluate(() => { location.hash = "#/portal/complaints"; });
   await adminPage.waitForTimeout(150);
-  assert.equal(await adminPage.locator(".application-card").count(), 1, "technical admin should see all discipline complaints");
-  assert.equal(await adminPage.locator('[data-action="open-complaint-assignee"]').count(), 1, "technical admin should assign discipline complaints");
-  assert.equal(await adminPage.locator('[data-action="delete-complaint"]').count(), 1, "technical admin should permanently delete discipline complaints");
+  assert.equal(await adminPage.locator(".application-card").count(), 0, "main portal must show only the current account's complaints");
+  assert.equal(await adminPage.locator('[data-action="open-complaint-assignee"]').count(), 0, "complaint management must not appear in the main portal");
+  assert.equal(await adminPage.locator('[data-action="delete-complaint"]').count(), 0, "complaints must not be deletable");
+  const adminComplaintRequests = complaintRequestUrls.filter((entry) => entry.profileId === adminProfile.id);
+  assert.equal(adminComplaintRequests.length > 0, true, "main portal should request the current account's complaint list");
+  assert.equal(
+    adminComplaintRequests.every((entry) => entry.url.includes(`complainant_profile_id=eq.${adminProfile.id}`)),
+    true,
+    "main portal complaint requests must be owner-filtered"
+  );
+  await adminPage.evaluate(() => { location.hash = "#/portal/regulation"; });
+  await adminPage.waitForSelector(".regulation-pdf-panel");
+  assert.equal(await adminPage.locator(".regulation-pdf-viewer iframe").count(), 1, "published regulation PDF should open inside the regulation page");
+  assert.equal(await adminPage.locator('[data-action="open-regulation-pdf"]').count(), 1, "Admin should be able to replace a regulation PDF");
   await adminContext.close();
 
   const creditOfficerContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const creditOfficerPage = await creditOfficerContext.newPage();
   const creditOfficerProfile = { ...baseProfile, id: "credit-officer-panel", email: "credit.officer@example.test", roles: ["credit_officer", "member"], role: "credit_officer", theme_preference: "blue" };
-  await openPortal(creditOfficerPage, creditOfficerProfile, "credit-management");
-  assert.equal(await creditOfficerPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "credit officer should retain a personal account menu");
-  assert.equal(await creditOfficerPage.getByText("Kredi Yönetimi", { exact: true }).first().isVisible(), true, "credit officer should see separate management menu");
-  assert.equal(await creditOfficerPage.locator(".credit-settings-panel").count(), 0, "credit officer must not change Admin economy settings");
-  assert.equal(await creditOfficerPage.locator('[data-action="open-credit-adjustment"]').isVisible(), true, "credit officer should manage balances");
-  assert.equal(await creditOfficerPage.locator('[data-action="open-credit-adjustment"][data-id="credit-officer-own"]').count(), 0, "credit officer must not adjust their own account");
-  assert.equal(await creditOfficerPage.getByText("Kendi hesabın", { exact: true }).isVisible(), true, "own officer account should be visibly locked");
-  assert.equal(await creditOfficerPage.getByRole("button", { name: "Onayla" }).first().isVisible(), true, "credit officer should review credit applications");
-  assert.equal(await creditOfficerPage.locator('[data-action="open-credit-review"][data-id="loan-own"]').count(), 0, "credit officer must not review their own loan application");
-  assert.equal(await creditOfficerPage.locator(".credit-self-service-lock").isVisible(), true, "own loan application should be visibly locked");
+  await openPortal(creditOfficerPage, creditOfficerProfile, "overview");
+  assert.equal(await creditOfficerPage.getByText("Kredi Hesabım", { exact: true }).count(), 0, "personal finance must stay outside the main portal");
+  assert.equal(await creditOfficerPage.getByText("Kredi Yönetimi", { exact: true }).count(), 0, "finance management must stay outside the main portal");
   await creditOfficerContext.close();
 
   const ordinaryCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const ordinaryCreditPage = await ordinaryCreditContext.newPage();
   await openPortal(ordinaryCreditPage, baseProfile);
-  assert.equal(await ordinaryCreditPage.getByText("Kredi Hesabım", { exact: true }).first().isVisible(), true, "ordinary members must see credit navigation");
+  assert.equal(await ordinaryCreditPage.getByText("Kredi Hesabım", { exact: true }).count(), 0, "ordinary member finance must stay outside the main portal");
   assert.equal(await ordinaryCreditPage.getByText("Bilgilerim", { exact: true }).count(), 0, "identity should not use a separate navigation item");
   await ordinaryCreditPage.locator('[data-action="open-member-credential"]').click();
   assert.equal(await ordinaryCreditPage.locator(".member-standard-card").isVisible(), true, "ordinary member should open the standard digital identity");
@@ -772,52 +981,9 @@ try {
   const fundedCreditContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const fundedCreditPage = await fundedCreditContext.newPage();
   await openPortal(fundedCreditPage, { ...baseProfile, id: "funded-credit", email: "funded@example.test" }, "credit");
-  assert.equal(await fundedCreditPage.getByText("İHP Snake", { exact: true }).isVisible(), true, "pending game charge must appear in credit center");
-  await fundedCreditPage.locator('[data-action="approve-game-charge"]').click();
-  await fundedCreditPage.waitForSelector(".arcade-grid");
-  assert.equal(await fundedCreditPage.locator('[data-action="start-approved-snake"]').isVisible(), true, "approved credit charge must immediately activate the game");
-  await fundedCreditPage.evaluate(() => { location.hash = "#/portal/credit"; });
-  await fundedCreditPage.waitForSelector(".credit-balance-stage");
-  await fundedCreditPage.getByText("Kredi transferi", { exact: true }).click();
-  await fundedCreditPage.locator("[data-credit-recipient]").fill("IHP999888777");
-  await fundedCreditPage.locator("[data-credit-transfer-amount]").fill("100");
-  await fundedCreditPage.locator("[data-credit-transfer-description]").fill("Kurul etkinlik ödemesi");
-  assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Vergi\s+20 kredi/);
-  assert.match(await fundedCreditPage.locator("[data-credit-transfer-preview]").innerText(), /Toplam kesinti\s+120 kredi/);
-  assert.equal(await fundedCreditPage.locator('[data-action="credit-member-transfer"]').isEnabled(), true, "valid transfer with tax preview must be enabled");
-  await fundedCreditPage.locator('[data-credit-delivery][value="scheduled"]').check();
-  const scheduledTransferValue = await fundedCreditPage.evaluate(() => {
-    const date = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-    return local.toISOString().slice(0, 16);
-  });
-  await fundedCreditPage.locator("[data-credit-scheduled-for]").fill(scheduledTransferValue);
-  assert.equal(await fundedCreditPage.locator("[data-credit-schedule-field]").isVisible(), true, "scheduled transfer date field should appear");
-  assert.match(await fundedCreditPage.locator("[data-credit-delivery-note]").innerText(), /rezerve edilir/i);
-  await fundedCreditPage.locator('[data-action="credit-member-transfer"]').click();
-  await fundedCreditPage.waitForSelector(".credit-scheduled-panel");
-  assert.equal(await fundedCreditPage.locator(".credit-scheduled-panel").isVisible(), true, "scheduled transfer should appear in the transfer calendar");
-  assert.match(await fundedCreditPage.locator(".credit-scheduled-item").innerText(), /Kurul etkinlik ödemesi/);
-  await fundedCreditPage.locator('[data-action="credit-cancel-scheduled-transfer"]').click();
-  await fundedCreditPage.waitForFunction(() => document.querySelector(".credit-scheduled-item")?.textContent?.includes("İptal edildi"));
-  assert.match(await fundedCreditPage.locator(".credit-scheduled-item").innerText(), /İptal edildi/);
-  await fundedCreditPage.getByText("Çek işlemleri", { exact: true }).click();
-  await fundedCreditPage.locator("[data-credit-cheque-amount]").fill("100");
-  await fundedCreditPage.locator('[data-action="credit-member-issue-cheque"]').click();
-  await fundedCreditPage.waitForSelector('[data-action="download-credit-cheque"]');
-  assert.equal(await fundedCreditPage.locator('[data-action="download-credit-cheque"]').isVisible(), true, "created cheque should offer a PDF document");
-  const chequeDownload = fundedCreditPage.waitForEvent("download");
-  await fundedCreditPage.locator('[data-action="download-credit-cheque"]').click();
-  assert.match((await chequeDownload).suggestedFilename(), /^IHP-Kredi-Ceki-1234\.pdf$/);
-  await fundedCreditPage.keyboard.press("Escape");
-  await fundedCreditPage.locator('[data-action="open-credit-account-close"]').click();
-  const closeCreditButton = fundedCreditPage.locator('[data-action="confirm-credit-account-close"]');
-  assert.equal(await closeCreditButton.isDisabled(), true, "credit account closure must require explicit consent");
-  await fundedCreditPage.locator("[data-credit-close-consent]").check();
-  await fundedCreditPage.locator("[data-credit-close-text]").fill("KREDİ HESABIMI SİL");
-  assert.equal(await closeCreditButton.isEnabled(), true, "credit account closure must require the exact phrase");
-  await closeCreditButton.click();
-  await fundedCreditPage.waitForSelector(".credit-onboarding-layout");
+  await fundedCreditPage.waitForTimeout(150);
+  assert.equal(new URL(fundedCreditPage.url()).hash, "#/portal/overview", "main portal must redirect hidden finance routes");
+  assert.equal(await fundedCreditPage.getByText("İHP Finans", { exact: true }).count(), 0, "finance navigation must not remain in the main portal");
   await fundedCreditContext.close();
 
   const disciplineContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -830,54 +996,13 @@ try {
     role: "discipline_chair",
     theme_preference: "blue"
   };
-  await openPortal(disciplinePage, disciplineProfile, "discipline");
-  await disciplinePage.locator('[data-action="open-discipline"]').click();
-  assert.equal(await disciplinePage.locator('#discipline-member option[value="discipline-chair-target"]').count(), 1, "DK chair should be selectable for point penalties");
-  assert.equal(await disciplinePage.locator('#discipline-member option[value="aide-1"]').count(), 1, "presidential aide should be selectable for discipline action");
-  assert.equal(await disciplinePage.locator('#discipline-member option[value="departed-member"]').count(), 0, "departed members must not be discipline targets");
-  assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-open"]').count(), 1, "unused open investigation should be selectable");
-  assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-used"]').count(), 0, "investigation with a penalty must not be selectable again");
-  assert.equal(await disciplinePage.locator('#discipline-investigation option[value="investigation-closed"]').count(), 0, "closed investigation must not be selectable");
-  assert.equal(await disciplinePage.locator('[data-action="discipline-ai-analyze"]').isVisible(), true, "discipline form should offer AI penalty analysis");
-  await disciplinePage.locator("#discipline-member").selectOption("member-2");
-  await disciplinePage.locator("#discipline-investigation").selectOption("investigation-open");
-  await disciplinePage.locator("#discipline-reason").fill("Görev ihlali");
-  await disciplinePage.locator("#discipline-description").fill("Soruşturmadaki olay ve savunma birlikte değerlendirilmiştir.");
-  await disciplinePage.locator("#discipline-decree").fill("İlgili olay, savunma ve yönetmelik hükümleri değerlendirilerek karar verilmiştir.");
-  const initialDisciplineType = await disciplinePage.locator("#discipline-type").inputValue();
-  await disciplinePage.locator('[data-action="discipline-ai-analyze"]').click();
-  await disciplinePage.locator("[data-discipline-ai-result] strong").getByText("Kınama", { exact: true }).waitFor();
-  assert.match(await disciplinePage.locator("[data-discipline-ai-result]").innerText(), /-15 disiplin puanı/i);
-  assert.equal(await disciplinePage.locator("#discipline-type").inputValue(), initialDisciplineType, "AI recommendation must not change the selected penalty");
-  const suspensionField = disciplinePage.locator("[data-discipline-suspension]");
-  assert.equal(await suspensionField.isHidden(), true, "suspension duration should start hidden");
-  await disciplinePage.locator("#discipline-effect").selectOption("party_suspension");
-  assert.equal(await suspensionField.isVisible(), true, "suspension duration should appear for party suspension");
-  assert.equal(await disciplinePage.locator("#discipline-sanction-days").isEnabled(), true);
-  assert.equal(await disciplinePage.locator("#discipline-sanction-days").getAttribute("required"), "");
-  await disciplinePage.locator("#discipline-effect").selectOption("none");
-  assert.equal(await suspensionField.isHidden(), true, "suspension duration should hide for other sanctions");
-  assert.equal(await disciplinePage.locator("#discipline-sanction-days").isDisabled(), true);
-  await disciplinePage.locator("#discipline-member").selectOption("president-1");
-  await disciplinePage.locator("#discipline-effect").selectOption("points_only");
-  await disciplinePage.locator("#discipline-point-delta").fill("-10");
-  await disciplinePage.locator("#discipline-point-delta").dispatchEvent("input");
-  assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), "", "DK chair point penalty for president should still require investigation");
-  assert.equal(await disciplinePage.locator("#discipline-credit-fine").isVisible(), true, "discipline form should include credit fine debt amount");
-  await disciplinePage.locator("#discipline-credit-fine").fill("120");
-  await disciplinePage.locator("#discipline-credit-installments").selectOption("3");
-  await disciplinePage.locator("#discipline-effect").selectOption("remove_roles");
-  assert.equal(await disciplinePage.locator("#discipline-investigation").getAttribute("required"), "", "role sanction should still require investigation");
-  await disciplinePage.keyboard.press("Escape");
-  await disciplinePage.goto(`${baseUrl}/#/portal/investigations`);
-  await disciplinePage.waitForSelector(".app-shell");
-  await disciplinePage.locator('[data-action="open-investigation"]').click();
-  assert.equal(await disciplinePage.locator('#investigation-subject option[value="discipline-chair-target"]').count(), 1, "investigation can be opened for DK chair");
-  assert.equal(await disciplinePage.locator('#investigation-subject option[value="aide-1"]').count(), 1, "investigation can be opened for presidential aide");
-  assert.equal(await disciplinePage.locator('#investigation-subject option[value="departed-member"]').count(), 0, "departed members must not be investigation targets");
-  await disciplinePage.keyboard.press("Escape");
-  await disciplinePage.goto(`${baseUrl}/#/portal/complaints`);
-  await disciplinePage.waitForSelector(".app-shell");
+  await openPortal(disciplinePage, disciplineProfile, "overview");
+  assert.equal(await disciplinePage.getByText("Disiplin İşlemleri", { exact: true }).count(), 0, "main portal must not expose discipline operations");
+  await disciplinePage.evaluate(() => { location.hash = "#/portal/discipline"; });
+  await disciplinePage.waitForTimeout(150);
+  assert.equal(new URL(disciplinePage.url()).hash, "#/portal/overview", "hidden discipline pages must redirect before loading data");
+  await disciplinePage.evaluate(() => { location.hash = "#/portal/complaints"; });
+  await disciplinePage.waitForSelector('[data-action="open-complaint"]');
   await disciplinePage.locator('[data-action="open-complaint"]').click();
   assert.equal(await disciplinePage.locator('#complaint-accused option[value="departed-member"]').count(), 0, "departed members must not be complaint targets");
   await disciplineContext.close();

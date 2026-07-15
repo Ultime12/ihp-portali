@@ -2,6 +2,9 @@ export interface RuntimeConfig {
   configured: boolean;
   supabaseUrl: string;
   supabaseAnonKey: string;
+    pushConfigured?: boolean;
+    vapidPublicKey?: string;
+    passkeysEnabled?: boolean;
 }
 
 export interface AuthUser {

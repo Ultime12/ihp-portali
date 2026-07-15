@@ -3,6 +3,10 @@ import {
   getSession,
   isAuthenticationError,
   loadConfig,
+  serverRequest,
+  createSignedStorageUrl,
+  uploadStorageObject,
+  removeStorageObject,
   changePassword,
   signIn,
   signOut
@@ -12,6 +16,7 @@ import {
   createApplication,
   createComplaint,
   createDisciplineRecord,
+  downloadCaseAttachment,
   createRegulation,
   createYouthActivity,
   deleteRecord,
@@ -38,6 +43,8 @@ import {
   reviewComplaint,
   reviewApplication,
   deleteOwnAccount,
+  uploadCaseAttachments,
+  validateCaseAttachmentFiles,
   updateRecord,
   governanceAction,
   agreementAction
@@ -68,7 +75,7 @@ const ROLE_LABELS = {
 const ROLE_OPTIONS = Object.entries(ROLE_LABELS);
 
 const THEME_OPTIONS = [
-  ["blue", "Mavi"],
+  ["blue", "Aurora"],
   ["light", "Aydınlık"],
   ["green", "Yeşil"],
   ["pink", "Pembe"],
@@ -320,7 +327,7 @@ function sanctionEffectLabel(effect = "none") {
 }
 
 function canAwardPoints() {
-  return hasRole("super_admin", "president", "discipline_chair", "discipline_vice_chair", "discipline_member");
+  return hasRole("super_admin", "discipline_chair");
 }
 
 const LEADERSHIP_ORDER = [
@@ -509,6 +516,7 @@ function canEditRegulations() {
 
 function canReviewApplication(item) {
   if (!item) return false;
+  if (item.applicant_profile_id === state.profile?.id) return false;
   if (hasRole("super_admin")) return true;
   if (item.claimed_by && item.claimed_by !== state.profile?.id && !hasRole("discipline_chair")) return false;
   const committeeName = targetCommitteeName(item);
@@ -529,6 +537,7 @@ function canReviewApplication(item) {
 function canClaimApplication(item) {
   return Boolean(
     item &&
+      item.applicant_profile_id !== state.profile?.id &&
       !item.claimed_by &&
       targetCommitteeName(item) === "Disiplin Kurulu" &&
       hasRole("super_admin", "discipline_chair") &&
@@ -1590,14 +1599,29 @@ function appealStatusOf(item) {
   return item?.appeal_status || (item?.decision_status === "appealed" ? "submitted" : "none");
 }
 
+function isRewardDisciplineRecord(item) {
+  if (!item) return false;
+  return (
+    item.sanction_effect === "reward_points" ||
+    Number(item.point_delta || 0) > 0 ||
+    String(item.record_type || "").toLocaleLowerCase("tr-TR").includes("ödül")
+  );
+}
+
 function canAppealDiscipline(item) {
   if (!item || item.archived || item.member_id !== state.profile?.id) return false;
+  if (isRewardDisciplineRecord(item)) return false;
   if (item.decision_status !== "decided") return false;
   return appealStatusOf(item) === "none";
 }
 
 function canReviewDisciplineAppeal(item) {
-  return Boolean(item && appealStatusOf(item) === "submitted" && hasRole("super_admin", "discipline_chair"));
+  return Boolean(
+    item &&
+      !isRewardDisciplineRecord(item) &&
+      appealStatusOf(item) === "submitted" &&
+      hasRole("super_admin", "discipline_chair")
+  );
 }
 
 function disciplineRowActions(item) {
@@ -1626,17 +1650,13 @@ function disciplinePage() {
     : rows.filter((item) => item.member_id === state.profile?.id);
   return `
     ${pageHeader(
-      "Gizlilik odaklı kayıtlar",
-      permissions.disciplineView() ? "Disiplin kayıtları" : "Disiplin durumum",
-      "Kayıtlar yalnızca ilgili üye, yetkili Disiplin Kurulu personeli ve teknik Admin tarafından görülebilir.",
+      "Disiplin",
+      permissions.disciplineView() ? "Kararnameler ve Yaptırımlar" : "Disiplin Kayıtlarım",
+      "Kararname, yaptırım ve puan kayıtları.",
       permissions.disciplineManage() || canAwardPoints()
         ? `<div class="inline-actions">${permissions.disciplineManage() ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-discipline">${icon("plus")} Ceza Kararnamesi</button>` : ""}${canAwardPoints() ? `<button class="btn btn-secondary btn-sm" type="button" data-action="open-award-points">${icon("sparkles")} Puan Ver</button>` : ""}</div>`
         : ""
     )}
-    <div class="privacy-strip">
-      ${icon("shield")}
-      <span>Bu alan herkese açık değildir. Erişim Supabase RLS politikalarıyla veri katmanında sınırlandırılır.</span>
-    </div>
     <div class="table-shell glass">
       <table class="data-table">
         <thead><tr><th>Kayıt</th><th>İlgili üye</th><th>Tür</th><th>Ciddiyet</th><th>Karar durumu</th><th>Puan</th><th>İşlem</th></tr></thead>
@@ -1900,16 +1920,75 @@ function complaintTargetLabel(item) {
   return item.accused?.display_name || "Genel şikayet";
 }
 
+function formatAttachmentSize(value) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function caseAttachmentFiles(form) {
+  const input = form?.querySelector("[data-case-attachments]");
+  return Array.from(input?.files || []);
+}
+
+function validatedCaseAttachmentFiles(form) {
+  const input = form?.querySelector("[data-case-attachments]");
+  const files = caseAttachmentFiles(form);
+  validateCaseAttachmentFiles(
+    files,
+    Number(input?.dataset.existingAttachments || 0)
+  );
+  return files;
+}
+
+function caseAttachmentsMarkup(item) {
+  const attachments = Array.isArray(item?.attachments) ? item.attachments : [];
+  const modern = attachments.map((attachment) => `
+    <button
+      class="case-attachment"
+      type="button"
+      data-action="download-case-attachment"
+      data-id="${esc(attachment.id)}"
+    >
+      ${icon("download")}
+      <span><strong>${esc(attachment.file_name)}</strong><small>${esc(formatAttachmentSize(attachment.size_bytes))}</small></span>
+    </button>
+  `);
+  const legacy = item?.evidence_file
+    ? [`<a class="case-attachment" href="${esc(item.evidence_file)}" download="${esc(item.evidence_filename || "ihp-kanit")}">${icon("download")}<span><strong>${esc(item.evidence_filename || "Eski kanÄ±t dosyasÄ±")}</strong><small>ArÅŸiv eki</small></span></a>`]
+    : [];
+  const rows = [...modern, ...legacy];
+  return rows.length
+    ? `<div class="case-attachment-list">${rows.join("")}</div>`
+    : `<span class="cell-sub">Eklenmedi</span>`;
+}
+
+function findCaseAttachment(id) {
+  const collections = [
+    state.cache.complaints,
+    state.cache.investigations,
+    state.cache.discipline
+  ];
+  for (const rows of collections) {
+    for (const item of rows || []) {
+      const attachment = (item.attachments || []).find((entry) => entry.id === id);
+      if (attachment) return attachment;
+    }
+  }
+  return null;
+}
+
 function canHandleComplaint(item) {
   if (!item) return false;
-  if (hasRole("super_admin")) return true;
-  if (hasRole("discipline_chair")) return true;
-  if (item.assigned_to && item.assigned_to !== state.profile?.id) return false;
-  return hasRole("discipline_vice_chair", "discipline_member");
+  if (item.complainant_profile_id === state.profile?.id) return false;
+  if (item.assigned_to !== state.profile?.id) return false;
+  return hasRole("super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member");
 }
 
 function canClaimComplaint(item) {
   if (!item || ["resolved", "rejected", "closed"].includes(item.status)) return false;
+  if (item.complainant_profile_id === state.profile?.id) return false;
   if (hasRole("super_admin")) return item.assigned_to !== state.profile?.id;
   if (!hasRole("discipline_chair", "discipline_vice_chair", "discipline_member")) return false;
   if (!item.assigned_to) return true;
@@ -1927,12 +2006,8 @@ function complaintActions(item) {
     buttons.push(`<button class="table-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="resolved">Çözüldü</button>`);
     buttons.push(`<button class="table-action danger-action" type="button" data-action="open-complaint-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>`);
   }
-  if (hasRole("super_admin")) {
+  if (hasRole("super_admin") && !isOwn) {
     buttons.push(`<button class="table-action" type="button" data-action="open-complaint-assignee" data-id="${esc(item.id)}">Sorumluyu değiştir</button>`);
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-complaint" data-id="${esc(item.id)}">Kalıcı sil</button>`);
-  }
-  if (isOwn && item.status === "new") {
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-complaint" data-id="${esc(item.id)}">Sil</button>`);
   }
   return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
 }
@@ -1966,7 +2041,7 @@ function complaintsPage() {
                       <div class="meta-row"><span>İşleyen yetkili</span><strong>${esc(item.decider?.display_name || "Henüz işlem yok")}</strong></div>
                       <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
                       <div class="meta-row"><span>Kanıt notu</span><strong>${esc(item.evidence_note || "Eklenmedi")}</strong></div>
-                      <div class="meta-row"><span>Kanıt dosyası</span><strong>${item.evidence_file ? `<a href="${esc(item.evidence_file)}" download="${esc(item.evidence_filename || "ihp-kanit")}">Dosyayı aç</a>` : "Eklenmedi"}</strong></div>
+                      <div class="meta-row meta-row-stack"><span>Dosya ekleri</span>${caseAttachmentsMarkup(item)}</div>
                       <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
                     </div>
                     ${complaintActions(item)}
@@ -1997,9 +2072,8 @@ function openComplaint() {
         <div class="form-group"><label for="complaint-evidence-note">Kanıt notu (isteğe bağlı)</label><textarea class="field" id="complaint-evidence-note" name="evidenceNote" maxlength="1200" placeholder="Varsa kanıtı kısaca açıklayın."></textarea></div>
         <div class="form-group">
           <label for="complaint-evidence-file">Fotoğraf veya dosya (isteğe bağlı)</label>
-          <input class="field" id="complaint-evidence-file" type="file" data-evidence-upload data-evidence-target="complaint-evidence-data" data-evidence-name-target="complaint-evidence-name" />
-          <input id="complaint-evidence-data" name="evidenceFile" type="hidden" />
-          <input id="complaint-evidence-name" name="evidenceFilename" type="hidden" />
+          <input class="field" id="complaint-evidence-file" type="file" multiple data-case-attachments accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.doc,.docx,.txt,image/jpeg,image/png,image/webp,image/heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
+          <p class="security-note" data-case-attachment-status>En fazla 10 dosya; her biri en fazla 6 MB.</p>
         </div>
         <p class="security-note">Şikayet, disiplin kurulu tarafından incelenir. Sorumluluğu alan yetkili ve karar notu kayıt üzerinde görünür.</p>
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Şikayeti gönder</button></div>
@@ -2041,10 +2115,14 @@ function canAssignComplaintTo(member) {
 function openComplaintAssigneeEdit(item) {
   if (!item || !hasRole("super_admin")) return;
   const members = visibleProfiles(state.cache.complaintMembers || state.cache.members || [])
-    .filter((member) => canAssignComplaintTo(member) || member.id === item.assigned_to);
+    .filter(
+      (member) =>
+        member.id !== item.complainant_profile_id &&
+        (canAssignComplaintTo(member) || member.id === item.assigned_to)
+    );
   modal({
     title: "Sikayet sorumlusu",
-    subtitle: "Admin, sikayetin sorumlu yetkilisini aktif DK personeli arasindan degistirir.",
+    subtitle: "Sistem Yöneticisi, sorumlu yetkiliyi aktif DK personeli arasından değiştirir.",
     body: `
       <form class="form-stack" data-form="complaint-assignee" data-id="${esc(item.id)}">
         <div class="setup-box">
@@ -2059,7 +2137,7 @@ function openComplaintAssigneeEdit(item) {
           </select>
         </div>
         <div class="form-group">
-          <label for="complaint-assignee-note">Admin notu</label>
+          <label for="complaint-assignee-note">Sistem yönetimi notu</label>
           <textarea class="field" id="complaint-assignee-note" name="decisionNote" maxlength="800">${esc(item.decision_note || "")}</textarea>
         </div>
         <div class="modal-actions">
@@ -2077,7 +2155,7 @@ function openComplaintTargetEdit(item) {
     .filter((member) => member.id !== state.profile?.id && member.status !== "left");
   modal({
     title: "Sikayette ilgili uye",
-    subtitle: "Admin, sikayetin ilgili uye alanini sorumlulugu bozmadan duzenler.",
+    subtitle: "Sistem Yöneticisi, ilgili üye alanını sorumluluk kaydını bozmadan düzenler.",
     body: `
       <form class="form-stack" data-form="complaint-target" data-id="${esc(item.id)}">
         <div class="setup-box">
@@ -2092,7 +2170,7 @@ function openComplaintTargetEdit(item) {
           </select>
         </div>
         <div class="form-group">
-          <label for="complaint-target-note">Admin notu</label>
+          <label for="complaint-target-note">Sistem yönetimi notu</label>
           <textarea class="field" id="complaint-target-note" name="decisionNote" maxlength="800">${esc(item.decision_note || "")}</textarea>
         </div>
         <div class="modal-actions">
@@ -2160,7 +2238,8 @@ function investigationsPage() {
                       <div class="meta-row"><span>İlgili üye</span><strong>${esc(investigationSubjectLabel(item))}</strong></div>
                       <div class="meta-row"><span>Sorumlu</span><strong>${esc(item.assignee?.display_name || "Henüz alınmadı")}</strong></div>
                       <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
-                      <div class="meta-row"><span>Kanıt</span><strong>${item.evidence_file ? `<a href="${esc(item.evidence_file)}" download="${esc(item.evidence_filename || "ihp-sorusturma-kanit")}">Dosyayı aç</a>` : esc(item.evidence_note || "Eklenmedi")}</strong></div>
+                      <div class="meta-row"><span>Kanıt notu</span><strong>${esc(item.evidence_note || "Eklenmedi")}</strong></div>
+                      <div class="meta-row meta-row-stack"><span>Dosya ekleri</span>${caseAttachmentsMarkup(item)}</div>
                       <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
                     </div>
                     ${investigationActions(item)}
@@ -2179,7 +2258,7 @@ function openInvestigation() {
   const members = investigationTargetMembers();
   modal({
     title: "Soruşturma aç",
-    subtitle: "Soruşturma, ilgili üyeye görünür ve disiplin hiyerarşisine göre yönetilir.",
+    subtitle: "Dosya açıldıktan sonra bir Disiplin Kurulu personeli sorumluluğu alarak işlemi yürütür.",
     body: `
       <form class="form-stack" data-form="investigation">
         <div class="form-group"><label for="investigation-subject">İlgili üye</label><select class="field" id="investigation-subject" name="subjectProfileId" required><option value="">Seçin</option>${members.map((member) => `<option value="${esc(member.id)}">${esc(member.display_name)} · ${esc(roleLabels(member))}</option>`).join("")}</select></div>
@@ -2188,9 +2267,8 @@ function openInvestigation() {
         <div class="form-group"><label for="investigation-evidence-note">Kanıt notu (isteğe bağlı)</label><textarea class="field" id="investigation-evidence-note" name="evidenceNote" maxlength="1200"></textarea></div>
         <div class="form-group">
           <label for="investigation-evidence-file">Fotoğraf veya dosya (isteğe bağlı)</label>
-          <input class="field" id="investigation-evidence-file" type="file" data-evidence-upload data-evidence-target="investigation-evidence-data" data-evidence-name-target="investigation-evidence-name" />
-          <input id="investigation-evidence-data" name="evidenceFile" type="hidden" />
-          <input id="investigation-evidence-name" name="evidenceFilename" type="hidden" />
+          <input class="field" id="investigation-evidence-file" type="file" multiple data-case-attachments accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.doc,.docx,.txt,image/jpeg,image/png,image/webp,image/heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
+          <p class="security-note" data-case-attachment-status>En fazla 10 dosya; her biri en fazla 6 MB.</p>
         </div>
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Soruşturmayı aç</button></div>
       </form>
@@ -2234,9 +2312,8 @@ function openInvestigationEdit(item) {
         <div class="form-group"><label for="investigation-edit-evidence-note">Kanıt notu</label><textarea class="field" id="investigation-edit-evidence-note" name="evidenceNote" maxlength="1200">${esc(item.evidence_note || "")}</textarea></div>
         <div class="form-group">
           <label for="investigation-edit-evidence-file">Fotoğraf veya dosya</label>
-          <input class="field" id="investigation-edit-evidence-file" type="file" data-evidence-upload data-evidence-target="investigation-edit-evidence-data" data-evidence-name-target="investigation-edit-evidence-name" />
-          <input id="investigation-edit-evidence-data" name="evidenceFile" type="hidden" value="${esc(item.evidence_file || "")}" />
-          <input id="investigation-edit-evidence-name" name="evidenceFilename" type="hidden" value="${esc(item.evidence_filename || "")}" />
+          <input class="field" id="investigation-edit-evidence-file" type="file" multiple data-case-attachments data-existing-attachments="${esc((item.attachments || []).length + (item.evidence_file ? 1 : 0))}" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.doc,.docx,.txt,image/jpeg,image/png,image/webp,image/heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
+          <p class="security-note" data-case-attachment-status>Mevcut eklerle birlikte en fazla 10 dosya.</p>
         </div>
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Kaydet</button></div>
       </form>
@@ -2649,6 +2726,11 @@ async function handleRoute() {
       return;
     }
     const page = current.split("/")[1] || "overview";
+    const navItem = navItems.find(([id]) => id === page);
+    if (!navItem || !navItem[3]()) {
+      render();
+      return;
+    }
     await loadPage(page);
     return;
   }
@@ -2890,6 +2972,11 @@ function openDiscipline(item = null) {
           </select>
           <p class="security-note">Başkan, başkan yardımcısı ve admin için yetki alma işlemi uygulanmaz.</p>
         </div>
+        <div class="form-group">
+          <label for="discipline-attachments">FotoÄŸraf veya dosya ekleri (isteÄŸe baÄŸlÄ±)</label>
+          <input class="field" id="discipline-attachments" type="file" multiple data-case-attachments data-existing-attachments="${esc((item?.attachments || []).length)}" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.doc,.docx,.txt,image/jpeg,image/png,image/webp,image/heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
+          <p class="security-note" data-case-attachment-status>Mevcut eklerle birlikte en fazla 10 dosya; her biri en fazla 6 MB.</p>
+        </div>
         <input type="hidden" name="privacy_level" value="${esc(item?.privacy_level || "restricted")}" />
         <input type="hidden" name="decision_status" value="decided" />
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Kaydet</button></div>
@@ -2934,8 +3021,8 @@ function openDisciplineDetails(item) {
         <div class="meta-row"><span>Puan hareketi</span><strong>${pointDeltaBadge(pointDeltaValue(item))} ${esc(pointTrail(item))}</strong></div>
         <div class="meta-row"><span>Sistemde uygulanan işlem</span><strong>${esc(sanctionEffectLabel(item.sanction_effect))}</strong></div>
         <div class="meta-row"><span>Soruşturma</span><strong>${esc(item.investigation?.title || "Bağlı soruşturma yok")}</strong></div>
-        <div class="meta-row"><span>İtiraz</span><strong>${esc(statusLabel(appealStatusOf(item)))}</strong></div>
-        <div class="meta-row"><span>İtiraz tarihi</span><strong>${formatDate(item.appealed_at, true)}</strong></div>
+        <div class="meta-row"><span>İtiraz</span><strong>${isRewardDisciplineRecord(item) ? "Uygulanamaz" : esc(statusLabel(appealStatusOf(item)))}</strong></div>
+        ${isRewardDisciplineRecord(item) ? "" : `<div class="meta-row"><span>İtiraz tarihi</span><strong>${formatDate(item.appealed_at, true)}</strong></div>`}
         <div class="meta-row"><span>Kaydı yazan</span><strong>${esc(item.creator?.display_name || "Yetkili")}</strong></div>
         <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
       </div>
@@ -2944,6 +3031,7 @@ function openDisciplineDetails(item) {
       ${item.appeal_text ? `<div class="setup-box"><strong>İtiraz metni</strong><p class="security-note">${esc(item.appeal_text)}</p></div>` : ""}
       ${item.appeal_decision_note ? `<div class="setup-box"><strong>İtiraz kararı</strong><p class="security-note">${esc(item.appeal_decision_note)}</p></div>` : ""}
       ${item.notes ? `<div class="setup-box"><strong>Not</strong><p class="security-note">${esc(item.notes)}</p></div>` : ""}
+      <div class="setup-box"><strong>Dosya ekleri</strong>${caseAttachmentsMarkup(item)}</div>
     `,
     actions: `<div class="modal-actions"><button class="btn btn-primary btn-sm" type="button" data-action="close-modal">Tamam</button></div>`
   });
@@ -3230,6 +3318,7 @@ async function submitForm(event) {
     }
 
     if (form.dataset.form === "discipline") {
+      const attachments = validatedCaseAttachmentFiles(form);
       const { sanction_effect: sanctionEffect = "none", point_delta: rawPointDelta = "0", ...recordValues } = values;
       const pointDelta = Number(rawPointDelta || 0);
       if (!Number.isInteger(pointDelta) || pointDelta < -100 || pointDelta > 0) {
@@ -3260,9 +3349,12 @@ async function submitForm(event) {
         const rows = await createDisciplineRecord(payload);
         savedRecord = rows?.[0] || null;
       }
+      const disciplineRecordId = savedRecord?.id || form.dataset.id;
+      if (!disciplineRecordId) throw new Error("Disiplin kaydÄ± oluÅŸturuldu ancak dosya kimliÄŸi alÄ±namadÄ±.");
+      await uploadCaseAttachments("discipline", disciplineRecordId, attachments);
       if (shouldApply) {
         await applyDisciplineSanction({
-          disciplineRecordId: savedRecord?.id || form.dataset.id,
+          disciplineRecordId,
           memberId: payload.member_id,
           effect: effectiveSanction,
           pointDelta,
@@ -3345,18 +3437,20 @@ async function submitForm(event) {
     }
 
     if (form.dataset.form === "complaint") {
-      await createComplaint({
+      const attachments = validatedCaseAttachmentFiles(form);
+      const rows = await createComplaint({
         complainant_profile_id: state.profile.id,
         created_by: state.profile.id,
         accused_profile_id: values.accusedProfileId || null,
         subject: values.subject,
         description: values.description,
         evidence_note: values.evidenceNote || "",
-        evidence_file: values.evidenceFile || "",
-        evidence_filename: values.evidenceFilename || "",
         priority: values.priority || "normal",
         status: "new"
       });
+      const complaint = rows?.[0];
+      if (!complaint?.id) throw new Error("Åikayet kaydÄ± oluÅŸturuldu ancak dosya kimliÄŸi alÄ±namadÄ±.");
+      await uploadCaseAttachments("complaint", complaint.id, attachments);
       showToast("Şikayet kaydedildi.");
       closeModal();
       await loadPage("complaints");
@@ -3386,15 +3480,16 @@ async function submitForm(event) {
     }
 
     if (form.dataset.form === "investigation") {
-      await manageInvestigation({
+      const attachments = validatedCaseAttachmentFiles(form);
+      const result = await manageInvestigation({
         action: "create",
         subjectProfileId: values.subjectProfileId,
         title: values.title,
         description: values.description,
-        evidenceNote: values.evidenceNote || "",
-        evidenceFile: values.evidenceFile || "",
-        evidenceFilename: values.evidenceFilename || ""
+        evidenceNote: values.evidenceNote || ""
       });
+      if (!result?.investigation?.id) throw new Error("SoruÅŸturma aÃ§Ä±ldÄ± ancak dosya kimliÄŸi alÄ±namadÄ±.");
+      await uploadCaseAttachments("investigation", result.investigation.id, attachments);
       showToast("Soruşturma açıldı.");
       closeModal();
       await loadPage("investigations");
@@ -3412,15 +3507,15 @@ async function submitForm(event) {
     }
 
     if (form.dataset.form === "investigation-edit") {
+      const attachments = validatedCaseAttachmentFiles(form);
       await manageInvestigation({
         action: "update",
         id: form.dataset.id,
         title: values.title,
         description: values.description,
-        evidenceNote: values.evidenceNote || "",
-        evidenceFile: values.evidenceFile || "",
-        evidenceFilename: values.evidenceFilename || ""
+        evidenceNote: values.evidenceNote || ""
       });
+      await uploadCaseAttachments("investigation", form.dataset.id, attachments);
       showToast("Soruşturma düzenlendi.");
       closeModal();
       await loadPage("investigations");
@@ -3476,6 +3571,22 @@ async function handleClick(event) {
   if (!target) return;
 
   const action = target.dataset.action;
+  if (action === "download-case-attachment") {
+    const attachment = findCaseAttachment(target.dataset.id);
+    if (!attachment) {
+      showToast("Dosya eki bulunamadÄ±.", "error");
+      return;
+    }
+    target.disabled = true;
+    try {
+      await downloadCaseAttachment(attachment);
+    } catch (error) {
+      showToast(error.message, "error");
+    } finally {
+      target.disabled = false;
+    }
+    return;
+  }
   if (action === "nav-login") navigate("login");
   if (action === "toggle-sidebar") {
     state.sidebarOpen = !state.sidebarOpen;
@@ -3668,14 +3779,21 @@ async function handleClick(event) {
   if (action === "claim-complaint") {
     const item = (state.cache.complaints || []).find((row) => row.id === target.dataset.id);
     if (!canClaimComplaint(item)) return;
-    await reviewComplaint({
-      id: item.id,
-      status: "reviewing",
-      claim: true,
-      decisionNote: item.assigned_to ? "Şikayet sorumluluğu devralındı." : "Şikayet sorumluluğu alındı."
-    });
-    showToast(item.assigned_to ? "Şikayet sorumluluğu devralındı." : "Şikayet sorumluluğu alındı.");
-    await loadPage("complaints");
+    target.disabled = true;
+    try {
+      await reviewComplaint({
+        id: item.id,
+        status: "reviewing",
+        claim: true,
+        decisionNote: item.assigned_to ? "Şikayet sorumluluğu devralındı." : "Şikayet sorumluluğu alındı."
+      });
+      showToast(item.assigned_to ? "Şikayet sorumluluğu devralındı." : "Şikayet sorumluluğu alındı.");
+      await loadPage("complaints");
+    } catch (error) {
+      showToast(error?.message || "Şikayet sorumluluğu alınamadı.", "error");
+    } finally {
+      target.disabled = false;
+    }
   }
   if (action === "delete-complaint") {
     const id = target.dataset.id;
@@ -3689,13 +3807,20 @@ async function handleClick(event) {
   if (action === "claim-investigation") {
     const item = (state.cache.investigations || []).find((row) => row.id === target.dataset.id);
     if (!item) return;
-    await manageInvestigation({
-      action: "claim",
-      id: item.id,
-      decisionNote: item.assigned_to ? "Soruşturma sorumluluğu devralındı." : "Soruşturma sorumluluğu alındı."
-    });
-    showToast(item.assigned_to ? "Soruşturma sorumluluğu devralındı." : "Soruşturma sorumluluğu alındı.");
-    await loadPage("investigations");
+    target.disabled = true;
+    try {
+      await manageInvestigation({
+        action: "claim",
+        id: item.id,
+        decisionNote: item.assigned_to ? "Soruşturma sorumluluğu devralındı." : "Soruşturma sorumluluğu alındı."
+      });
+      showToast(item.assigned_to ? "Soruşturma sorumluluğu devralındı." : "Soruşturma sorumluluğu alındı.");
+      await loadPage("investigations");
+    } catch (error) {
+      showToast(error?.message || "Soruşturma sorumluluğu alınamadı.", "error");
+    } finally {
+      target.disabled = false;
+    }
   }
   if (action === "open-investigation-review") {
     const item = (state.cache.investigations || []).find((row) => row.id === target.dataset.id);
@@ -3849,6 +3974,25 @@ async function handleFilter(event) {
     try {
       await handleAvatarUpload(avatarInput);
     } catch (error) {
+      showToast(error.message, "error");
+    }
+    return;
+  }
+  const caseAttachmentInput = event.target.closest("[data-case-attachments]");
+  if (caseAttachmentInput) {
+    const files = Array.from(caseAttachmentInput.files || []);
+    const existingCount = Number(caseAttachmentInput.dataset.existingAttachments || 0);
+    const status = caseAttachmentInput.parentElement?.querySelector("[data-case-attachment-status]");
+    try {
+      validateCaseAttachmentFiles(files, existingCount);
+      if (status) {
+        status.textContent = files.length
+          ? `${files.length} dosya hazÄ±r. Form kaydedilince gÃ¼venli alana yÃ¼klenecek.`
+          : "En fazla 10 dosya; her biri en fazla 6 MB.";
+      }
+    } catch (error) {
+      caseAttachmentInput.value = "";
+      if (status) status.textContent = error.message;
       showToast(error.message, "error");
     }
     return;

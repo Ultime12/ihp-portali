@@ -2,7 +2,12 @@
 .env.*
 !.env.example
 dist/
+dist-dk/
+dist-finance/
+dist-mail/
 node_modules/
 .pnpm-store/
 .vercel/
+supabase/.temp/
 test-results/
+*-mobile-smoke.png

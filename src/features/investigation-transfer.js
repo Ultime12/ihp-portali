@@ -7,9 +7,13 @@ function ihpInvestigationAssigneeProfileV2(item) {
 
 function ihpInvestigationCanTakeV2(item) {
   if (!item || ["cancelled", "closed"].includes(item.status)) return false;
+  if (item.subject_profile_id === state.profile?.id) return false;
   if (hasRole("super_admin")) return item.assigned_to !== state.profile?.id;
   if (!item.assigned_to) return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
   if (item.assigned_to === state.profile?.id) return false;
+  if (item.status === "open" && item.assigned_to === item.opened_by) {
+    return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
+  }
   const assignee = ihpInvestigationAssigneeProfileV2(item);
   if (!assignee) return hasRole("discipline_chair");
   const actorRank = disciplineRank(state.profile);
@@ -105,8 +109,8 @@ investigationsPage = function patchedMainRegulationInvestigationsPage() {
   return `
     ${pageHeader(
       "Soruşturmalar",
-      "Bağımsız inceleme ve savunma hakkı",
-      "Soruşturma Disiplin Kurulu tarafından yürütülür. Hakkında işlem yapılan üye savunmasını bu alandan sunar.",
+      "Soruşturma Dosyaları",
+      "Açık, sonuçlanan ve savunma bekleyen dosyalar.",
       permissions.disciplineManage()
         ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-investigation">${icon("plus")} Soruşturma Aç</button>`
         : ""
@@ -136,7 +140,8 @@ investigationsPage = function patchedMainRegulationInvestigationsPage() {
                   ${item.defense_note ? `<div class="meta-row"><span>Savunma işlem notu</span><strong>${esc(item.defense_note)}</strong></div>` : ""}
                   ${item.recusal_note ? `<div class="meta-row"><span>Çekilme kaydı</span><strong>${esc(item.recusal_note)}</strong></div>` : ""}
                   <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
-                  <div class="meta-row"><span>Kanıt</span><strong>${item.evidence_file ? `<a href="${esc(item.evidence_file)}" download="${esc(item.evidence_filename || "ihp-sorusturma-kanit")}">Dosyayı aç</a>` : esc(item.evidence_note || "Eklenmedi")}</strong></div>
+                  <div class="meta-row"><span>Kanıt notu</span><strong>${esc(item.evidence_note || "Eklenmedi")}</strong></div>
+                  <div class="meta-row meta-row-stack"><span>Dosya ekleri</span>${caseAttachmentsMarkup(item)}</div>
                   <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
                 </div>
                 ${investigationActions(item)}

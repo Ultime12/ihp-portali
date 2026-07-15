@@ -111,7 +111,10 @@ export default async function handler(request, response) {
   }
 
   const actor = await authenticateActor(request);
-  if (!actor || !hasAny(actor.roles, COMPLAINT_MANAGERS)) {
+  if (!actor) {
+    return json(response, 401, { error: "Geçerli üye oturumu bulunamadı." });
+  }
+  if (!hasAny(actor.roles, COMPLAINT_MANAGERS)) {
     return json(response, 403, { error: "Sikayet islemek icin disiplin kurulu yetkisi gerekir." });
   }
 
@@ -138,11 +141,16 @@ export default async function handler(request, response) {
     return json(response, 404, { error: "Sikayet bulunamadi." });
   }
 
+  if (complaint.complainant_profile_id === actor.authUser.id) {
+    return json(response, 403, {
+      error: "Kendi yazdiginiz sikayetin sorumlulugunu alamaz veya bu kayit hakkinda islem yapamazsiniz."
+    });
+  }
+
   const assignedToOther = complaint.assigned_to && complaint.assigned_to !== actor.authUser.id;
   if (assignedToOther && !hasAny(actor.roles, OVERRIDE_MANAGERS)) {
     return json(response, 403, { error: "Bu sikayet baska bir yetkili tarafindan ustlenilmis." });
   }
-  const shouldAssignToActor = !targetEdit && (claim || !complaint.assigned_to || assignedToOther);
   const effectiveStatus = targetEdit && request.body?.status === undefined ? complaint.status : status;
 
   const patch = {
@@ -161,14 +169,29 @@ export default async function handler(request, response) {
       if (!targetResponse.ok || !isComplaintAssignee(nextAssigneeProfile)) {
         return json(response, 404, { error: "Sorumlu yalnizca aktif DK personeli olabilir." });
       }
+      if (requestedAssignedTo === complaint.complainant_profile_id) {
+        return json(response, 400, { error: "Sikayeti yazan kisi bu kayda sorumlu atanamaz." });
+      }
     }
     patch.assigned_to = requestedAssignedTo || null;
     patch.assigned_at = requestedAssignedTo ? new Date().toISOString() : null;
   }
 
-  if (shouldAssignToActor) {
+  if (claim) {
+    if (complaint.assigned_to === actor.authUser.id) {
+      return json(response, 409, { error: "Bu sikayetin sorumlulugu zaten sizdedir." });
+    }
     patch.assigned_to = actor.authUser.id;
     patch.assigned_at = new Date().toISOString();
+  }
+
+  if (!targetEdit && !claim) {
+    if (!complaint.assigned_to) {
+      return json(response, 409, { error: "Islem yapmadan once sikayetin sorumlulugu alinmalidir." });
+    }
+    if (complaint.assigned_to !== actor.authUser.id) {
+      return json(response, 403, { error: "Bu sikayette yalnizca kaydin sorumlusu islem yapabilir." });
+    }
   }
 
   if (!targetEdit && ["resolved", "rejected", "closed"].includes(effectiveStatus)) {
@@ -191,9 +214,9 @@ export default async function handler(request, response) {
     });
   }
 
-  const summary = assignedToOther && shouldAssignToActor
+  const summary = assignedToOther && claim
     ? "Sikayet sorumlulugu disiplin kurulu baskani tarafindan devralindi"
-    : claim || !complaint.assigned_to
+    : claim
       ? "Sikayet sorumlulugu alindi"
     : targetEdit
       ? "Sikayet sorumlusu admin tarafindan guncellendi"
@@ -227,7 +250,7 @@ export default async function handler(request, response) {
     );
   }
 
-  if (assignedToOther && shouldAssignToActor) {
+  if (assignedToOther && claim) {
     await notify(
       complaint.assigned_to,
       actor.authUser.id,

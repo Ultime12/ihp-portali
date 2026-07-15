@@ -3,6 +3,15 @@ import { emailProfile } from "../server/mail.js";
 const APPEAL_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const VALID_ACTIONS = new Set(["appeal", "accept", "reject"]);
 
+function isRewardRecord(record) {
+  const recordType = String(record?.record_type || "").toLocaleLowerCase("tr-TR");
+  return (
+    record?.sanction_effect === "reward_points" ||
+    Number(record?.point_delta || 0) > 0 ||
+    recordType.includes("ödül")
+  );
+}
+
 function json(response, status, body) {
   return response.status(status).json(body);
 }
@@ -138,6 +147,9 @@ export default async function handler(request, response) {
   if (action === "appeal") {
     if (record.member_id !== actor.authUser.id) {
       return json(response, 403, { error: "Yalnizca kendi disiplin kaydiniza itiraz edebilirsiniz." });
+    }
+    if (isRewardRecord(record)) {
+      return json(response, 400, { error: "Odul puani kayitlarina itiraz edilemez." });
     }
     if (record.archived || record.decision_status !== "decided" || appealStatus !== "none") {
       return json(response, 400, { error: "Bu kayit icin yeni itiraz acilamaz." });

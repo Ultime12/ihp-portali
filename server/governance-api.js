@@ -28,7 +28,6 @@ const ACTIONS = new Set([
   "vote_election",
   "finalize_election"
 ]);
-const CORE_EXECUTIVE_ROLES = new Set(["president", "vice_president", "presidential_aide"]);
 const MAX_VOTING_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
 function json(response, status, body) {
@@ -126,9 +125,7 @@ async function executiveMembers() {
     fetchRows("/rest/v1/executive_committee_members?select=profile_id")
   ]);
   const extraIds = new Set(extras.map((row) => row.profile_id));
-  return profiles.filter((profile) =>
-    rolesOf(profile).some((role) => CORE_EXECUTIVE_ROLES.has(role)) || extraIds.has(profile.id)
-  );
+  return profiles.filter((profile) => extraIds.has(profile.id));
 }
 
 function isExecutive(actor, members) {
@@ -447,8 +444,8 @@ export default async function handler(request, response) {
     const action = String(body.action || "list");
     if (!ACTIONS.has(action)) return json(response, 400, { error: "Yönetişim işlemi geçersiz." });
     const members = await executiveMembers();
-    const actorIsExecutive = isExecutive(actor, members);
     const actorIsAdmin = hasRole(actor.profile, "super_admin");
+    const actorIsExecutive = isExecutive(actor, members) || actorIsAdmin;
 
     if (action === "list") {
       return json(response, 200, await listData(actor, members));

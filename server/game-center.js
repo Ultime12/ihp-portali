@@ -53,6 +53,20 @@ async function callRpc(name, body) {
   return Array.isArray(payload) ? payload[0] : payload;
 }
 
+async function callRpcRows(name, body) {
+  const result = await supabaseRequest(`/rest/v1/rpc/${name}`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+  const payload = await result.json().catch(() => null);
+  if (!result.ok) {
+    const error = new Error(payload?.message || "Oyun islemi tamamlanamadi.");
+    error.status = result.status;
+    throw error;
+  }
+  return Array.isArray(payload) ? payload : payload ? [payload] : [];
+}
+
 async function gameSettings() {
   const result = await supabaseRequest("/rest/v1/game_settings?select=*&order=game_key.asc");
   const rows = await result.json().catch(() => []);
@@ -126,10 +140,17 @@ export default async function handler(request, response) {
     if (action === "request_credit") {
       const gameKey = String(request.body?.gameKey || "");
       if (!GAME_KEYS.has(gameKey)) return json(response, 400, { error: "Oyun seçimi geçersiz." });
-      const requestRow = await callRpc("request_game_credit_authorization", {
-        p_profile_id: member.profile.id,
-        p_game_key: gameKey
-      });
+      const quantity = gameKey === "scratch" ? integer(request.body?.quantity ?? 1, 1, 10) : 1;
+      if (quantity === null) return json(response, 400, { error: "Kart adedi 1 ile 10 arasında olmalıdır." });
+      const requestRow = gameKey === "scratch"
+        ? await callRpc("request_scratch_credit_authorization", {
+            p_profile_id: member.profile.id,
+            p_quantity: quantity
+          })
+        : await callRpc("request_game_credit_authorization", {
+            p_profile_id: member.profile.id,
+            p_game_key: gameKey
+          });
       return json(response, 200, { request: requestRow, ...(await statusFor(member)) });
     }
 
@@ -184,6 +205,25 @@ export default async function handler(request, response) {
         won: attempt.status === "won",
         rewardPoints: Number(attempt.reward_points || 0),
         ...(await statusFor(member))
+      });
+    }
+
+    if (action === "play_scratch_batch") {
+      if (request.body?.acceptedTerms !== true) return json(response, 400, { error: "Kredi onayı gerekir." });
+      const quantity = integer(request.body?.quantity, 1, 10);
+      if (quantity === null) return json(response, 400, { error: "Kart adedi 1 ile 10 arasında olmalıdır." });
+      const attempts = await callRpcRows("play_scratch_batch", {
+        p_profile_id: member.profile.id,
+        p_random_rolls: Array.from({ length: quantity }, () => randomInt(0, 10000)),
+        p_terms_accepted: true
+      });
+      const wins = attempts.filter((attempt) => attempt.status === "won");
+      const status = await statusFor(member);
+      return json(response, 200, {
+        ...status,
+        batchAttempts: attempts,
+        wonCount: wins.length,
+        rewardPoints: wins.reduce((sum, attempt) => sum + Number(attempt.reward_points || 0), 0)
       });
     }
 

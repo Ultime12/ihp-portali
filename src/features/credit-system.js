@@ -1,6 +1,13 @@
 const IHP_CREDIT_ADMIN_V1 = true;
 const CREDIT_PAGE_ID = "credit";
 const CREDIT_MANAGEMENT_PAGE_ID = "credit-management";
+const CREDIT_MARKET_DEFAULT_SYMBOL = "THYAO.IS";
+const CREDIT_MARKET_RANGE_OPTIONS = [
+  ["1d", "1 gün"],
+  ["1w", "1 hafta"],
+  ["1y", "1 yıl"]
+];
+let creditMarketRefreshTimer = null;
 
 function canAccessCreditSystem() {
   return !(typeof isEntryAccessAccount === "function" && isEntryAccessAccount());
@@ -14,7 +21,7 @@ if (!navItems.some(([id]) => id === CREDIT_PAGE_ID)) {
   const settingsIndex = navItems.findIndex(([id]) => id === "settings");
   navItems.splice(settingsIndex < 0 ? navItems.length : settingsIndex, 0, [
     CREDIT_PAGE_ID,
-    "Kredi Hesabım",
+    "Kredi İşlemleri",
     "wallet",
     canAccessCreditSystem
   ]);
@@ -83,6 +90,8 @@ function creditTransactionLabel(kind) {
     weekly_allowance: "Haftalık ödeme", cheque_issue: "Çek oluşturuldu", cheque_redeem: "Çek bozduruldu",
     loan_disbursement: "Kredi kullandırıldı", loan_repayment: "Kredi ödemesi",
     discipline_fine_repayment: "Disiplin para cezası ödemesi",
+    finance_deposit: "İHP Finans'a aktarım", finance_withdrawal: "İHP Finans'tan aktarım",
+    finance_portfolio_fee: "İHP Finans portföy kesintisi",
     balance_forfeit: "Kapatılan hesap bakiyesi", admin_adjustment: "Yetkili düzeltmesi",
     game_entry: "Oyun giriş bedeli", game_reward: "Oyun ödülü",
     assistant_message: "Dijital Asistan mesajı", assistant_weekly: "Dijital Asistan haftalık paket",
@@ -94,8 +103,8 @@ function creditTransactionDirection(item = {}) {
   if (item.kind === "admin_adjustment") {
     return item.metadata?.direction === "credit" ? "incoming" : "outgoing";
   }
-  if (["transfer_in", "transfer_refund", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward", "assistant_refund"].includes(item.kind)) return "incoming";
-  if (["transfer_out", "transfer_tax", "transfer_reserve", "cheque_issue", "loan_repayment", "discipline_fine_repayment", "balance_forfeit", "game_entry", "assistant_message", "assistant_weekly"].includes(item.kind)) return "outgoing";
+  if (["transfer_in", "transfer_refund", "weekly_allowance", "cheque_redeem", "loan_disbursement", "game_reward", "assistant_refund", "finance_withdrawal"].includes(item.kind)) return "incoming";
+  if (["transfer_out", "transfer_tax", "transfer_reserve", "cheque_issue", "loan_repayment", "discipline_fine_repayment", "balance_forfeit", "game_entry", "assistant_message", "assistant_weekly", "finance_deposit", "finance_portfolio_fee"].includes(item.kind)) return "outgoing";
   return "neutral";
 }
 
@@ -137,6 +146,175 @@ function creditLoanLabel(status) {
 
 function creditGameName(key) {
   return ({ flappy: "İHP Flappy", snake: "İHP Snake", scratch: "İHP Kazı Kazan" })[key] || "Oyun Alanı";
+}
+
+function creditMarketData() {
+  return state.cache.creditMarket || {
+    selectedSymbol: CREDIT_MARKET_DEFAULT_SYMBOL,
+    range: "1w",
+    instruments: [],
+    series: []
+  };
+}
+
+function creditMarketRangeLabel(range = creditMarketData().range || "1w") {
+  return CREDIT_MARKET_RANGE_OPTIONS.find(([value]) => value === range)?.[1] || "1 hafta";
+}
+
+function creditMarketNumber(value, digits = 2) {
+  return Number(value || 0).toLocaleString("tr-TR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  });
+}
+
+function creditMarketPrice(value) {
+  return `${creditMarketNumber(value)} İHP kredi`;
+}
+
+function creditMarketChart(data) {
+  const series = Array.isArray(data.series) ? data.series : [];
+  if (series.length < 2) {
+    return `<div class="credit-market-empty">${icon("chart")}<strong>Grafik hazırlanıyor</strong><span>Güncel veriler geldiğinde burada gösterilecek.</span></div>`;
+  }
+
+  const width = 760;
+  const height = 280;
+  const inset = { top: 24, right: 20, bottom: 34, left: 20 };
+  const values = series.map((point) => Number(point.value)).filter(Number.isFinite);
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const spread = Math.max(maximum - minimum, Math.abs(maximum) * 0.006, 1);
+  const chartWidth = width - inset.left - inset.right;
+  const chartHeight = height - inset.top - inset.bottom;
+  const points = series.map((point, index) => ({
+    x: inset.left + (index / Math.max(series.length - 1, 1)) * chartWidth,
+    y: inset.top + ((maximum - Number(point.value)) / spread) * chartHeight
+  }));
+  const line = points.map((point, index) => `${index ? "L" : "M"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+  const area = `${line} L ${points.at(-1).x.toFixed(2)} ${(height - inset.bottom).toFixed(2)} L ${points[0].x.toFixed(2)} ${(height - inset.bottom).toFixed(2)} Z`;
+  const firstTime = new Date(series[0].timestamp);
+  const lastTime = new Date(series.at(-1).timestamp);
+  const pointPayload = encodeURIComponent(JSON.stringify(series.map((point, index) => ({
+    timestamp: point.timestamp,
+    value: Number(point.value),
+    x: points[index].x,
+    y: points[index].y
+  }))));
+
+  return `
+    <div class="credit-market-chart-shell" data-finance-chart data-points="${esc(pointPayload)}" tabindex="0" aria-label="Grafikte bir noktaya dokunarak tarih ve fiyatı görüntüleyin">
+      <svg class="credit-market-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Seçili piyasa aracının son beş günlük fiyat grafiği">
+        <defs>
+          <linearGradient id="creditMarketArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="currentColor" stop-opacity=".34"></stop>
+            <stop offset="100%" stop-color="currentColor" stop-opacity=".015"></stop>
+          </linearGradient>
+        </defs>
+        <g class="credit-market-grid">
+          <line x1="20" y1="70" x2="740" y2="70"></line>
+          <line x1="20" y1="140" x2="740" y2="140"></line>
+          <line x1="20" y1="210" x2="740" y2="210"></line>
+        </g>
+        <path class="credit-market-area" d="${area}"></path>
+        <path class="credit-market-line" d="${line}"></path>
+        <circle class="credit-market-last-point" cx="${points.at(-1).x.toFixed(2)}" cy="${points.at(-1).y.toFixed(2)}" r="5"></circle>
+        <g class="credit-market-cursor" data-market-cursor hidden>
+          <line x1="20" y1="20" x2="20" y2="246"></line>
+          <circle cx="20" cy="20" r="7"></circle>
+        </g>
+      </svg>
+      <div class="credit-market-tooltip" data-market-tooltip hidden></div>
+      <div class="credit-market-axis"><span>${esc(firstTime.toLocaleDateString("tr-TR", { day: "2-digit", month: "short" }))}</span><span>${esc(lastTime.toLocaleDateString("tr-TR", { day: "2-digit", month: "short" }))}</span></div>
+    </div>
+  `;
+}
+
+function creditMarketPanel() {
+  const data = creditMarketData();
+  const instruments = Array.isArray(data.instruments) ? data.instruments : [];
+  const selectedSymbol = data.selectedSymbol || instruments[0]?.symbol || CREDIT_MARKET_DEFAULT_SYMBOL;
+  const selected = instruments.find((item) => item.symbol === selectedSymbol);
+  const change = Number(selected?.change || 0);
+  const changeClass = change > 0 ? "positive" : change < 0 ? "negative" : "neutral";
+  const updatedAt = selected?.updatedAt || data.updatedAt;
+
+  return `
+    <section class="panel glass credit-market-panel" aria-labelledby="credit-market-title">
+      <div class="credit-market-head">
+        <div>
+          <span class="panel-kicker">İHP Piyasa</span>
+          <h3 id="credit-market-title">Canlı piyasa görünümü</h3>
+          <p>Listelenen fiyatın her 1 birimi, bu ekranda 1 İHP kredi olarak gösterilir.</p>
+        </div>
+        <div class="credit-market-live">
+          <span><i></i>${data.error ? "Veri bekleniyor" : "Otomatik güncelleme"}</span>
+          <button class="btn btn-secondary btn-sm" type="button" data-action="credit-market-refresh">${icon("activity")} Yenile</button>
+        </div>
+      </div>
+      ${data.error ? `<div class="credit-market-warning">${icon("info")}<span>${esc(data.error)}</span></div>` : ""}
+      <div class="credit-market-layout">
+        <div class="credit-market-list" role="list" aria-label="Piyasa araçları">
+          ${instruments.length ? instruments.map((item) => {
+            const itemChange = Number(item.change || 0);
+            const itemClass = itemChange > 0 ? "positive" : itemChange < 0 ? "negative" : "neutral";
+            return `
+              <button class="credit-market-symbol ${item.symbol === selectedSymbol ? "active" : ""}" type="button" data-action="credit-market-symbol" data-symbol="${esc(item.symbol)}" role="listitem">
+                <span><strong>${esc(item.code)}</strong><small>${esc(item.name)}</small></span>
+                <span><b>${creditMarketNumber(item.price)}</b><em class="${itemClass}">${itemChange > 0 ? "+" : ""}${creditMarketNumber(item.changePercent)}%</em></span>
+              </button>
+            `;
+          }).join("") : `<div class="credit-market-loading"><span class="loading-spinner"></span><span>Piyasa verileri alınıyor.</span></div>`}
+        </div>
+        <article class="credit-market-chart-card">
+          <div class="credit-market-quote">
+            <div><span>${esc(selected?.name || "Piyasa verisi")}</span><strong>${selected ? creditMarketPrice(selected.price) : "—"}</strong></div>
+            <div class="credit-market-change ${changeClass}"><strong>${change > 0 ? "+" : ""}${creditMarketNumber(change)}</strong><span>${change > 0 ? "+" : ""}${creditMarketNumber(selected?.changePercent)}%</span></div>
+          </div>
+          ${creditMarketChart(data)}
+          <div class="credit-market-stats">
+            <div><span>5 günlük en yüksek</span><strong>${selected ? creditMarketPrice(selected.high) : "—"}</strong></div>
+            <div><span>5 günlük en düşük</span><strong>${selected ? creditMarketPrice(selected.low) : "—"}</strong></div>
+            <div><span>Son güncelleme</span><strong>${updatedAt ? formatDate(updatedAt, true) : "Bekleniyor"}</strong></div>
+          </div>
+        </article>
+      </div>
+      <footer class="credit-market-footer"><span>Kaynak: ${esc(data.source || "Piyasa veri servisi")}</span><span>Veriler bilgilendirme amaçlıdır; gerçek para veya alım satım işlemi içermez.</span></footer>
+    </section>
+  `;
+}
+
+async function loadCreditMarket(symbol = creditMarketData().selectedSymbol || CREDIT_MARKET_DEFAULT_SYMBOL, range = creditMarketData().range || "1w") {
+  try {
+    state.cache.creditMarket = await portalServerRequest("/api/manage-member", {
+      module: "market",
+      symbol,
+      range
+    });
+  } catch (error) {
+    state.cache.creditMarket = {
+      ...creditMarketData(),
+      selectedSymbol: symbol,
+      range,
+      error: error.message || "Piyasa verisine şu anda ulaşılamıyor."
+    };
+  }
+  return state.cache.creditMarket;
+}
+
+function scheduleCreditMarketRefresh() {
+  clearTimeout(creditMarketRefreshTimer);
+  if (state.page !== "finance") return;
+  const seconds = Math.max(30, Number(creditMarketData().refreshSeconds || 60));
+  creditMarketRefreshTimer = setTimeout(async () => {
+    if (typeof globalThis.__IHP_FINANCE_REFRESH__ === "function") {
+      await globalThis.__IHP_FINANCE_REFRESH__();
+    } else {
+      await loadCreditMarket();
+    }
+    if (state.page === "finance") render();
+    scheduleCreditMarketRefresh();
+  }, seconds * 1000);
 }
 
 function gameCreditRequestsPanel(data) {
@@ -291,7 +469,7 @@ function downloadCreditChequePdf(code, amount) {
     ["24 haneli cek kodu", grouped]
   ]);
   builder.section("Kullanim");
-  builder.paragraph("Talimat", "Bu kod Kredi Hesabim ekranindaki Ceki hesaba aktar alanina girildiginde tutar bir kez hesaba aktarilir. Kodu yalnizca teslim edeceginiz kisiyle paylasin.");
+  builder.paragraph("Talimat", "Bu kod Kredi Islemleri ekranindaki Ceki hesaba aktar alanina girildiginde tutar bir kez hesaba aktarilir. Kodu yalnizca teslim edeceginiz kisiyle paylasin.");
   downloadBlob(builder.finish(), `IHP-Kredi-Ceki-${String(code).slice(-4)}.pdf`);
   showToast("Çek PDF belgesi indirildi.", "success");
 }
@@ -463,6 +641,33 @@ handleClick = async function creditHandleClick(event) {
   if (action === "download-credit-cheque") {
     event.preventDefault();
     downloadCreditChequePdf(target.dataset.code || "", Number(target.dataset.amount || 0));
+    return;
+  }
+  if (action === "credit-market-zoom") {
+    event.preventDefault();
+    const current = Math.min(3.5, Math.max(1, Number(state.filters.marketZoom || 1)));
+    const next = target.dataset.direction === "out" ? current - 0.5 : current + 0.5;
+    state.filters.marketZoom = Math.min(3.5, Math.max(1, next));
+    render();
+    return;
+  }
+  if (action === "credit-market-symbol" || action === "credit-market-refresh") {
+    event.preventDefault();
+    target.disabled = true;
+    const symbol = action === "credit-market-symbol"
+      ? target.dataset.symbol
+      : creditMarketData().selectedSymbol;
+    await loadCreditMarket(symbol, creditMarketData().range || "1w");
+    render();
+    scheduleCreditMarketRefresh();
+    return;
+  }
+  if (action === "credit-market-range") {
+    event.preventDefault();
+    target.disabled = true;
+    await loadCreditMarket(creditMarketData().selectedSymbol, target.dataset.range || "1w");
+    render();
+    scheduleCreditMarketRefresh();
     return;
   }
   if (action === "credit-open-account") {

@@ -2,7 +2,10 @@ import { emailProfile, sendPortalEmail } from "../server/mail.js";
 import agreementHandler from "../server/agreement-api.js";
 import assistantHandler from "../server/assistant-api.js";
 import creditSystemHandler from "../server/credit-system.js";
+import financeSystemHandler from "../server/finance-system.js";
 import governanceHandler from "../server/governance-api.js";
+import mailboxHandler from "../server/mailbox-api.js";
+import marketDataHandler from "../server/market-data.js";
 
 const MANAGER_ROLES = new Set(["super_admin"]);
 const FULL_MANAGER_ROLES = new Set(["super_admin"]);
@@ -334,6 +337,9 @@ async function notify(profileId, actorId, title, body) {
 }
 
 export default async function handler(request, response) {
+  if (request.query?.route === "mailbox") {
+    return mailboxHandler(request, response);
+  }
   if (request.method === "POST" && request.body?.module === "assistant") {
     return assistantHandler(request, response);
   }
@@ -342,6 +348,12 @@ export default async function handler(request, response) {
   }
   if (request.method === "POST" && request.body?.module === "agreement") {
     return agreementHandler(request, response);
+  }
+  if (request.method === "POST" && request.body?.module === "market") {
+    return marketDataHandler(request, response);
+  }
+  if (request.method === "POST" && request.body?.module === "finance") {
+    return financeSystemHandler(request, response);
   }
   if (request.method === "GET" || (request.method === "POST" && request.body?.module === "credit")) {
     return creditSystemHandler(request, response);

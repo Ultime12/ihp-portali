@@ -220,6 +220,9 @@ export default async function handler(request, response) {
     `/rest/v1/applications?id=eq.${encodeURIComponent(id)}&select=*&limit=1`
   );
   if (!application) return json(response, 404, { error: "Basvuru bulunamadi." });
+  if (application.applicant_profile_id === actor.authUser.id) {
+    return json(response, 403, { error: "Kendi basvurunuz hakkinda inceleme veya karar islemi yapamazsiniz." });
+  }
 
   const committeeId = application.target_committee_id || application.suggested_committee_id;
   const committee = committeeId

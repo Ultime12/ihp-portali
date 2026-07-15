@@ -4,6 +4,20 @@
   "cleanUrls": true,
   "headers": [
     {
+      "source": "/service-worker.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=300, must-revalidate" }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
@@ -14,6 +28,14 @@
     }
   ],
   "rewrites": [
+    { "source": "/dk", "destination": "https://dk.ihp.org.tr/" },
+    { "source": "/dk/:path*", "destination": "https://dk.ihp.org.tr/:path*" },
+    { "source": "/finans", "destination": "https://ihp-finans.vercel.app/" },
+    { "source": "/finans/:path*", "destination": "https://ihp-finans.vercel.app/:path*" },
+    { "source": "/mail", "destination": "https://mail.ihp.org.tr/" },
+    { "source": "/mail/:path*", "destination": "https://mail.ihp.org.tr/:path*" },
+    { "source": "/api/mailbox", "destination": "/api/manage-member?route=mailbox" },
+    { "source": "/api/resend-webhook", "destination": "/api/client-error?route=resend-webhook" },
     { "source": "/auth/:path*", "destination": "/index.html" },
     { "source": "/portal/:path*", "destination": "/index.html" },
     { "source": "/giris", "destination": "/index.html" }

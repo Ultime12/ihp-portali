@@ -31,9 +31,12 @@ function paidGameAction(key, attempt, enabled) {
   if (request?.status === "pending") return `<button class="btn btn-primary btn-sm" type="button" data-page="credit">Kredi onayını tamamla</button>`;
   if (request?.status === "approved") {
     const action = key === "flappy" ? "start-approved-flappy" : key === "snake" ? "start-approved-snake" : "play-approved-scratch";
-    return `<button class="btn btn-primary btn-sm" type="button" data-action="${action}" ${enabled ? "" : "disabled"}>Oyunu başlat</button>`;
+    const quantity = key === "scratch"
+      ? Math.max(1, Math.min(10, Math.round(Number(request.credit_amount || 0) / Math.max(1, Number(gameCenterSetting("scratch").entry_cost || 1)))))
+      : 1;
+    return `<button class="btn btn-primary btn-sm" type="button" data-action="${action}" data-quantity="${quantity}" ${enabled ? "" : "disabled"}>${key === "scratch" ? `${quantity} kartı aç` : "Oyunu başlat"}</button>`;
   }
-  return `<button class="btn btn-primary btn-sm" type="button" data-action="request-game-credit" data-game-key="${key}" ${enabled ? "" : "disabled"}>Kredi onayı iste</button>`;
+  return `<button class="btn btn-primary btn-sm" type="button" data-action="${key === "scratch" ? "open-scratch-purchase" : "request-game-credit"}" data-game-key="${key}" ${enabled ? "" : "disabled"}>${key === "scratch" ? "Kart paketi seç" : "Kredi onayı iste"}</button>`;
 }
 
 function gameAttemptLabel(attempt) {
@@ -113,7 +116,7 @@ function gameCenterPage() {
       })}
       ${gameCenterCard({
         key: "scratch", title: "İHP Kazı Kazan", kicker: "Şans", iconName: "gift",
-        description: "İki günlük kartını kazı. Sonuç güvenli biçimde sunucuda belirlenir.",
+        description: "1-10 kartlık paketini seç; kartları tek tek kazı veya tamamını birlikte aç.",
         facts: [["Kart bedeli", `${scratch.entry_cost} kredi`], ["Ödül", `+${scratch.reward_points} kredi`], ["İhtimal", `%${(Number(scratch.win_probability_basis_points) / 100).toLocaleString("tr-TR")}`]],
         attempt: scratchAttempt,
         actions: paidGameAction("scratch", scratchAttempt, scratch.enabled)
@@ -133,6 +136,35 @@ function openGameTerms(kind) {
     body: `<div class="flappy-terms-box"><span class="flappy-terms-icon">${icon("shield")}</span><div><strong>Kredi kullanım onayı</strong><p>${settings.entry_cost} kredi hesabımdan kalıcı olarak düşülür. Oyunu kapatsam, bağlantım kesilse veya kazanamasam bile kredinin iade edilmeyeceğini anladım.</p></div></div><label class="flappy-consent"><input type="checkbox" data-game-consent="${kind}" /> <span>Metni okudum, anladım ve kabul ediyorum.</span></label>`,
     actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="button" data-action="confirm-${kind}" disabled>${settings.entry_cost} kredi kullan</button></div>`
   });
+}
+
+function openScratchPurchase() {
+  const settings = gameCenterSetting("scratch");
+  modal({
+    title: "Kazı Kazan kart paketi",
+    subtitle: "1 ile 10 arasında kart seçin.",
+    body: `
+      <div class="scratch-purchase-panel">
+        <div class="scratch-quantity-stepper">
+          <button type="button" data-action="scratch-quantity-down" aria-label="Kart azalt">-</button>
+          <label><span>Kart adedi</span><input class="field" data-scratch-quantity type="number" min="1" max="10" value="1" /></label>
+          <button type="button" data-action="scratch-quantity-up" aria-label="Kart artır">+</button>
+        </div>
+        <div class="scratch-purchase-total"><span>Toplam onay tutarı</span><strong data-scratch-total>${Number(settings.entry_cost || 0).toLocaleString("tr-TR")} kredi</strong><small>Kart başı ${Number(settings.entry_cost || 0).toLocaleString("tr-TR")} kredi</small></div>
+      </div>
+      <label class="flappy-consent"><input type="checkbox" data-scratch-purchase-consent /> <span>Kredi Sistemi'nde onayladığım toplam tutarın iade edilmeyeceğini, her kart sonucunun sunucuda belirlendiğini okudum ve kabul ediyorum.</span></label>
+    `,
+    actions: `<div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="button" data-action="confirm-scratch-purchase" disabled>Onaya gönder</button></div>`
+  });
+}
+
+function updateScratchPurchaseTotal() {
+  const input = modalRoot.querySelector("[data-scratch-quantity]");
+  if (!input) return;
+  const quantity = Math.max(1, Math.min(10, Number(input.value || 1)));
+  input.value = String(quantity);
+  const total = modalRoot.querySelector("[data-scratch-total]");
+  if (total) total.textContent = `${(quantity * Number(gameCenterSetting("scratch").entry_cost || 0)).toLocaleString("tr-TR")} kredi`;
 }
 
 function stopSnakeGame() {
@@ -276,6 +308,90 @@ function launchScratch(attempt) {
   activeScratchCard = { root, canvas, attempt };
 }
 
+function scratchBatchCard(attempt, index) {
+  const won = attempt.status === "won";
+  return `
+    <article class="scratch-batch-card ${won ? "won" : "lost"}" data-scratch-card="${index}">
+      <div class="scratch-batch-result"><span>${won ? "TEBRİKLER" : "BU KEZ OLMADI"}</span><strong>${won ? `+${Number(attempt.reward_points || 0)} KREDİ` : "YENİ ŞANS"}</strong><small>Kart ${index + 1}</small></div>
+      <canvas width="520" height="300" aria-label="${index + 1}. Kazı Kazan kartı"></canvas>
+    </article>
+  `;
+}
+
+function paintScratchCover(canvas, index) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, "#7960ea");
+  gradient.addColorStop(.52, "#5f8ff1");
+  gradient.addColorStop(1, "#3a6fda");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "rgba(255,255,255,.96)";
+  ctx.textAlign = "center";
+  ctx.font = "800 34px system-ui";
+  ctx.fillText("İHP KAZI KAZAN", canvas.width / 2, 132);
+  ctx.font = "650 17px system-ui";
+  ctx.fillText(`KART ${index + 1}`, canvas.width / 2, 168);
+  return ctx;
+}
+
+function revealScratchBatchCard(card) {
+  if (!card || card.classList.contains("revealed")) return;
+  card.classList.add("revealed");
+  card.querySelector("canvas")?.classList.add("revealed");
+}
+
+function bindScratchBatchCard(card, index) {
+  const canvas = card.querySelector("canvas");
+  if (!canvas) return;
+  const ctx = paintScratchCover(canvas, index);
+  let drawing = false;
+  let moves = 0;
+  const erase = (event) => {
+    if (!drawing || card.classList.contains("revealed")) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * canvas.width / rect.width;
+    const y = (event.clientY - rect.top) * canvas.height / rect.height;
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.beginPath();
+    ctx.arc(x, y, 38, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    moves += 1;
+    if (moves % 7 === 0) {
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let clear = 0;
+      for (let cursor = 3; cursor < pixels.length; cursor += 20) if (pixels[cursor] < 30) clear += 1;
+      if (clear / (pixels.length / 20) > .38) revealScratchBatchCard(card);
+    }
+  };
+  canvas.addEventListener("pointerdown", (event) => { drawing = true; canvas.setPointerCapture(event.pointerId); erase(event); });
+  canvas.addEventListener("pointermove", erase);
+  canvas.addEventListener("pointerup", () => { drawing = false; });
+  canvas.addEventListener("pointercancel", () => { drawing = false; });
+}
+
+function launchScratchBatch(attempts) {
+  const wonCount = attempts.filter((attempt) => attempt.status === "won").length;
+  const reward = attempts.reduce((sum, attempt) => sum + Number(attempt.reward_points || 0), 0);
+  modal({
+    title: "İHP Kazı Kazan",
+    subtitle: `${attempts.length} kart hazır. Sonuçlar sunucuda güvence altında.`,
+    body: `
+      <div class="scratch-batch-stage" data-scratch-batch>
+        <div class="scratch-batch-summary"><span>${attempts.length} kart</span><strong>${wonCount ? `${wonCount} kazanç, +${reward} kredi` : "Kartlarını aç"}</strong><button class="btn btn-primary btn-sm" type="button" data-action="reveal-all-scratch">Tümünü aç</button></div>
+        <div class="scratch-batch-grid">${attempts.map(scratchBatchCard).join("")}</div>
+        <button class="btn btn-secondary btn-sm scratch-batch-finish" type="button" data-action="finish-scratch">Tamamla</button>
+      </div>
+    `
+  });
+  modalRoot.querySelector(".modal")?.classList.add("scratch-modal", "scratch-batch-modal");
+  const root = modalRoot.querySelector("[data-scratch-batch]");
+  root?.querySelectorAll("[data-scratch-card]").forEach((card, index) => bindScratchBatchCard(card, index));
+  activeScratchCard = { root, attempts };
+}
+
 const gameCenterBaseCloseModal = closeModal;
 closeModal = function gameCenterCloseModal() {
   stopSnakeGame();
@@ -309,6 +425,26 @@ handleClick = async function gameCenterHandleClick(event) {
   const target = event.target.closest("[data-action], [data-snake-direction]");
   const action = target?.dataset.action;
   if (action === "start-snake-practice") { event.preventDefault(); launchSnake("practice"); return; }
+  if (action === "open-scratch-purchase") { event.preventDefault(); openScratchPurchase(); return; }
+  if (action === "scratch-quantity-down" || action === "scratch-quantity-up") {
+    event.preventDefault();
+    const input = modalRoot.querySelector("[data-scratch-quantity]");
+    if (input) input.value = String(Math.max(1, Math.min(10, Number(input.value || 1) + (action.endsWith("up") ? 1 : -1))));
+    updateScratchPurchaseTotal();
+    return;
+  }
+  if (action === "confirm-scratch-purchase") {
+    event.preventDefault();
+    const quantity = Math.max(1, Math.min(10, Number(modalRoot.querySelector("[data-scratch-quantity]")?.value || 1)));
+    target.disabled = true;
+    try {
+      state.cache.gameCenter = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "request_credit", gameKey: "scratch", quantity });
+      closeModal();
+      showToast(`${quantity} kart için kredi onayı oluşturuldu.`, "success");
+      navigate("portal/credit");
+    } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
   if (action === "request-game-credit") {
     event.preventDefault(); target.disabled = true;
     try {
@@ -330,14 +466,22 @@ handleClick = async function gameCenterHandleClick(event) {
   if (action === "play-approved-scratch") {
     event.preventDefault(); target.disabled = true;
     try {
-      const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "play_scratch", acceptedTerms: true });
+      const quantity = Math.max(1, Math.min(10, Number(target.dataset.quantity || 1)));
+      const response = await portalServerRequest("/api/flappy-session", { module: "game_center", action: "play_scratch_batch", quantity, acceptedTerms: true });
       state.cache.gameCenter = response;
-      launchScratch(response.attempt);
-      if (response.won) {
+      launchScratchBatch(response.batchAttempts || []);
+      if (Number(response.wonCount || 0) > 0) {
         state.cache.notifications = await loadNotifications().catch(() => state.cache.notifications || []);
         maybeCelebrateRewards();
       }
     } catch (error) { showToast(error.message, "error"); target.disabled = false; }
+    return;
+  }
+  if (action === "reveal-all-scratch") {
+    event.preventDefault();
+    activeScratchCard?.root?.querySelectorAll("[data-scratch-card]").forEach(revealScratchBatchCard);
+    target.disabled = true;
+    target.textContent = "Kartlar açıldı";
     return;
   }
   if (action === "restart-snake-practice") { event.preventDefault(); launchSnake("practice"); return; }
@@ -363,6 +507,15 @@ handleClick = async function gameCenterHandleClick(event) {
 
 const gameCenterBaseHandleFilter = handleFilter;
 handleFilter = async function gameCenterHandleFilter(event) {
+  if (event.target.matches("[data-scratch-quantity]")) {
+    updateScratchPurchaseTotal();
+    return;
+  }
+  if (event.target.matches("[data-scratch-purchase-consent]")) {
+    const button = modalRoot.querySelector('[data-action="confirm-scratch-purchase"]');
+    if (button) button.disabled = !event.target.checked;
+    return;
+  }
   const kind = event.target.dataset.gameConsent;
   if (kind) {
     const button = modalRoot.querySelector(`[data-action="confirm-${kind}"]`);

@@ -1,4 +1,11 @@
-import { getSession, restRequest, serverRequest } from "./supabase.js";
+import {
+  downloadStorageObject,
+  getSession,
+  removeStorageObject,
+  restRequest,
+  serverRequest,
+  uploadStorageObject
+} from "./supabase.js";
 
 const tablePath = (table: string, query = "") => `${table}${query ? `?${query}` : ""}`;
 
@@ -15,18 +22,27 @@ export async function getProfile() {
 }
 
 export async function loadDashboard() {
+  const mainPortalOwnData = Boolean(globalThis.__IHP_MAIN_PORTAL_OWN_DATA__);
+  const currentProfileId = getSession()?.user?.id || "";
+  const ownComplaintFilter = currentProfileId
+    ? `&complainant_profile_id=eq.${encodeURIComponent(currentProfileId)}`
+    : "&complainant_profile_id=is.null";
   const [profiles, announcements, disciplines, positions, committees, auditLogs, applications, youth, complaints, investigations] =
     await Promise.all([
       list("profiles", "select=id,status"),
       list("announcements", "select=*&order=created_at.desc&limit=6"),
-      list("discipline_records", "select=id,decision_status,created_at&archived=eq.false"),
+      mainPortalOwnData
+        ? Promise.resolve([])
+        : list("discipline_records", "select=id,decision_status,created_at&archived=eq.false"),
       list("positions", "select=*,committees!positions_committee_id_fkey(name),profiles!positions_assigned_profile_id_fkey(display_name)&order=authority_level.desc"),
       list("committees", "select=id,name,status&status=eq.active"),
       list("audit_logs", "select=*,actor:profiles!audit_logs_actor_id_fkey(display_name)&order=created_at.desc&limit=6"),
       list("applications", "select=id,status,created_at"),
       list("youth_activities", "select=id,status,created_at"),
-      list("complaints", "select=id,status,created_at"),
-      list("investigations", "select=id,status,created_at")
+      list("complaints", `select=id,status,created_at${mainPortalOwnData ? ownComplaintFilter : ""}`),
+      mainPortalOwnData
+        ? Promise.resolve([])
+        : list("investigations", "select=id,status,created_at")
     ]);
 
   return { profiles, announcements, disciplines, positions, committees, auditLogs, applications, youth, complaints, investigations };
@@ -45,7 +61,7 @@ export const loadAnnouncements = () =>
   list("announcements", "select=*&order=pinned.desc,created_at.desc");
 
 export const loadDisciplineRecords = () =>
-  list("discipline_records", "select=*,profiles!discipline_records_member_id_fkey(display_name),creator:profiles!discipline_records_created_by_fkey(display_name),investigation:investigations!discipline_records_investigation_id_fkey(id,title,status)&order=created_at.desc");
+  list("discipline_records", "select=*,profiles!discipline_records_member_id_fkey(display_name),creator:profiles!discipline_records_created_by_fkey(display_name),investigation:investigations!discipline_records_investigation_id_fkey(id,title,status),attachments:case_attachments!case_attachments_discipline_record_id_fkey(id,file_name,object_path,content_type,size_bytes,created_at)&order=created_at.desc");
 
 export const loadApplications = () =>
   list(
@@ -53,16 +69,21 @@ export const loadApplications = () =>
     "select=*,applicant:profiles!applications_applicant_profile_id_fkey(id,display_name,email,roles,role),target_committee:committees!applications_target_committee_id_fkey(id,name),committees!applications_suggested_committee_id_fkey(id,name),decider:profiles!applications_decided_by_fkey(display_name),claimer:profiles!applications_claimed_by_fkey(display_name)&order=created_at.desc"
   );
 
-export const loadComplaints = () =>
-  list(
+export const loadComplaints = () => {
+  const currentProfileId = getSession()?.user?.id || "";
+  const ownFilter = globalThis.__IHP_MAIN_PORTAL_OWN_DATA__
+    ? `complainant_profile_id=eq.${encodeURIComponent(currentProfileId)}&`
+    : "";
+  return list(
     "complaints",
-    "select=*,complainant:profiles!complaints_complainant_profile_id_fkey(id,display_name,email),accused:profiles!complaints_accused_profile_id_fkey(id,display_name,email),assignee:profiles!complaints_assigned_to_fkey(id,display_name),decider:profiles!complaints_decided_by_fkey(id,display_name)&order=created_at.desc"
+    `${ownFilter}select=*,complainant:profiles!complaints_complainant_profile_id_fkey(id,display_name,email),accused:profiles!complaints_accused_profile_id_fkey(id,display_name,email),assignee:profiles!complaints_assigned_to_fkey(id,display_name),decider:profiles!complaints_decided_by_fkey(id,display_name),attachments:case_attachments!case_attachments_complaint_id_fkey(id,file_name,object_path,content_type,size_bytes,created_at)&order=created_at.desc`
   );
+};
 
 export const loadInvestigations = () =>
   list(
     "investigations",
-    "select=*,subject:profiles!investigations_subject_profile_id_fkey(id,display_name,email,roles,role),opener:profiles!investigations_opened_by_fkey(id,display_name),assignee:profiles!investigations_assigned_to_fkey(id,display_name),decider:profiles!investigations_decided_by_fkey(id,display_name)&order=created_at.desc"
+    "select=*,subject:profiles!investigations_subject_profile_id_fkey(id,display_name,email,roles,role),opener:profiles!investigations_opened_by_fkey(id,display_name),assignee:profiles!investigations_assigned_to_fkey(id,display_name),decider:profiles!investigations_decided_by_fkey(id,display_name),attachments:case_attachments!case_attachments_investigation_id_fkey(id,file_name,object_path,content_type,size_bytes,created_at)&order=created_at.desc"
   );
 
 export const loadRegulations = () =>
@@ -112,6 +133,129 @@ export async function createComplaint(payload) {
     headers: { Prefer: "return=representation" },
     body: JSON.stringify(payload)
   });
+}
+
+const CASE_ATTACHMENT_BUCKET = "case-attachments";
+const CASE_ATTACHMENT_MAX_COUNT = 10;
+const CASE_ATTACHMENT_MAX_SIZE = 6 * 1024 * 1024;
+const CASE_ATTACHMENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain"
+]);
+const CASE_ATTACHMENT_EXTENSION_TYPES = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  txt: "text/plain"
+};
+const CASE_PARENT_COLUMNS = {
+  complaint: "complaint_id",
+  investigation: "investigation_id",
+  discipline: "discipline_record_id"
+};
+
+function safeObjectFileName(fileName: string) {
+  const normalized = fileName
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized.slice(0, 90) || "ek-dosya";
+}
+
+function caseAttachmentContentType(file: File) {
+  if (CASE_ATTACHMENT_TYPES.has(file.type)) return file.type;
+  const extension = String(file.name || "").split(".").pop()?.toLowerCase() || "";
+  return CASE_ATTACHMENT_EXTENSION_TYPES[extension] || file.type || "";
+}
+
+export function validateCaseAttachmentFiles(files: File[], existingCount = 0) {
+  if (existingCount + files.length > CASE_ATTACHMENT_MAX_COUNT) {
+    throw new Error(`Bir dosyaya en fazla ${CASE_ATTACHMENT_MAX_COUNT} ek yÃ¼klenebilir.`);
+  }
+  for (const file of files) {
+    if (!CASE_ATTACHMENT_TYPES.has(caseAttachmentContentType(file))) {
+      throw new Error(`${file.name}: Bu dosya tÃ¼rÃ¼ desteklenmiyor.`);
+    }
+    if (file.size < 1 || file.size > CASE_ATTACHMENT_MAX_SIZE) {
+      throw new Error(`${file.name}: Dosya 6 MB veya daha kÃ¼Ã§Ã¼k olmalÄ±.`);
+    }
+  }
+}
+
+export async function uploadCaseAttachments(
+  parentType: keyof typeof CASE_PARENT_COLUMNS,
+  parentId: string,
+  selectedFiles: File[]
+) {
+  const parentColumn = CASE_PARENT_COLUMNS[parentType];
+  const profileId = getSession()?.user?.id || "";
+  const files = Array.from(selectedFiles || []);
+  if (!parentColumn || !parentId || !profileId || !files.length) return [];
+
+  const existing = await list(
+    "case_attachments",
+    `${parentColumn}=eq.${encodeURIComponent(parentId)}&select=id`
+  );
+  validateCaseAttachmentFiles(files, existing.length);
+
+  const uploaded = [];
+  for (const file of files) {
+    const uniqueId = globalThis.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const objectPath = [
+      profileId,
+      parentType,
+      parentId,
+      `${uniqueId}-${safeObjectFileName(file.name)}`
+    ].join("/");
+    const contentType = caseAttachmentContentType(file);
+
+    await uploadStorageObject(CASE_ATTACHMENT_BUCKET, objectPath, file, contentType);
+    try {
+      const rows = await restRequest("case_attachments", {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          [parentColumn]: parentId,
+          uploaded_by: profileId,
+          file_name: file.name.slice(0, 180),
+          object_path: objectPath,
+          content_type: contentType,
+          size_bytes: file.size
+        })
+      });
+      uploaded.push(rows?.[0]);
+    } catch (error) {
+      await removeStorageObject(CASE_ATTACHMENT_BUCKET, objectPath).catch(() => undefined);
+      throw error;
+    }
+  }
+  return uploaded;
+}
+
+export async function downloadCaseAttachment(attachment) {
+  const blob = await downloadStorageObject(
+    CASE_ATTACHMENT_BUCKET,
+    String(attachment?.object_path || "")
+  );
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = String(attachment?.file_name || "ihp-ek-dosya");
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
 export async function createRegulation(payload) {

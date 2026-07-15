@@ -345,11 +345,20 @@ submitForm = async function ihpAssistantSubmitForm(event) {
   render();
   scrollIhpAssistantToBottom();
   try {
-    ui.data = await portalServerRequest("/api/manage-member", {
+    const response = await portalServerRequest("/api/manage-member", {
       module: "assistant",
       action: "message",
       message
     });
+    ui.data = response;
+    if (response.mailDraft && !response.mailSent && typeof openMailComposer === "function") {
+      const draft = response.mailDraft;
+      openMailComposer({
+        to: draft.to || "",
+        subject: draft.subject || "",
+        html: esc(draft.body || "").replace(/\n/g, "<br>")
+      });
+    }
     ui.error = "";
   } catch (error) {
     showToast(error.message, "error");
