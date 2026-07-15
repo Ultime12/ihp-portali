@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import handler from "../api/discipline-appeal.js";
+import handler from "../serverless-handlers/discipline-appeal.js";
 
 process.env.SUPABASE_URL = "https://mock.supabase.test";
 process.env.SUPABASE_ANON_KEY = "anon-test";

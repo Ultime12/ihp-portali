@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import handler from "../api/manage-investigation.js";
+import handler from "../serverless-handlers/manage-investigation.js";
 
 process.env.SUPABASE_URL = "https://mock.supabase.test";
 process.env.SUPABASE_ANON_KEY = "anon-test";

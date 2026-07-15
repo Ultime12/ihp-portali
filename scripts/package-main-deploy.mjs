@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareLargeDeployFiles } from "./deploy-package-utils.mjs";
@@ -12,66 +12,11 @@ await mkdir(join(packageDir, "api"), { recursive: true });
 await mkdir(join(packageDir, "serverless-handlers"), { recursive: true });
 await mkdir(join(packageDir, "src", "features"), { recursive: true });
 await cp(join(rootPath, "dist"), join(packageDir, "public"), { recursive: true });
+await cp(join(rootPath, "api"), join(packageDir, "api"), { recursive: true });
+await cp(join(rootPath, "serverless-handlers"), join(packageDir, "serverless-handlers"), { recursive: true });
 await cp(join(rootPath, "server"), join(packageDir, "server"), { recursive: true });
 await cp(join(rootPath, "src", "features", "flappy-engine.js"), join(packageDir, "src", "features", "flappy-engine.js"));
 await cp(join(rootPath, "src", "features", "snake-engine.js"), join(packageDir, "src", "features", "snake-engine.js"));
-
-const apiFiles = (await readdir(join(rootPath, "api"), { withFileTypes: true }))
-  .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
-  .map((entry) => entry.name)
-  .sort();
-
-for (const apiFile of apiFiles) {
-  await cp(
-    join(rootPath, "api", apiFile),
-    join(packageDir, "serverless-handlers", apiFile)
-  );
-}
-
-const handlerImports = apiFiles
-  .map((apiFile, index) => `import handler${index} from "../serverless-handlers/${apiFile}";`)
-  .join("\n");
-const handlerRoutes = apiFiles
-  .map((apiFile, index) => `  ${JSON.stringify(apiFile.replace(/\.js$/, ""))}: handler${index}`)
-  .join(",\n");
-
-await writeFile(
-  join(packageDir, "api", "[...routePath].js"),
-  `${handlerImports}
-
-const handlers = Object.freeze({
-${handlerRoutes}
-});
-
-function resolveRoute(request) {
-  const routeParam = request?.query?.routePath;
-  if (Array.isArray(routeParam)) return routeParam.join("/");
-  if (typeof routeParam === "string" && routeParam.trim()) return routeParam.trim();
-
-  try {
-    return new URL(request?.url || "/", "https://ihp.org.tr")
-      .pathname
-      .replace(/^\\/api\\/?/, "")
-      .replace(/\\/+$/, "");
-  } catch {
-    return "";
-  }
-}
-
-export default async function apiRouter(request, response) {
-  const route = resolveRoute(request);
-  const routeHandler = handlers[route];
-
-  if (!routeHandler) {
-    response.status(404).json({ error: "API endpoint not found." });
-    return;
-  }
-
-  return routeHandler(request, response);
-}
-`,
-  "utf8"
-);
 await prepareLargeDeployFiles(packageDir);
 
 await writeFile(

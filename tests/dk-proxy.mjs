@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import handler from "../api/dk-proxy.js";
+import handler from "../serverless-handlers/dk-proxy.js";
 
 const originalFetch = globalThis.fetch;
 const originalOrigin = process.env.IHP_CORE_API_ORIGIN;
