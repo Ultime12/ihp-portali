@@ -13,12 +13,22 @@ function isDkPortalActor(profile = state.profile) {
   return rolesOf(profile).some((role) => DK_ALLOWED_ROLES.has(role));
 }
 
+function isDkPortalMember(profile = state.profile) {
+  return Boolean(
+    profile &&
+    profile.status === "active" &&
+    isDkPortalActor(profile) &&
+    (!profile.is_system_account || rolesOf(profile).includes("super_admin"))
+  );
+}
+
 function dkLogoUrl() {
   return state.cache.settings?.dk_logo_url || DK_DEFAULT_LOGO;
 }
 
 function dkRoleLabel(profile = state.profile) {
   if (rolesOf(profile).includes("super_admin")) return "Sistem Yöneticisi";
+  if (!isDkPortalActor(profile)) return "Üye";
   return disciplineRankLabel(profile);
 }
 
@@ -57,15 +67,17 @@ navItems.splice(
   ["overview", "Operasyon Merkezi", "activity", () => isDkPortalActor()],
   ["discipline-council", "Kurul Hiyerarşisi", "shield", () => isDkPortalActor()],
   ["applications", "DK Başvuruları", "inbox", () => isDkPortalActor()],
-  ["complaints", "Gelen Şikayetler", "clipboard", () => isDkPortalActor()],
+  ["complaints", "Şikayetler", "clipboard", () => isDkPortalMember()],
   ["investigations", "Soruşturmalar", "search", () => isDkPortalActor()],
   ["discipline", "Kararlar ve Cezalar", "shield", () => isDkPortalActor()],
   ["discipline-operations", "Üye Raporları", "download", () => isDkPortalActor()],
-  ["settings", "Hesap ve Sistem", "settings", () => isDkPortalActor()]
+  ["settings", "Hesap ve Sistem", "settings", () => isDkPortalMember()]
 );
 
 brand = function dkBrand() {
-  const href = state.profile ? "#/portal/overview" : "#/home";
+  const href = state.profile
+    ? (isDkPortalActor() ? "#/portal/overview" : "#/portal/complaints")
+    : "#/home";
   return `
     <a class="brand dk-brand" href="${href}" aria-label="İHP Disiplin Kurulu ana sayfa">
       <span class="brand-mark dk-brand-mark"><img src="${esc(dkLogoUrl())}" alt="Disiplin Kurulu logosu" /></span>
@@ -75,6 +87,14 @@ brand = function dkBrand() {
       </span>
     </a>
   `;
+};
+
+const dkBaseNavigate = navigate;
+navigate = function dkNavigate(target) {
+  const nextTarget = target === "portal/overview" && state.profile && !isDkPortalActor()
+    ? "portal/complaints"
+    : target;
+  return dkBaseNavigate(nextTarget);
 };
 
 function dkNavButton(item, page) {
@@ -114,14 +134,14 @@ publicPage = function dkPublicPage() {
     <div class="dk-public">
       <header class="dk-public-header">
         ${brand()}
-        <button class="btn btn-primary btn-sm" type="button" data-action="nav-login">${icon("lock")} Yetkili Girişi</button>
+        <button class="btn btn-primary btn-sm" type="button" data-action="nav-login">${icon("lock")} Üye Girişi</button>
       </header>
       <main class="dk-public-main">
         <section class="dk-public-copy">
           <span class="dk-overline"><i></i> İHP</span>
           <h1>Disiplin<br /><span>Kurulu</span></h1>
           <div class="hero-actions">
-            <button class="btn btn-primary" type="button" data-action="nav-login">Yetkili Girişi ${icon("arrow")}</button>
+            <button class="btn btn-primary" type="button" data-action="nav-login">Üye Girişi ${icon("arrow")}</button>
             <a class="btn btn-secondary" href="https://ihp-portali.vercel.app">Üye Portalına Dön</a>
           </div>
         </section>
@@ -147,13 +167,13 @@ loginPage = function dkLoginPage() {
         ${brand()}
         <a class="back-link" href="#/home">${icon("back")} Tanıtıma dön</a>
         <div class="dk-login-seal"><img src="${esc(dkLogoUrl())}" alt="" /><span>İHP Disiplin Kurulu</span></div>
-        <span class="dk-overline"><i></i> Yetkili Girişi</span>
+        <span class="dk-overline"><i></i> Üye ve Yetkili Girişi</span>
         <h1>Disiplin<br /><span>Kurulu</span></h1>
       </section>
       <section class="dk-login-card glass">
         <div class="login-card-head">
           <span class="dk-login-number">DK</span>
-          <div><span>İHP Disiplin Kurulu</span><h2>Yetkili girişi</h2></div>
+          <div><span>İHP Disiplin Kurulu</span><h2>Üye girişi</h2></div>
         </div>
         <form class="form-stack" data-form="login">
           <div class="form-group"><label for="login-email">E-posta</label><input class="field" id="login-email" name="email" type="email" autocomplete="email" inputmode="email" required /></div>
@@ -270,6 +290,7 @@ applicationsPage = function dkApplicationsPage() {
                   <div class="meta-row"><span>Sorumlu</span><strong>${esc(item.claimer?.display_name || "Henüz alınmadı")}</strong></div>
                   <div class="meta-row"><span>İşleyen yetkili</span><strong>${esc(item.decider?.display_name || "Henüz işlem yok")}</strong></div>
                   <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
+                  <div class="meta-row"><span>Ön inceleme</span><strong>${esc(complaintPreliminaryOutcomeLabel(item.preliminary_outcome))}</strong></div>
                 </div>
                 ${applicationActions(item)}
               </article>
@@ -281,12 +302,18 @@ applicationsPage = function dkApplicationsPage() {
 };
 
 complaintsPage = function dkComplaintsPage() {
-  const rows = state.cache.complaints || [];
+  const isManager = isDkPortalActor();
+  const rows = (state.cache.complaints || []).filter(
+    (item) => isManager || item.complainant_profile_id === state.profile?.id
+  );
   return `
     ${pageHeader(
-      "Gelen Şikayetler",
-      "Şikayet Dosyaları",
-      "Kurula iletilen şikayet kayıtları."
+      isManager ? "Gelen Şikayetler" : "Şikayetlerim",
+      isManager ? "Şikayet Dosyaları" : "Resmî Disiplin Başvurusu",
+      isManager
+        ? "Kurula iletilen şikayet kayıtları."
+        : "Başvurular doğrulanmış kimlikle kaydedilir ve Disiplin Kurulu tarafından incelenir.",
+      isManager ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-complaint">${icon("plus")} Şikayet Yaz</button>`
     )}
     <div class="card-grid application-grid">
       ${
@@ -305,14 +332,21 @@ complaintsPage = function dkComplaintsPage() {
                   <div class="meta-row"><span>Sorumlu</span><strong>${esc(item.assignee?.display_name || "Henüz alınmadı")}</strong></div>
                   <div class="meta-row"><span>İşleyen yetkili</span><strong>${esc(item.decider?.display_name || "Henüz işlem yok")}</strong></div>
                   <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
+                  <div class="meta-row"><span>Olay tarihi</span><strong>${formatDate(item.event_date)}</strong></div>
+                  <div class="meta-row"><span>Öğrenme tarihi</span><strong>${formatDate(item.learned_at)}</strong></div>
+                  <div class="meta-row"><span>Talep</span><strong>${esc(item.requested_outcome || "Belirtilmedi")}</strong></div>
+                  ${item.late_filing_reason ? `<div class="meta-row"><span>Süre aşımı gerekçesi</span><strong>${esc(item.late_filing_reason)}</strong></div>` : ""}
                   <div class="meta-row"><span>Kanıt notu</span><strong>${esc(item.evidence_note || "Eklenmedi")}</strong></div>
                   <div class="meta-row meta-row-stack"><span>Dosya ekleri</span>${caseAttachmentsMarkup(item)}</div>
                   <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
                 </div>
-                ${complaintActions(item)}
+                ${isManager ? complaintActions(item) : ""}
               </article>
             `).join("")
-          : emptyCard("Gelen şikayet yok", "Üyelerin ana portaldan gönderdiği şikayetler burada listelenecek.")
+          : emptyCard(
+              isManager ? "Gelen şikayet yok" : "Henüz şikayetiniz yok",
+              isManager ? "Yeni resmî başvurular burada listelenecek." : "Yeni başvurunuzu bu ekrandan oluşturabilirsiniz."
+            )
       }
     </div>
   `;
@@ -431,7 +465,7 @@ function dkAccessDeniedPage() {
         <span class="dk-denied-mark">${icon("lock")}</span>
         <span class="dk-overline"><i></i> Erişim sınırlandırıldı</span>
         <h1>Bu hesap DK sistemine yetkili değil.</h1>
-        <p>Bu sistem yalnızca yetkili Disiplin Kurulu personeline açıktır.</p>
+        <p>Başvuru alanı yalnızca aktif ve doğrulanmış gerçek üye hesaplarına açıktır.</p>
         <div class="hero-actions"><a class="btn btn-primary" href="https://ihp-portali.vercel.app">Ana Portala Dön</a><button class="btn btn-secondary" type="button" data-action="logout">Oturumu Kapat</button></div>
       </section>
     </main>
@@ -442,7 +476,7 @@ const dkBaseRender = render;
 render = function dkRender() {
   document.documentElement.dataset.theme = "red";
   document.documentElement.dataset.portal = "discipline";
-  if (!state.booting && state.profile && route().startsWith("portal") && !isDkPortalActor()) {
+  if (!state.booting && state.profile && route().startsWith("portal") && !isDkPortalMember()) {
     app.innerHTML = dkAccessDeniedPage();
     return;
   }

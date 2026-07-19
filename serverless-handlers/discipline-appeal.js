@@ -1,16 +1,6 @@
 import { emailProfile } from "../server/mail.js";
 
-const APPEAL_MANAGERS = new Set(["super_admin", "discipline_chair"]);
-const VALID_ACTIONS = new Set(["appeal", "accept", "reject"]);
-
-function isRewardRecord(record) {
-  const recordType = String(record?.record_type || "").toLocaleLowerCase("tr-TR");
-  return (
-    record?.sanction_effect === "reward_points" ||
-    Number(record?.point_delta || 0) > 0 ||
-    recordType.includes("ödül")
-  );
-}
+const VALID_ACTIONS = new Set(["appeal", "accept", "reject", "remand"]);
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -33,7 +23,6 @@ async function supabaseRequest(path, options = {}) {
 async function authenticateActor(request) {
   const bearer = request.headers.authorization || "";
   if (!bearer.startsWith("Bearer ")) return null;
-
   const token = bearer.slice(7);
   const authResponse = await fetch(`${process.env.SUPABASE_URL}/auth/v1/user`, {
     headers: {
@@ -49,18 +38,29 @@ async function authenticateActor(request) {
   );
   const [profile] = await profileResponse.json().catch(() => []);
   if (!profile || profile.status !== "active") return null;
-  const roles = Array.isArray(profile.roles) && profile.roles.length ? profile.roles : [profile.role];
+  const roles = Array.isArray(profile.roles) && profile.roles.length ? [...profile.roles] : [];
+  if (profile.role && !roles.includes(profile.role)) roles.unshift(profile.role);
   return { authUser, profile, roles };
-}
-
-function hasAny(roles, allowed) {
-  return roles.some((role) => allowed.has(role));
 }
 
 async function fetchSingle(path) {
   const response = await supabaseRequest(path);
   const [row] = await response.json().catch(() => []);
   return response.ok ? row || null : null;
+}
+
+async function rpc(name, body) {
+  const response = await supabaseRequest(`/rest/v1/rpc/${name}`, {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(payload?.message || "İtiraz işlemi tamamlanamadı.");
+    error.status = response.status;
+    throw error;
+  }
+  return Array.isArray(payload) ? payload[0] : payload;
 }
 
 async function notify(profileId, actorId, title, body) {
@@ -74,31 +74,34 @@ async function notify(profileId, actorId, title, body) {
       title,
       body,
       category: "discipline",
-      link: "#/portal/discipline"
+      link: "https://dk.ihp.org.tr/#/portal/discipline"
     })
   }).catch(() => undefined);
   await emailProfile(supabaseRequest, profileId, {
-    subject: title,
+    from: "İHP Disiplin Kurulu <dk@ihp.org.tr>",
+    subject: `İHP Disiplin Kurulu: ${title}`,
     title,
     body,
-    actionUrl: "#/portal/discipline",
-    actionLabel: "Disiplin kaydini ac"
+    actionUrl: "https://dk.ihp.org.tr/#/portal/discipline",
+    actionLabel: "Disiplin kaydını aç",
+    senderLabel: "İHP Disiplin Kurulu",
+    force: true
   }).catch(() => undefined);
 }
 
-async function notifyAppealManagers(actorId, recordId, body) {
-  const response = await supabaseRequest(
-    "/rest/v1/profiles?status=eq.active&select=id,role,roles"
-  );
-  const rows = await response.json().catch(() => []);
-  if (!response.ok || !Array.isArray(rows)) return;
-  await Promise.all(
-    rows
+async function notifyAppealAuthority(actorId, record, body) {
+  const authorityRole = record.appeal_authority_role;
+  if (!authorityRole) return;
+  const response = await supabaseRequest("/rest/v1/profiles?status=eq.active&select=id,role,roles");
+  const profiles = await response.json().catch(() => []);
+  if (!response.ok || !Array.isArray(profiles)) return;
+  await Promise.allSettled(
+    profiles
       .filter((profile) => {
         const roles = Array.isArray(profile.roles) && profile.roles.length ? profile.roles : [profile.role];
-        return roles.some((role) => APPEAL_MANAGERS.has(role));
+        return roles.includes("super_admin") || roles.includes(authorityRole);
       })
-      .map((profile) => notify(profile.id, actorId, "Yeni disiplin itirazı", body || `Kayıt: ${recordId}`))
+      .map((profile) => notify(profile.id, actorId, "Yeni disiplin itirazı", body))
   );
 }
 
@@ -107,7 +110,7 @@ async function audit(actorId, recordId, summary, details = {}) {
     method: "POST",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({
-      action: "update",
+      action: "discipline_appeal_20260719",
       actor_id: actorId,
       target_type: "discipline_records",
       target_id: recordId,
@@ -116,110 +119,74 @@ async function audit(actorId, recordId, summary, details = {}) {
   }).catch(() => undefined);
 }
 
+function statusForError(error) {
+  const message = String(error?.message || "");
+  if (/yalnizca|yalnızca|yetki|makami|makamı/i.test(message)) return 403;
+  if (/bulunamadi|bulunamadı/i.test(message)) return 404;
+  return error?.status && error.status < 500 ? error.status : 400;
+}
+
 export default async function handler(request, response) {
   if (request.method !== "POST") {
-    return json(response, 405, { error: "Yalnizca POST istegi kabul edilir." });
+    return json(response, 405, { error: "Yalnızca POST isteği kabul edilir." });
   }
-
-  if (
-    !process.env.SUPABASE_URL ||
-    !process.env.SUPABASE_ANON_KEY ||
-    !process.env.SUPABASE_SERVICE_ROLE_KEY
-  ) {
-    return json(response, 500, { error: "Sunucu yapilandirmasi eksik." });
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return json(response, 500, { error: "Sunucu yapılandırması eksik." });
   }
 
   const actor = await authenticateActor(request);
-  if (!actor) return json(response, 401, { error: "Oturum bulunamadi." });
+  if (!actor) return json(response, 401, { error: "Geçerli üye oturumu bulunamadı." });
 
-  const { id, action, appealText = "", decisionNote = "" } = request.body || {};
+  const { id, action } = request.body || {};
   if (!id || !VALID_ACTIONS.has(action)) {
-    return json(response, 400, { error: "Itiraz bilgisi gecersiz." });
+    return json(response, 400, { error: "İtiraz bilgisi geçersiz." });
+  }
+  const text = String(action === "appeal" ? request.body?.appealText : request.body?.decisionNote || "").trim();
+  if (text.length < 10) {
+    return json(response, 400, { error: "İtiraz veya karar gerekçesi en az 10 karakter olmalıdır." });
   }
 
   const record = await fetchSingle(
-    `/rest/v1/discipline_records?id=eq.${encodeURIComponent(id)}&select=*&limit=1`
+    `/rest/v1/discipline_records?id=eq.${encodeURIComponent(id)}&select=id,member_id,record_type,reason,sanction_effect,point_delta,appeal_authority_role&limit=1`
   );
-  if (!record) return json(response, 404, { error: "Disiplin kaydi bulunamadi." });
+  if (!record) return json(response, 404, { error: "Disiplin kaydı bulunamadı." });
+  if (action === "appeal" && (record.sanction_effect === "reward_points" || Number(record.point_delta || 0) > 0)) {
+    return json(response, 400, { error: "Ödül puanı kayıtlarına itiraz edilemez." });
+  }
 
-  const appealStatus = record.appeal_status || (record.decision_status === "appealed" ? "submitted" : "none");
-
-  if (action === "appeal") {
-    if (record.member_id !== actor.authUser.id) {
-      return json(response, 403, { error: "Yalnizca kendi disiplin kaydiniza itiraz edebilirsiniz." });
-    }
-    if (isRewardRecord(record)) {
-      return json(response, 400, { error: "Odul puani kayitlarina itiraz edilemez." });
-    }
-    if (record.archived || record.decision_status !== "decided" || appealStatus !== "none") {
-      return json(response, 400, { error: "Bu kayit icin yeni itiraz acilamaz." });
-    }
-    const cleanAppeal = String(appealText || "").trim();
-    if (cleanAppeal.length < 10) {
-      return json(response, 400, { error: "Itiraz gerekcesi en az 10 karakter olmali." });
-    }
-
-    const updateResponse = await supabaseRequest(`/rest/v1/discipline_records?id=eq.${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({
-        appeal_text: cleanAppeal.slice(0, 1600),
-        appeal_status: "submitted",
-        appealed_at: new Date().toISOString(),
-        decision_status: "appealed"
-      })
+  try {
+    const result = await rpc("manage_20260719_discipline_appeal", {
+      p_actor_profile_id: actor.authUser.id,
+      p_record_id: id,
+      p_action: action,
+      p_text: text.slice(0, 4000)
     });
-    const updated = await updateResponse.json().catch(() => null);
-    if (!updateResponse.ok) {
-      return json(response, updateResponse.status, { error: updated?.message || "Itiraz kaydedilemedi." });
+
+    if (action === "appeal") {
+      await audit(actor.authUser.id, id, "Disiplin itirazı açıldı", {
+        appeal_authority_role: record.appeal_authority_role
+      });
+      await notifyAppealAuthority(actor.authUser.id, record, `${record.reason}\n\n${text.slice(0, 1200)}`);
+    } else {
+      const accepted = action === "accept" || action === "remand";
+      const title = accepted
+        ? action === "remand" ? "Disiplin itirazınız kabul edildi ve dosya yeniden açıldı" : "Disiplin itirazınız kabul edildi"
+        : "Disiplin itirazınız reddedildi";
+      await audit(actor.authUser.id, id, title, {
+        appeal_action: action,
+        refunded: result?.refunded || 0,
+        refund_outstanding: result?.refundOutstanding || 0
+      });
+      await notify(record.member_id, actor.authUser.id, title, text.slice(0, 2000));
     }
 
-    await audit(actor.authUser.id, id, "Disiplin itirazi acildi");
-    await notifyAppealManagers(actor.authUser.id, id, cleanAppeal.slice(0, 220));
-    return json(response, 200, { ok: true, record: updated?.[0] || null });
+    const updated = await fetchSingle(
+      `/rest/v1/discipline_records?id=eq.${encodeURIComponent(id)}&select=*&limit=1`
+    );
+    return json(response, 200, { ok: true, record: updated, result });
+  } catch (error) {
+    return json(response, statusForError(error), {
+      error: error.message || "İtiraz işlemi tamamlanamadı."
+    });
   }
-
-  if (!hasAny(actor.roles, APPEAL_MANAGERS)) {
-    return json(response, 403, { error: "İtiraz kararını Disiplin Kurulu Başkanı veya teknik Admin verebilir." });
-  }
-  if (appealStatus !== "submitted") {
-    return json(response, 400, { error: "Karara baglanacak acik itiraz yok." });
-  }
-  const cleanDecision = String(decisionNote || "").trim();
-  if (!cleanDecision) return json(response, 400, { error: "Itiraz karari icin not zorunludur." });
-
-  const accepted = action === "accept";
-  const patch = {
-    appeal_status: accepted ? "accepted" : "rejected",
-    appeal_decision_note: cleanDecision.slice(0, 900),
-    appeal_decided_by: actor.authUser.id,
-    appeal_decided_at: new Date().toISOString(),
-    decision_status: "closed",
-    archived: accepted,
-    notes: accepted
-      ? `${record.notes || ""}\nItiraz kabul edildi; ceza iptal edildi.`
-      : `${record.notes || ""}\nItiraz reddedildi; ayni cezaya tekrar itiraz acilamaz.`
-  };
-
-  const updateResponse = await supabaseRequest(`/rest/v1/discipline_records?id=eq.${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify(patch)
-  });
-  const updated = await updateResponse.json().catch(() => null);
-  if (!updateResponse.ok) {
-    return json(response, updateResponse.status, { error: updated?.message || "Itiraz karari kaydedilemedi." });
-  }
-
-  await audit(actor.authUser.id, id, accepted ? "Disiplin itirazi kabul edildi" : "Disiplin itirazi reddedildi", {
-    appeal_status: patch.appeal_status
-  });
-  await notify(
-    record.member_id,
-    actor.authUser.id,
-    accepted ? "Disiplin itirazınız kabul edildi" : "Disiplin itirazınız reddedildi",
-    cleanDecision
-  );
-
-  return json(response, 200, { ok: true, record: updated?.[0] || null });
 }

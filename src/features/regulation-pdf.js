@@ -12,11 +12,20 @@ function regulationPdfUrl(item) {
     : "";
 }
 
+function regulationStaticPdfUrl(path = "") {
+  return String(path).startsWith("static:") ? String(path).slice(7) : "";
+}
+
 async function refreshRegulationPdfUrls(rows = state.cache.regulation || []) {
   const next = { ...(state.cache.regulationPdfUrls || {}) };
   await Promise.all(rows.map(async (item) => {
     if (!item.pdf_path) {
       delete next[item.id];
+      return;
+    }
+    const staticUrl = regulationStaticPdfUrl(item.pdf_path);
+    if (staticUrl) {
+      next[item.id] = { path: item.pdf_path, url: staticUrl };
       return;
     }
     if (next[item.id]?.path === item.pdf_path && next[item.id]?.url) return;
@@ -136,7 +145,9 @@ handleClick = async function regulationPdfHandleClick(event) {
         pdf_uploaded_at: null,
         pdf_uploaded_by: null
       });
-      if (item.pdf_path) await removeStorageObject(REGULATION_DOCUMENT_BUCKET, item.pdf_path).catch(() => undefined);
+      if (item.pdf_path && !regulationStaticPdfUrl(item.pdf_path)) {
+        await removeStorageObject(REGULATION_DOCUMENT_BUCKET, item.pdf_path).catch(() => undefined);
+      }
       delete state.cache.regulationPdfUrls?.[item.id];
       closeModal();
       showToast("Yönetmelik PDF'i kaldırıldı.", "success");
@@ -195,7 +206,9 @@ submitForm = async function regulationPdfSubmitForm(event) {
       await removeStorageObject(REGULATION_DOCUMENT_BUCKET, objectPath).catch(() => undefined);
       throw error;
     }
-    if (item.pdf_path) await removeStorageObject(REGULATION_DOCUMENT_BUCKET, item.pdf_path).catch(() => undefined);
+    if (item.pdf_path && !regulationStaticPdfUrl(item.pdf_path)) {
+      await removeStorageObject(REGULATION_DOCUMENT_BUCKET, item.pdf_path).catch(() => undefined);
+    }
     delete state.cache.regulationPdfUrls?.[item.id];
     closeModal();
     showToast("Yönetmelik PDF'i yayınlandı.", "success");

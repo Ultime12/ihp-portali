@@ -50,7 +50,7 @@ const INITIALS_PATTERN = /^[\p{L}0-9]{1,4}$/u;
 const COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DISCIPLINE_POINT_MIN = 0;
-const DISCIPLINE_POINT_MAX = 200;
+const DISCIPLINE_POINT_MAX = 120;
 
 function json(response, status, body) {
   return response.status(status).json(body);

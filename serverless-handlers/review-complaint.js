@@ -3,6 +3,9 @@ import { emailProfile } from "../server/mail.js";
 const COMPLAINT_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const OVERRIDE_MANAGERS = new Set(["super_admin", "discipline_chair"]);
 const VALID_STATUSES = new Set(["new", "reviewing", "resolved", "rejected", "closed"]);
+const VALID_PRIORITIES = new Set(["normal", "important", "urgent"]);
+const VALID_PRELIMINARY_OUTCOMES = new Set(["investigation_opened", "evidence_requested", "rejected", "forwarded"]);
+const CURRENT_REGULATION_VERSION = "2026-07-19";
 
 function json(response, status, body) {
   return response.status(status).json(body);
@@ -37,16 +40,26 @@ async function authenticateActor(request) {
 
   const authUser = await authResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,role,roles,status,is_system_account&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
-  if (!profile || profile.status !== "active") return null;
+  if (!profile || profile.status !== "active" || profile.is_system_account) return null;
   const roles = Array.isArray(profile.roles) && profile.roles.length ? profile.roles : [profile.role];
   return { authUser, profile, roles };
 }
 
 function hasAny(roles, allowed) {
   return roles.some((role) => allowed.has(role));
+}
+
+function parseDateOnly(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isNaN(date.valueOf()) ? null : date;
+}
+
+function utcDateOnly(date = new Date()) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
 function rolesOf(profile) {
@@ -71,14 +84,14 @@ async function notify(profileId, actorId, title, body) {
       title,
       body,
       category: "complaint",
-      link: "#/portal/complaints"
+      link: "https://dk.ihp.org.tr/#/portal/complaints"
     })
   }).catch(() => undefined);
   await emailProfile(supabaseRequest, profileId, {
     subject: title,
     title,
     body,
-    actionUrl: "#/portal/complaints",
+    actionUrl: "https://dk.ihp.org.tr/#/portal/complaints",
     actionLabel: "Sikayetleri ac"
   }).catch(() => undefined);
 }
@@ -95,6 +108,80 @@ async function audit(actorId, complaintId, summary, details = {}) {
       details: { summary, ...details }
     })
   }).catch(() => undefined);
+}
+
+async function createComplaint(actor, body, response) {
+  const accusedProfileId = String(body.accusedProfileId || "");
+  const subject = String(body.subject || "").trim();
+  const description = String(body.description || "").trim();
+  const evidenceNote = String(body.evidenceNote || "").trim();
+  const requestedOutcome = String(body.requestedOutcome || "").trim();
+  const lateFilingReason = String(body.lateFilingReason || "").trim();
+  const priority = String(body.priority || "normal");
+  const eventDate = parseDateOnly(body.eventDate);
+  const learnedAt = parseDateOnly(body.learnedAt);
+  const today = utcDateOnly();
+  const earliestAllowed = new Date(today);
+  earliestAllowed.setUTCDate(earliestAllowed.getUTCDate() - 30);
+
+  if (!accusedProfileId || accusedProfileId === actor.authUser.id) {
+    return json(response, 400, { error: "Şikâyet edilen aktif üye seçilmelidir; kişi kendisini şikâyet edemez." });
+  }
+  if (subject.length < 3 || subject.length > 140 || description.length < 10 || description.length > 12000) {
+    return json(response, 400, { error: "Şikâyet başlığı veya olay açıklaması geçersiz." });
+  }
+  if (evidenceNote.length < 3 || evidenceNote.length > 1200 || requestedOutcome.length < 3 || requestedOutcome.length > 2000) {
+    return json(response, 400, { error: "Kanıt açıklaması ve başvuru talebi zorunludur." });
+  }
+  if (!VALID_PRIORITIES.has(priority) || !eventDate || !learnedAt) {
+    return json(response, 400, { error: "Şikâyet tarihi veya öncelik bilgisi geçersiz." });
+  }
+  if (eventDate > today || learnedAt > today || eventDate > learnedAt) {
+    return json(response, 400, { error: "Olay tarihi gelecekte olamaz ve öğrenme tarihinden sonra olamaz." });
+  }
+  if (learnedAt < earliestAllowed && (lateFilingReason.length < 10 || lateFilingReason.length > 2000)) {
+    return json(response, 400, { error: "30 günlük süre aşıldıysa doğrulanabilir haklı neden açıklanmalıdır." });
+  }
+
+  const targetResponse = await supabaseRequest(
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(accusedProfileId)}&select=id,status,is_system_account&limit=1`
+  );
+  const [target] = await targetResponse.json().catch(() => []);
+  if (!targetResponse.ok || !target || target.status !== "active" || target.is_system_account) {
+    return json(response, 404, { error: "Şikâyet edilen aktif üye bulunamadı." });
+  }
+
+  const insertResponse = await supabaseRequest("/rest/v1/complaints", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      complainant_profile_id: actor.authUser.id,
+      created_by: actor.authUser.id,
+      accused_profile_id: accusedProfileId,
+      subject,
+      description,
+      evidence_note: evidenceNote,
+      requested_outcome: requestedOutcome,
+      late_filing_reason: lateFilingReason || null,
+      event_date: String(body.eventDate),
+      learned_at: String(body.learnedAt),
+      priority,
+      status: "new",
+      regulation_version: CURRENT_REGULATION_VERSION,
+      source_channel: "dk_portal"
+    })
+  });
+  const inserted = await insertResponse.json().catch(() => null);
+  if (!insertResponse.ok) {
+    return json(response, insertResponse.status, { error: inserted?.message || "Şikâyet kaydedilemedi." });
+  }
+
+  const complaint = inserted?.[0] || null;
+  await audit(actor.authUser.id, complaint?.id || accusedProfileId, "Resmî DK portalı şikâyeti oluşturuldu", {
+    accused_profile_id: accusedProfileId,
+    regulation_version: CURRENT_REGULATION_VERSION
+  });
+  return json(response, 200, { ok: true, complaint });
 }
 
 export default async function handler(request, response) {
@@ -114,6 +201,12 @@ export default async function handler(request, response) {
   if (!actor) {
     return json(response, 401, { error: "Geçerli üye oturumu bulunamadı." });
   }
+  if (request.body?.action === "create") {
+    if (String(request.headers["x-ihp-portal"] || "").toLowerCase() !== "discipline") {
+      return json(response, 403, { error: "Resmî disiplin şikâyeti yalnızca dk.ihp.org.tr üzerinden oluşturulabilir." });
+    }
+    return createComplaint(actor, request.body || {}, response);
+  }
   if (!hasAny(actor.roles, COMPLAINT_MANAGERS)) {
     return json(response, 403, { error: "Sikayet islemek icin disiplin kurulu yetkisi gerekir." });
   }
@@ -126,8 +219,12 @@ export default async function handler(request, response) {
     targetEdit = false,
     assignedTo
   } = request.body || {};
+  const preliminaryOutcome = String(request.body?.preliminaryOutcome || "");
   if (!id || !VALID_STATUSES.has(status)) {
     return json(response, 400, { error: "Sikayet bilgisi gecersiz." });
+  }
+  if (preliminaryOutcome && !VALID_PRELIMINARY_OUTCOMES.has(preliminaryOutcome)) {
+    return json(response, 400, { error: "Ön inceleme kararı geçersiz." });
   }
   if (targetEdit && !actor.roles.includes("super_admin")) {
     return json(response, 403, { error: "Sikayet sorumlusunu yalnizca admin degistirebilir." });
@@ -141,9 +238,12 @@ export default async function handler(request, response) {
     return json(response, 404, { error: "Sikayet bulunamadi." });
   }
 
-  if (complaint.complainant_profile_id === actor.authUser.id) {
+  if (
+    complaint.complainant_profile_id === actor.authUser.id ||
+    complaint.accused_profile_id === actor.authUser.id
+  ) {
     return json(response, 403, {
-      error: "Kendi yazdiginiz sikayetin sorumlulugunu alamaz veya bu kayit hakkinda islem yapamazsiniz."
+      error: "Şikâyetin tarafı olan kişi bu kaydın sorumluluğunu alamaz veya kayıt hakkında işlem yapamaz."
     });
   }
 
@@ -151,12 +251,26 @@ export default async function handler(request, response) {
   if (assignedToOther && !hasAny(actor.roles, OVERRIDE_MANAGERS)) {
     return json(response, 403, { error: "Bu sikayet baska bir yetkili tarafindan ustlenilmis." });
   }
-  const effectiveStatus = targetEdit && request.body?.status === undefined ? complaint.status : status;
+  const outcomeStatus = {
+    investigation_opened: "reviewing",
+    evidence_requested: "reviewing",
+    rejected: "rejected",
+    forwarded: "closed"
+  }[preliminaryOutcome];
+  const effectiveStatus = outcomeStatus || (targetEdit && request.body?.status === undefined ? complaint.status : status);
 
   const patch = {
     status: effectiveStatus,
     decision_note: decisionNote || complaint.decision_note || null
   };
+  if (preliminaryOutcome) {
+    if (!String(decisionNote || "").trim()) {
+      return json(response, 400, { error: "Ön inceleme kararı için gerekçe veya istek metni zorunludur." });
+    }
+    patch.preliminary_outcome = preliminaryOutcome;
+    patch.preliminary_reviewed_at = new Date().toISOString();
+    patch.preliminary_reviewed_by = actor.authUser.id;
+  }
 
   let nextAssigneeProfile = null;
   const requestedAssignedTo = assignedTo === undefined ? undefined : String(assignedTo || "");
@@ -169,8 +283,8 @@ export default async function handler(request, response) {
       if (!targetResponse.ok || !isComplaintAssignee(nextAssigneeProfile)) {
         return json(response, 404, { error: "Sorumlu yalnizca aktif DK personeli olabilir." });
       }
-      if (requestedAssignedTo === complaint.complainant_profile_id) {
-        return json(response, 400, { error: "Sikayeti yazan kisi bu kayda sorumlu atanamaz." });
+      if ([complaint.complainant_profile_id, complaint.accused_profile_id].includes(requestedAssignedTo)) {
+        return json(response, 400, { error: "Şikâyetin tarafı olan kişi bu kayda sorumlu atanamaz." });
       }
     }
     patch.assigned_to = requestedAssignedTo || null;
@@ -220,7 +334,9 @@ export default async function handler(request, response) {
       ? "Sikayet sorumlulugu alindi"
     : targetEdit
       ? "Sikayet sorumlusu admin tarafindan guncellendi"
-      : `Sikayet durumu ${effectiveStatus} olarak guncellendi`;
+      : preliminaryOutcome
+        ? `Şikâyet ön incelemesi ${preliminaryOutcome} kararıyla tamamlandı`
+        : `Sikayet durumu ${effectiveStatus} olarak guncellendi`;
   await audit(actor.authUser.id, id, summary, {
     old_status: complaint.status,
     new_status: effectiveStatus,
@@ -262,7 +378,15 @@ export default async function handler(request, response) {
   await notify(
     complaint.complainant_profile_id,
     actor.authUser.id,
-    effectiveStatus === "reviewing" ? "Şikayetiniz incelemeye alındı" : "Şikayetiniz güncellendi",
+    preliminaryOutcome === "evidence_requested"
+      ? "Şikâyetiniz için ek bilgi istendi"
+      : preliminaryOutcome === "forwarded"
+        ? "Şikâyetiniz yetkili organa gönderildi"
+        : preliminaryOutcome === "rejected"
+          ? "Şikâyetiniz hakkında ön inceleme kararı verildi"
+          : effectiveStatus === "reviewing"
+            ? "Şikayetiniz incelemeye alındı"
+            : "Şikayetiniz güncellendi",
     decisionNote || "Şikayet kaydınız disiplin kurulu tarafından güncellendi."
   );
 

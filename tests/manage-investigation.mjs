@@ -93,7 +93,10 @@ const createResult = await invoke({
     action: "create",
     subjectProfileId: "president",
     title: "Dosya incelemesi",
-    description: "Üst görevdeki üye hakkında ayrıntılı olay incelemesi."
+    description: "Üst görevdeki üye hakkında ayrıntılı olay incelemesi.",
+    classification: "heavy",
+    allegedArticles: ["Madde 79"],
+    evidenceSummary: "Doğrulanmış sistem kayıtları"
   },
   profiles: {
     president: {
@@ -108,6 +111,12 @@ const createResult = await invoke({
 assert.equal(createResult.statusCode, 200);
 assert.equal(createResult.payload.investigation.assigned_to, null);
 assert.equal(createResult.payload.investigation.assigned_at, null);
+assert.equal(createResult.payload.investigation.regulation_version, "2026-07-19");
+assert.equal(createResult.payload.investigation.classification, "heavy");
+assert.deepEqual(createResult.payload.investigation.alleged_articles, ["Madde 79"]);
+assert.equal(createResult.payload.investigation.hearing_required, true);
+assert.ok(createResult.payload.investigation.due_at);
+assert.ok(createResult.payload.investigation.defense_due_at);
 assert.equal(
   createResult.requests.some((entry) => entry.target.endsWith("/rest/v1/notifications")),
   true,
@@ -120,7 +129,10 @@ const selfCreateResult = await invoke({
     action: "create",
     subjectProfileId: "investigator",
     title: "Kendi dosyası",
-    description: "Kişinin kendi hakkında açmaya çalıştığı soruşturma."
+    description: "Kişinin kendi hakkında açmaya çalıştığı soruşturma.",
+    classification: "light",
+    allegedArticles: ["Madde 75"],
+    evidenceSummary: "Başlangıç delili"
   }
 });
 assert.equal(selfCreateResult.statusCode, 400);
@@ -205,6 +217,6 @@ const subjectClaim = await invoke({
   }
 });
 assert.equal(subjectClaim.statusCode, 403);
-assert.match(subjectClaim.payload.error, /Kendi hakkinizdaki/);
+assert.match(subjectClaim.payload.error, /aynı dosyada kurul işlemi yapamaz/);
 
 console.log("Soruşturma hedef, sorumluluk ve çıkar çatışması kuralları doğrulandı.");

@@ -37,9 +37,9 @@ complaintsPage = function mainComplaintsPage() {
   return `
     ${pageHeader(
       "Şikayetlerim",
-      "Disiplin kuruluna güvenli bildirim",
-      "Şikayetinizi bu alandan iletebilirsiniz. İnceleme ve karar işlemleri bağımsız Disiplin Kurulu sisteminde yürütülür.",
-      isTechnicalSuperAdmin() ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-complaint">${icon("plus")} Şikayet Yaz</button>`
+      "Disiplin Kurulu başvurularım",
+      "Geçmiş başvurularınızı burada izleyebilir ve yeni şikâyetinizi doğrudan iletebilirsiniz.",
+      isTechnicalSuperAdmin() ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-complaint">${icon("plus")} Şikâyet Yaz</button>`
     )}
     <div class="card-grid application-grid">
       ${
@@ -56,6 +56,8 @@ complaintsPage = function mainComplaintsPage() {
                   <div class="meta-row"><span>Öncelik</span><strong>${esc(priorityLabel(item.priority || "normal"))}</strong></div>
                   <div class="meta-row"><span>Sorumlu</span><strong>${esc(item.assignee?.display_name || "Henüz alınmadı")}</strong></div>
                   <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
+                  <div class="meta-row"><span>Ön inceleme</span><strong>${esc(complaintPreliminaryOutcomeLabel(item.preliminary_outcome))}</strong></div>
+                  <div class="meta-row"><span>Talep</span><strong>${esc(item.requested_outcome || "Belirtilmedi")}</strong></div>
                   <div class="meta-row meta-row-stack"><span>Dosya ekleri</span>${caseAttachmentsMarkup(item)}</div>
                   <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
                 </div>

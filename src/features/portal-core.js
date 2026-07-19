@@ -655,6 +655,80 @@ function syncDisciplineSuspensionField(effectSelect = document.getElementById("d
   if (!visible) input.value = "";
 }
 
+function syncDisciplinePointTier() {
+  const tierSelect = document.getElementById("discipline-point-tier");
+  const pointInput = document.getElementById("discipline-point-delta");
+  const severityInput = document.getElementById("discipline-severity");
+  if (!tierSelect || !pointInput) return;
+  const tier = disciplineTier(tierSelect.value);
+  pointInput.value = String(disciplineTierDelta(tierSelect.value));
+  if (severityInput) severityInput.value = tier[3];
+}
+
+function disciplineFinancialLines(value = "") {
+  return String(value)
+    .split(/[\n,;]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function syncDisciplineFinancialFields() {
+  const tariffSelect = document.getElementById("discipline-tariff");
+  const compensationSelect = document.getElementById("discipline-compensation");
+  const recipientFields = document.querySelector("[data-discipline-recipient-fields]");
+  const recipientType = document.getElementById("discipline-recipient-type");
+  const recipientProfileField = document.querySelector("[data-discipline-recipient-profile]");
+  const recipientProfile = document.getElementById("discipline-recipient-profile");
+  const targetMemberId = document.getElementById("discipline-member")?.value || "";
+  const compensationEvidenceField = document.querySelector("[data-discipline-compensation-evidence]");
+  const compensationEvidence = document.getElementById("discipline-compensation-evidence");
+  const independentField = document.querySelector("[data-discipline-independent-outcomes]");
+  const independentInput = document.getElementById("discipline-independent-outcomes");
+  const summary = document.querySelector("[data-discipline-financial-summary]");
+  if (!tariffSelect || !compensationSelect || !recipientType) return;
+
+  const tariff = disciplineTariff(tariffSelect.value);
+  const compensation = disciplineCompensation(compensationSelect.value);
+  const hasFinancialDecision = Boolean(tariff || compensation);
+  const recipientMode = tariff?.[3] || (compensation ? "victim" : null);
+
+  recipientFields.hidden = !hasFinancialDecision;
+  if (recipientMode === "victim" || (!tariff && compensation)) recipientType.value = "victim";
+  if (recipientMode === "system") recipientType.value = "system";
+  recipientType.disabled = false;
+  recipientType.dataset.locked = recipientMode === "victim_or_system" ? "false" : "true";
+  recipientType.required = hasFinancialDecision;
+
+  const needsVictim = hasFinancialDecision && recipientType.value === "victim";
+  Array.from(recipientProfile.options).forEach((option) => {
+    if (!option.value) return;
+    option.disabled = option.value === targetMemberId;
+  });
+  if (recipientProfile.value === targetMemberId) recipientProfile.value = "";
+  recipientProfileField.hidden = !needsVictim;
+  recipientProfile.disabled = !needsVictim;
+  recipientProfile.required = needsVictim;
+
+  compensationEvidenceField.hidden = !compensation;
+  compensationEvidence.disabled = !compensation;
+  compensationEvidence.required = Boolean(compensation);
+  independentField.hidden = !compensation;
+  independentInput.disabled = !compensation;
+  independentInput.required = Boolean(compensation);
+  if (compensation && Number(independentInput.value || 1) < compensation[3]) {
+    independentInput.value = String(compensation[3]);
+  }
+
+  const base = tariff?.[2] || 0;
+  const compensationAmount = compensation?.[2] || 0;
+  const factors = disciplineFinancialLines(document.getElementById("discipline-aggravating-factors")?.value);
+  summary.hidden = !hasFinancialDecision;
+  if (hasFinancialDecision) {
+    summary.innerHTML = `<strong>Finansal karar özeti</strong><p class="security-note">Temel tarife: ${base.toLocaleString("tr-TR")} kredi · Tazminat: ${compensationAmount.toLocaleString("tr-TR")} kredi${factors.length >= 2 ? " · İki ağırlaştırıcı neden nedeniyle sunucu bir üst tarifeyi denetleyecek." : ""} Vergi ve kesin toplam karar sırasında kredi sistemi tarafından hesaplanır.</p>`;
+  }
+}
+
 function chairProtectedPointPenaltySelection() {
   return false;
 }
@@ -692,27 +766,10 @@ openDiscipline = function patchedOpenDiscipline(item = null) {
       </div>`
     );
   }
-  if (!document.getElementById("discipline-credit-fine")) {
-    document.getElementById("discipline-point-delta")?.closest(".form-grid")?.insertAdjacentHTML(
-      "afterend",
-      `<div class="form-grid" data-discipline-credit-fine-group>
-        <div class="form-group">
-          <label for="discipline-credit-fine">Kredi para cezasi</label>
-          <input class="field" id="discipline-credit-fine" name="credit_fine_amount" type="number" min="0" max="100000000" step="1" value="${esc(item?.credit_fine_amount ?? 0)}" />
-          <p class="security-note">Bu tutar bakiyeden hemen dusmez; kredi sisteminde borc olarak gorunur.</p>
-        </div>
-        <div class="form-group">
-          <label for="discipline-credit-installments">Taksit sayisi</label>
-          <select class="field" id="discipline-credit-installments" name="credit_fine_installments">
-            ${Array.from({ length: 12 }, (_, index) => index + 1).map((value) => `<option value="${value}" ${Number(item?.credit_fine_installments || 1) === value ? "selected" : ""}>${value} taksit</option>`).join("")}
-          </select>
-          <p class="security-note">Uye taksitleri kredi hesabindan oder.</p>
-        </div>
-      </div>`
-    );
-  }
   syncDisciplineSuspensionField(effect);
+  syncDisciplinePointTier();
   syncDisciplineInvestigationRequirement();
+  syncDisciplineFinancialFields();
 };
 
 const disciplineBaseHandleFilter = handleFilter;
@@ -725,6 +782,16 @@ handleFilter = async function patchedDisciplineHandleFilter(event) {
   }
   if (event.target.closest("#discipline-member, #discipline-point-delta")) {
     syncDisciplineInvestigationRequirement();
+    syncDisciplineFinancialFields();
+    return;
+  }
+  if (event.target.closest("#discipline-point-tier")) {
+    syncDisciplinePointTier();
+    syncDisciplineInvestigationRequirement();
+    return;
+  }
+  if (event.target.closest("#discipline-tariff, #discipline-compensation, #discipline-recipient-type, #discipline-aggravating-factors, #discipline-independent-outcomes")) {
+    syncDisciplineFinancialFields();
     return;
   }
   return disciplineBaseHandleFilter(event);
@@ -734,10 +801,19 @@ const baseOpenDisciplineDetails = openDisciplineDetails;
 openDisciplineDetails = function patchedOpenDisciplineDetails(item) {
   baseOpenDisciplineDetails(item);
   const detailList = modalRoot.querySelector(".detail-list");
-  if (item?.credit_fine_amount > 0) {
+  const financialTotal = Number(item?.financial_base_amount || item?.credit_fine_amount || 0)
+    + Number(item?.compensation_amount || 0)
+    + Number(item?.financial_tax_amount || 0);
+  if (financialTotal > 0) {
     detailList?.insertAdjacentHTML(
       "beforeend",
-      `<div class="meta-row"><span>Kredi para cezasi</span><strong>${esc(item.credit_fine_amount)} kredi · ${esc(item.credit_fine_installments || 1)} taksit</strong></div>`
+      `<div class="meta-row"><span>Kredi ceza tarifesi</span><strong>${esc(item.financial_tariff_code || "Yalnızca tazminat")}</strong></div>
+       <div class="meta-row"><span>Temel ceza</span><strong>${Number(item.financial_base_amount || item.credit_fine_amount || 0).toLocaleString("tr-TR")} kredi</strong></div>
+       <div class="meta-row"><span>Tazminat</span><strong>${Number(item.compensation_amount || 0).toLocaleString("tr-TR")} kredi${item.compensation_code ? ` · ${esc(item.compensation_code)}` : ""}</strong></div>
+       <div class="meta-row"><span>Vergi</span><strong>${Number(item.financial_tax_amount || 0).toLocaleString("tr-TR")} kredi</strong></div>
+       <div class="meta-row"><span>Toplam borç</span><strong>${financialTotal.toLocaleString("tr-TR")} kredi · ${esc(item.credit_fine_installments || 1)} taksit</strong></div>
+       <div class="meta-row"><span>Alıcı</span><strong>${item.financial_recipient_type === "victim" ? "Zarar gören üye" : "İHP kurumsal hesabı"}</strong></div>
+       <div class="meta-row"><span>İlk vade</span><strong>${formatDate(item.financial_due_at, true)}</strong></div>`
     );
   }
   if (!item?.sanction_days) return;
@@ -1198,94 +1274,6 @@ submitForm = async function patchedSubmitForm(event) {
       state.cache.executiveExtras = await loadExecutiveExtrasLocal();
       showToast("Üye yürütme kuruluna eklendi.");
       render();
-    } catch (error) {
-      showToast(error.message, "error");
-    } finally {
-      if (submit) submit.disabled = false;
-    }
-    return;
-  }
-
-  if (form.dataset.form === "discipline") {
-    event.preventDefault();
-    const values = formData(form);
-    const submit = form.querySelector('[type="submit"]');
-    if (submit) submit.disabled = true;
-    try {
-      const attachments = validatedCaseAttachmentFiles(form);
-      const {
-        sanction_effect: sanctionEffect = "none",
-        point_delta: rawPointDelta = "0",
-        sanction_days: rawSanctionDays = "",
-        credit_fine_amount: rawCreditFineAmount = "0",
-        credit_fine_installments: rawCreditFineInstallments = "1",
-        ...recordValues
-      } = values;
-      const pointDelta = Number(rawPointDelta || 0);
-      if (!Number.isInteger(pointDelta) || pointDelta < -100 || pointDelta > 0) {
-        throw new Error("Ceza puanı 0 ile -100 arasında olmalıdır.");
-      }
-      const creditFineAmount = Number(rawCreditFineAmount || 0);
-      const creditFineInstallments = Number(rawCreditFineInstallments || 1);
-      if (!Number.isInteger(creditFineAmount) || creditFineAmount < 0 || creditFineAmount > 100000000) {
-        throw new Error("Kredi para cezasi 0 ile 100000000 arasinda olmalidir.");
-      }
-      if (!Number.isInteger(creditFineInstallments) || creditFineInstallments < 1 || creditFineInstallments > 12 || (creditFineAmount > 0 && creditFineInstallments > creditFineAmount)) {
-        throw new Error("Para cezasi taksiti 1-12 arasinda ve tutardan buyuk olmayacak sekilde secilmelidir.");
-      }
-      const sanctionDays = rawSanctionDays ? Number(rawSanctionDays) : null;
-      const effectiveSanction = sanctionEffect === "none" && pointDelta !== 0 ? "points_only" : sanctionEffect;
-      if (effectiveSanction === "party_suspension" && (!Number.isInteger(sanctionDays) || sanctionDays < 1 || sanctionDays > 365)) {
-        throw new Error("Partiden uzaklaştırma için 1-365 gün arası süre girin.");
-      }
-      if (effectiveSanction === "reward_points" || pointDelta > 0) throw new Error("Ödül puanı ayrı Puan Ver ekranından verilir.");
-      if (!recordValues.decree_text) throw new Error("Kararname metni zorunludur.");
-      const allowWithoutInvestigation = false;
-      if (!recordValues.investigation_id && !allowWithoutInvestigation) throw new Error("Ceza girmek için önce soruşturma seçilmelidir.");
-
-      const shouldApply = effectiveSanction !== "none" || pointDelta !== 0 || creditFineAmount > 0;
-      const payload = {
-        ...recordValues,
-        investigation_id: recordValues.investigation_id || null,
-        decision_status: "decided",
-        point_delta: pointDelta,
-        sanction_effect: effectiveSanction,
-        sanction_days: effectiveSanction === "party_suspension" ? sanctionDays : null,
-        credit_fine_amount: creditFineAmount,
-        credit_fine_installments: creditFineInstallments,
-        action_taken: recordValues.decree_text,
-        created_by: state.profile.id
-      };
-      let savedRecord = null;
-      if (form.dataset.id) {
-        const rows = await updateRecord("discipline_records", form.dataset.id, payload);
-        savedRecord = rows?.[0] || { id: form.dataset.id };
-      } else {
-        const rows = await createDisciplineRecord(payload);
-        savedRecord = rows?.[0] || null;
-      }
-      const disciplineRecordId = savedRecord?.id || form.dataset.id;
-      if (!disciplineRecordId) throw new Error("Disiplin kaydı oluşturuldu ancak dosya kimliği alınamadı.");
-      await uploadCaseAttachments("discipline", disciplineRecordId, attachments);
-      if (shouldApply) {
-        await applyDisciplineSanction({
-          disciplineRecordId,
-          memberId: payload.member_id,
-          effect: effectiveSanction,
-          pointDelta,
-          sanctionDays,
-          creditFineAmount,
-          creditFineInstallments,
-          reason: payload.decree_text || payload.reason || "Disiplin kararnamesi",
-          decreeText: payload.decree_text,
-          description: payload.description || payload.reason
-        });
-      }
-      showToast(recordValues.investigation_id
-        ? "Disiplin cezası kaydedildi ve soruşturma otomatik kapatıldı."
-        : "Disiplin kaydı kaydedildi.");
-      closeModal();
-      await loadPage("discipline");
     } catch (error) {
       showToast(error.message, "error");
     } finally {

@@ -46,6 +46,9 @@ async function invoke({
     if (target.includes("/rest/v1/complaints") && method === "GET") {
       return jsonResponse([complaint]);
     }
+    if (target.endsWith("/rest/v1/complaints") && method === "POST") {
+      return jsonResponse([{ id: "created-complaint", ...JSON.parse(options.body) }], 201);
+    }
     if (target.includes("/rest/v1/complaints") && method === "PATCH") {
       return jsonResponse([{ ...complaint, ...JSON.parse(options.body) }]);
     }
@@ -62,7 +65,7 @@ async function invoke({
   let payload = null;
   const request = {
     method: "POST",
-    headers: { authorization: "Bearer test-token" },
+    headers: { authorization: "Bearer test-token", "x-ihp-portal": "discipline" },
     body
   };
   const response = {
@@ -92,6 +95,26 @@ const expiredSessionResult = await invoke({
 assert.equal(expiredSessionResult.statusCode, 401);
 assert.match(expiredSessionResult.payload.error, /oturumu/);
 
+const officialCreateResult = await invoke({
+  actorId: "member",
+  roles: ["member"],
+  body: {
+    action: "create",
+    accusedProfileId: "target-member",
+    subject: "Resmî şikâyet",
+    description: "Olayın tarih ve ayrıntılarını içeren resmî açıklama.",
+    evidenceNote: "Mesaj ve ekran görüntüsü kayıtları",
+    requestedOutcome: "Disiplin Kurulu tarafından incelenmesi",
+    eventDate: new Date().toISOString().slice(0, 10),
+    learnedAt: new Date().toISOString().slice(0, 10),
+    priority: "normal"
+  },
+  complaint: null
+});
+assert.equal(officialCreateResult.statusCode, 200);
+assert.equal(officialCreateResult.payload.complaint.source_channel, "dk_portal");
+assert.equal(officialCreateResult.payload.complaint.regulation_version, "2026-07-19");
+
 const successfulClaimResult = await invoke({
   body: { id: "available", claim: true, status: "reviewing" },
   complaint: {
@@ -115,7 +138,21 @@ const ownResult = await invoke({
   complaint: ownComplaint
 });
 assert.equal(ownResult.statusCode, 403);
-assert.match(ownResult.payload.error, /Kendi yazdiginiz sikayetin/);
+assert.match(ownResult.payload.error, /tarafı olan kişi/);
+
+const accusedResult = await invoke({
+  actorId: "accused",
+  body: { id: "accused-case", claim: true, status: "reviewing" },
+  complaint: {
+    id: "accused-case",
+    complainant_profile_id: "reporter",
+    accused_profile_id: "accused",
+    assigned_to: null,
+    status: "new"
+  }
+});
+assert.equal(accusedResult.statusCode, 403);
+assert.match(accusedResult.payload.error, /tarafı olan kişi/);
 
 const unassignedResult = await invoke({
   body: { id: "unassigned", status: "resolved", decisionNote: "Karar" },
@@ -156,6 +193,6 @@ const selfAssignmentResult = await invoke({
   }
 });
 assert.equal(selfAssignmentResult.statusCode, 400);
-assert.match(selfAssignmentResult.payload.error, /yazan kisi/);
+assert.match(selfAssignmentResult.payload.error, /tarafı olan kişi/);
 
 console.log("Şikayet sorumluluk ve çıkar çatışması kuralları doğrulandı.");

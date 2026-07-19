@@ -83,7 +83,7 @@ export const loadComplaints = () => {
 export const loadInvestigations = () =>
   list(
     "investigations",
-    "select=*,subject:profiles!investigations_subject_profile_id_fkey(id,display_name,email,roles,role),opener:profiles!investigations_opened_by_fkey(id,display_name),assignee:profiles!investigations_assigned_to_fkey(id,display_name),decider:profiles!investigations_decided_by_fkey(id,display_name),attachments:case_attachments!case_attachments_investigation_id_fkey(id,file_name,object_path,content_type,size_bytes,created_at)&order=created_at.desc"
+    "select=*,subject:profiles!investigations_subject_profile_id_fkey(id,display_name,email,roles,role),opener:profiles!investigations_opened_by_fkey(id,display_name),assignee:profiles!investigations_assigned_to_fkey(id,display_name,role,roles),decider:profiles!investigations_decided_by_fkey(id,display_name),source_complaint:complaints!investigations_source_complaint_id_fkey(id,subject,status,complainant_profile_id,accused_profile_id),attachments:case_attachments!case_attachments_investigation_id_fkey(id,file_name,object_path,content_type,size_bytes,created_at)&order=created_at.desc"
   );
 
 export const loadRegulations = () =>
@@ -128,11 +128,11 @@ export async function createApplication(payload) {
 }
 
 export async function createComplaint(payload) {
-  return restRequest("complaints", {
+  const result = await serverRequest("/api/review-complaint", {
     method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ action: "create", ...payload })
   });
+  return result?.complaint ? [result.complaint] : [];
 }
 
 const CASE_ATTACHMENT_BUCKET = "case-attachments";

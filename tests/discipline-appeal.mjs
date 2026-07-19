@@ -66,7 +66,7 @@ const response = {
 try {
   await handler(request, response);
   assert.equal(statusCode, 400);
-  assert.match(payload.error, /Odul puani kayitlarina itiraz edilemez/);
+  assert.match(payload.error, /Ödül puanı kayıtlarına itiraz edilemez/);
 } finally {
   globalThis.fetch = originalFetch;
 }

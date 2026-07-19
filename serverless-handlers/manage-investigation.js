@@ -3,10 +3,16 @@ import { sendDisciplineMailboxMessage } from "../server/mailbox-api.js";
 
 const INVESTIGATION_MANAGERS = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
 const PROTECTED_ROLES = new Set(["super_admin"]);
+const VALID_CLASSIFICATIONS = new Set(["light", "medium", "heavy", "very_heavy", "expulsion"]);
+const CURRENT_REGULATION_VERSION = "2026-07-19";
 const VALID_ACTIONS = new Set([
   "create",
   "claim",
   "transfer",
+  "extend",
+  "extend_defense",
+  "schedule_hearing",
+  "complete_hearing",
   "reviewing",
   "closed",
   "cancelled",
@@ -61,6 +67,17 @@ async function authenticateActor(request) {
 
 function hasAny(roles, allowed) {
   return roles.some((role) => allowed.has(role));
+}
+
+function normalizedArticles(value) {
+  const source = Array.isArray(value) ? value : String(value || "").split(",");
+  return [...new Set(source.map((item) => String(item).trim()).filter(Boolean))].slice(0, 20);
+}
+
+function addDays(value, days) {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString();
 }
 
 function rolesOf(profile) {
@@ -213,7 +230,19 @@ export default async function handler(request, response) {
     const subjectProfileId = String(body.subjectProfileId || "");
     const title = String(body.title || "").trim();
     const description = String(body.description || "").trim();
-    if (!subjectProfileId || title.length < 3 || description.length < 10) {
+    const classification = String(body.classification || "");
+    const allegedArticles = normalizedArticles(body.allegedArticles);
+    const evidenceSummary = String(body.evidenceSummary || body.evidenceNote || "").trim();
+    const sourceComplaintId = String(body.sourceComplaintId || "");
+    if (
+      !subjectProfileId ||
+      title.length < 3 ||
+      description.length < 10 ||
+      description.length > 12000 ||
+      !VALID_CLASSIFICATIONS.has(classification) ||
+      !allegedArticles.length ||
+      evidenceSummary.length < 3
+    ) {
       return json(response, 400, { error: "Sorusturma bilgileri eksik." });
     }
 
@@ -231,6 +260,25 @@ export default async function handler(request, response) {
       return json(response, 403, { error: "Disiplin hiyerarsisi bu sorusturmaya izin vermiyor." });
     }
 
+    let sourceComplaint = null;
+    if (sourceComplaintId) {
+      sourceComplaint = await fetchSingle(
+        `/rest/v1/complaints?id=eq.${encodeURIComponent(sourceComplaintId)}&select=id,accused_profile_id,assigned_to,complainant_profile_id,status&limit=1`
+      );
+      if (!sourceComplaint || sourceComplaint.accused_profile_id !== subjectProfileId) {
+        return json(response, 400, { error: "Kaynak şikâyet ile soruşturmanın ilgili üyesi eşleşmiyor." });
+      }
+      if (!actor.roles.includes("super_admin") && sourceComplaint.assigned_to !== actor.authUser.id) {
+        return json(response, 403, { error: "Soruşturmayı yalnızca şikâyetin sorumlusu açabilir." });
+      }
+      if (sourceComplaint.complainant_profile_id === actor.authUser.id) {
+        return json(response, 403, { error: "Şikâyeti yazan kişi aynı dosyada soruşturmacı olamaz." });
+      }
+    }
+
+    const openedAt = new Date();
+    const defenseDays = ["heavy", "very_heavy", "expulsion"].includes(classification) ? 5 : 3;
+
     const insertResponse = await supabaseRequest("/rest/v1/investigations", {
       method: "POST",
       headers: { Prefer: "return=representation" },
@@ -241,13 +289,22 @@ export default async function handler(request, response) {
         assigned_at: null,
         status: "open",
         title: title.slice(0, 140),
-        description: description.slice(0, 1600),
-        evidence_note: String(body.evidenceNote || "").slice(0, 1200),
+        description: description.slice(0, 12000),
+        evidence_note: String(body.evidenceNote || evidenceSummary).slice(0, 1200),
         evidence_file: String(body.evidenceFile || ""),
         evidence_filename: String(body.evidenceFilename || "").slice(0, 180),
         defense_status: "pending",
         defense_text: "",
-        defense_note: ""
+        defense_note: "",
+        regulation_version: CURRENT_REGULATION_VERSION,
+        source_complaint_id: sourceComplaintId || null,
+        classification,
+        alleged_articles: allegedArticles,
+        evidence_summary: evidenceSummary.slice(0, 12000),
+        due_at: addDays(openedAt, 7),
+        notice_sent_at: openedAt.toISOString(),
+        defense_due_at: addDays(openedAt, defenseDays),
+        hearing_required: ["heavy", "very_heavy", "expulsion"].includes(classification)
       })
     });
     const inserted = await insertResponse.json().catch(() => null);
@@ -256,6 +313,20 @@ export default async function handler(request, response) {
     }
 
     const investigation = inserted?.[0] || null;
+    if (sourceComplaintId && investigation?.id) {
+      await supabaseRequest(`/rest/v1/complaints?id=eq.${encodeURIComponent(sourceComplaintId)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          status: "reviewing",
+          linked_investigation_id: investigation.id,
+          preliminary_outcome: "investigation_opened",
+          preliminary_reviewed_at: new Date().toISOString(),
+          preliminary_reviewed_by: actor.authUser.id,
+          decision_note: "Soruşturma açıldı."
+        })
+      }).catch(() => undefined);
+    }
     await audit(actor.authUser.id, investigation?.id || subjectProfileId, "Sorusturma acildi", { subject_profile_id: subjectProfileId });
     await notify(
       subjectProfileId,
@@ -263,7 +334,10 @@ export default async function handler(request, response) {
       "Hakkınızda soruşturma açıldı",
       [
         `Dosya başlığı: ${title}`,
+        investigation?.case_number ? `Dosya numarası: ${investigation.case_number}` : "",
         `Açılış tarihi: ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}`,
+        `İsnat edilen maddeler: ${allegedArticles.join(", ")}`,
+        `Savunma son tarihi: ${new Date(addDays(openedAt, defenseDays)).toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}`,
         `Durum: Açık - savunma bekleniyor`,
         "",
         "Olay ve inceleme özeti:",
@@ -282,9 +356,118 @@ export default async function handler(request, response) {
   const investigation = await fetchSingle(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
   if (!investigation) return json(response, 404, { error: "Sorusturma bulunamadi." });
   const isAdmin = actor.roles.includes("super_admin");
+  const sourceComplaint = investigation.source_complaint_id
+    ? await fetchSingle(
+        `/rest/v1/complaints?id=eq.${encodeURIComponent(investigation.source_complaint_id)}&select=id,complainant_profile_id,accused_profile_id&limit=1`
+      )
+    : null;
+  const actorHasCaseConflict = investigation.subject_profile_id === actor.authUser.id ||
+    sourceComplaint?.complainant_profile_id === actor.authUser.id;
+
+  if (action !== "submit_defense" && actorHasCaseConflict) {
+    return json(response, 403, {
+      error: "Şikâyetçi veya hakkında soruşturma yürütülen kişi aynı dosyada kurul işlemi yapamaz."
+    });
+  }
+
+  if (action === "extend") {
+    if (!isAdmin && !actor.roles.includes("discipline_chair")) {
+      return json(response, 403, { error: "Soruşturma süresini yalnızca Disiplin Kurulu Başkanı uzatabilir." });
+    }
+    if (["closed", "cancelled"].includes(investigation.status)) {
+      return json(response, 400, { error: "Kapanmış soruşturmanın süresi uzatılamaz." });
+    }
+    if (Number(investigation.extension_days || 0) > 0) {
+      return json(response, 409, { error: "Soruşturma süresi yalnızca bir kez uzatılabilir." });
+    }
+    const extensionDays = Number(body.extensionDays);
+    const extensionReason = String(body.decisionNote || body.extensionReason || "").trim();
+    if (!Number.isInteger(extensionDays) || extensionDays < 1 || extensionDays > 5 || extensionReason.length < 10) {
+      return json(response, 400, { error: "Uzatma 1-5 gün arasında olmalı ve gerekçesi yazılmalıdır." });
+    }
+    const baseDueAt = investigation.due_at || addDays(investigation.created_at || new Date(), 7);
+    const patch = {
+      due_at: addDays(baseDueAt, extensionDays),
+      extension_days: extensionDays,
+      extension_reason: extensionReason.slice(0, 1200)
+    };
+    const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return json(response, updateResponse.status, { error: updated?.message || "Soruşturma süresi uzatılamadı." });
+    }
+    await audit(actor.authUser.id, id, "Soruşturma süresi gerekçeli olarak uzatıldı", {
+      extension_days: extensionDays,
+      due_at: patch.due_at
+    });
+    await notify(
+      investigation.subject_profile_id,
+      actor.authUser.id,
+      "Soruşturma süresi uzatıldı",
+      `${extensionDays} günlük uzatma gerekçesi: ${extensionReason}`
+    );
+    return json(response, 200, { ok: true, investigation: updated?.[0] || null });
+  }
+
+  if (action === "extend_defense") {
+    const canExtendDefense = isAdmin || actor.roles.includes("discipline_chair") || investigation.assigned_to === actor.authUser.id;
+    if (!canExtendDefense) {
+      return json(response, 403, { error: "Savunma ek süresini yalnızca dosya görevlisi veya Disiplin Kurulu Başkanı verebilir." });
+    }
+    if (["closed", "cancelled"].includes(investigation.status) || investigation.defense_status !== "pending") {
+      return json(response, 400, { error: "Savunma aşaması açık olmayan dosyada ek süre verilemez." });
+    }
+    if (investigation.defense_extended_at) {
+      return json(response, 409, { error: "Savunma için yalnızca bir kez ek süre verilebilir." });
+    }
+    const defenseDueAt = new Date(body.defenseDueAt || "");
+    const currentDueAt = new Date(investigation.defense_due_at || 0);
+    const extensionReason = String(body.decisionNote || body.extensionReason || "").trim();
+    if (
+      Number.isNaN(defenseDueAt.valueOf()) ||
+      defenseDueAt.getTime() <= Date.now() ||
+      (!Number.isNaN(currentDueAt.valueOf()) && defenseDueAt <= currentDueAt) ||
+      extensionReason.length < 10 ||
+      extensionReason.length > 2000
+    ) {
+      return json(response, 400, { error: "Yeni savunma tarihi mevcut süreden sonra olmalı ve doğrulanabilir mazeret yazılmalıdır." });
+    }
+    const patch = {
+      defense_due_at: defenseDueAt.toISOString(),
+      defense_extension_reason: extensionReason,
+      defense_extended_at: new Date().toISOString(),
+      defense_extended_by: actor.authUser.id
+    };
+    const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return json(response, updateResponse.status, { error: updated?.message || "Savunma ek süresi kaydedilemedi." });
+    }
+    await audit(actor.authUser.id, id, "Doğrulanabilir mazeret nedeniyle bir defalık savunma ek süresi verildi", {
+      defense_due_at: patch.defense_due_at
+    });
+    await notify(
+      investigation.subject_profile_id,
+      actor.authUser.id,
+      "Savunma ek süresi verildi",
+      `Yeni savunma son tarihi: ${defenseDueAt.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}\nGerekçe: ${extensionReason}`
+    );
+    return json(response, 200, { ok: true, investigation: updated?.[0] || null });
+  }
 
   if (action === "delete") {
     if (!isAdmin) return json(response, 403, { error: "Soruşturmayı yalnızca teknik Admin kalıcı olarak silebilir." });
+    if (investigation.regulation_version === CURRENT_REGULATION_VERSION) {
+      return json(response, 409, { error: "19.07.2026 yönetmeliğine tabi soruşturma kayıtları kalıcı olarak silinemez." });
+    }
     const deleteResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: { Prefer: "return=minimal" }
@@ -301,16 +484,34 @@ export default async function handler(request, response) {
     if (!isAdmin) return json(response, 403, { error: "Soruşturmayı yalnızca teknik Admin düzeltebilir." });
     const title = String(body.title || "").trim();
     const description = String(body.description || "").trim();
-    if (title.length < 3 || description.length < 10) {
+    const classification = String(body.classification || investigation.classification || "");
+    const allegedArticles = normalizedArticles(body.allegedArticles || investigation.alleged_articles || []);
+    const evidenceSummary = String(body.evidenceSummary || body.evidenceNote || investigation.evidence_summary || "").trim();
+    if (
+      title.length < 3 ||
+      description.length < 10 ||
+      description.length > 12000 ||
+      (investigation.regulation_version === CURRENT_REGULATION_VERSION && (
+        !VALID_CLASSIFICATIONS.has(classification) ||
+        !allegedArticles.length ||
+        evidenceSummary.length < 3
+      ))
+    ) {
       return json(response, 400, { error: "Soruşturma başlığı veya açıklaması eksik." });
     }
     const patch = {
       title: title.slice(0, 140),
-      description: description.slice(0, 1600),
-      evidence_note: String(body.evidenceNote || "").slice(0, 1200),
+      description: description.slice(0, 12000),
+      evidence_note: evidenceSummary.slice(0, 1200),
+      evidence_summary: evidenceSummary.slice(0, 12000),
       evidence_file: String(body.evidenceFile || ""),
       evidence_filename: String(body.evidenceFilename || "").slice(0, 180)
     };
+    if (investigation.regulation_version === CURRENT_REGULATION_VERSION) {
+      patch.classification = classification;
+      patch.alleged_articles = allegedArticles;
+      patch.hearing_required = ["heavy", "very_heavy", "expulsion"].includes(classification) || investigation.hearing_required;
+    }
     const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: { Prefer: "return=representation" },
@@ -330,6 +531,9 @@ export default async function handler(request, response) {
     }
     if (["closed", "cancelled"].includes(investigation.status) || investigation.defense_status !== "pending") {
       return json(response, 400, { error: "Bu soruşturma için savunma aşaması kapalıdır." });
+    }
+    if (investigation.defense_due_at && new Date(investigation.defense_due_at).getTime() < Date.now()) {
+      return json(response, 400, { error: "Savunma süresi sona ermiştir." });
     }
     const defenseText = String(body.defenseText || "").trim();
     if (defenseText.length < 20) {
@@ -354,12 +558,6 @@ export default async function handler(request, response) {
       await notify(investigation.assigned_to, actor.authUser.id, "Soruşturma savunması sunuldu", investigation.title);
     }
     return json(response, 200, { ok: true, investigation: updated?.[0] || null });
-  }
-
-  if (!isAdmin && investigation.subject_profile_id === actor.authUser.id) {
-    return json(response, 403, {
-      error: "Kendi hakkinizdaki sorusturmanin sorumlulugunu alamaz veya bu dosyada kurul islemi yapamazsiniz."
-    });
   }
 
   if (["cancelled", "closed"].includes(investigation.status)) {
@@ -401,6 +599,9 @@ export default async function handler(request, response) {
   if (action === "close_defense") {
     if ((!isAdmin && investigation.assigned_to !== actor.authUser.id) || investigation.defense_status !== "pending") {
       return json(response, 403, { error: "Savunma aşamasını yalnızca sorumlu soruşturmacı kapatabilir." });
+    }
+    if (investigation.defense_due_at && new Date(investigation.defense_due_at).getTime() > Date.now()) {
+      return json(response, 400, { error: "Savunma süresi dolmadan savunma sunulmadı işlemi yapılamaz." });
     }
     const defenseNote = String(body.decisionNote || "").trim();
     if (defenseNote.length < 10) {
@@ -468,6 +669,12 @@ export default async function handler(request, response) {
     if ((investigation.recused_profile_ids || []).includes(targetAssignee.id)) {
       return json(response, 403, { error: "Çıkar çatışması nedeniyle çekilen kişi bu dosyaya yeniden atanamaz." });
     }
+    if (
+      targetAssignee.id === investigation.subject_profile_id ||
+      targetAssignee.id === sourceComplaint?.complainant_profile_id
+    ) {
+      return json(response, 403, { error: "Taraf olan kişi aynı dosyada soruşturmacı olarak görevlendirilemez." });
+    }
     if (!canDelegateResponsibility(actor.roles, targetAssigneeRoles)) {
       return json(response, 403, { error: "Sorumluluk yalnizca DK hiyerarsisinde alt rutbeye devredilebilir." });
     }
@@ -475,11 +682,81 @@ export default async function handler(request, response) {
     return json(response, 403, { error: "Bu islem icin once sorusturma sorumlulugunu devralmalisiniz." });
   }
 
+  if (action === "schedule_hearing") {
+    const scheduledAt = new Date(body.scheduledAt || "");
+    const hearingMethod = String(body.hearingMethod || "").trim();
+    if (Number.isNaN(scheduledAt.valueOf()) || scheduledAt.getTime() <= Date.now() || hearingMethod.length < 3) {
+      return json(response, 400, { error: "Duruşma tarihi gelecekte olmalı ve katılım yöntemi belirtilmelidir." });
+    }
+    const patch = {
+      hearing_required: true,
+      hearing_scheduled_at: scheduledAt.toISOString(),
+      hearing_method: hearingMethod.slice(0, 300),
+      hearing_attendee_ids: [],
+      hearing_evidence_list: [],
+      hearing_held_at: null
+    };
+    const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return json(response, updateResponse.status, { error: updated?.message || "Duruşma planlanamadı." });
+    }
+    await audit(actor.authUser.id, id, "Duruşma planlandı", { hearing_scheduled_at: patch.hearing_scheduled_at });
+    await notify(
+      investigation.subject_profile_id,
+      actor.authUser.id,
+      "Soruşturma duruşması planlandı",
+      `Dosya: ${investigation.case_number || investigation.title}\nTarih: ${scheduledAt.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}\nKatılım yöntemi: ${hearingMethod}`
+    );
+    return json(response, 200, { ok: true, investigation: updated?.[0] || null });
+  }
+
+  if (action === "complete_hearing") {
+    if (!investigation.hearing_scheduled_at) {
+      return json(response, 400, { error: "Önce duruşma tarihi ve katılım yöntemi planlanmalıdır." });
+    }
+    if (new Date(investigation.hearing_scheduled_at).getTime() > Date.now()) {
+      return json(response, 400, { error: "Planlanan duruşma zamanı gelmeden duruşma tamamlandı olarak kaydedilemez." });
+    }
+    const attendeeIds = normalizedArticles(body.attendeeIds).filter((value) => /^[0-9a-f-]{36}$/i.test(value));
+    const evidenceList = normalizedArticles(body.evidenceList);
+    if (!attendeeIds.length || !evidenceList.length) {
+      return json(response, 400, { error: "Duruşmaya katılanlar ve sunulan delillerin listesi zorunludur." });
+    }
+    const patch = {
+      hearing_attendee_ids: attendeeIds,
+      hearing_evidence_list: evidenceList,
+      hearing_held_at: new Date().toISOString()
+    };
+    const updateResponse = await supabaseRequest(`/rest/v1/investigations?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return json(response, updateResponse.status, { error: updated?.message || "Duruşma işlem kaydı tamamlanamadı." });
+    }
+    await audit(actor.authUser.id, id, "Duruşma yapıldı; yalnızca zorunlu idarî bilgiler kaydedildi", {
+      hearing_held_at: patch.hearing_held_at,
+      attendee_count: attendeeIds.length,
+      evidence_count: evidenceList.length
+    });
+    return json(response, 200, { ok: true, investigation: updated?.[0] || null });
+  }
+
   if (action === "cancelled" && !actor.roles.some((role) => ["super_admin", "discipline_chair"].includes(role))) {
     return json(response, 403, { error: "Sorusturmayi yalnizca Disiplin Kurulu baskani iptal edebilir." });
   }
   if (action === "closed" && investigation.defense_status === "pending") {
     return json(response, 400, { error: "Savunma aşaması tamamlanmadan soruşturma kapatılamaz." });
+  }
+  if (action === "closed" && investigation.hearing_required && !investigation.hearing_held_at) {
+    return json(response, 400, { error: "Zorunlu duruşma tamamlanmadan soruşturma kapatılamaz." });
   }
 
   const decisionNote = String(body.decisionNote || "").trim();
