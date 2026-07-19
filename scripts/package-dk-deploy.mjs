@@ -10,11 +10,12 @@ await rm(packageDir, { recursive: true, force: true });
 await mkdir(join(packageDir, "api"), { recursive: true });
 await mkdir(join(packageDir, ".vercel"), { recursive: true });
 await cp(join(rootPath, "dist-dk"), join(packageDir, "public"), { recursive: true });
+await cp(join(rootPath, "server"), join(packageDir, "server"), { recursive: true });
 await prepareLargeDeployFiles(packageDir);
 
 for (const functionName of ["config.js", "dk-proxy.js", "client-error.js"]) {
   await cp(
-    join(rootPath, "api", functionName),
+    join(rootPath, "serverless-handlers", functionName),
     join(packageDir, "api", functionName)
   );
 }
