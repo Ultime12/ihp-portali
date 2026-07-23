@@ -28,9 +28,11 @@ for (const [directory, expectedName, expectedIconRoot] of variants) {
 }
 
 const mainApp = await readFile(new URL("../dist/src/app.js", import.meta.url), "utf8");
+const mainPortalService = await readFile(new URL("../dist/src/lib/portal-service.js", import.meta.url), "utf8");
 assert.match(mainApp, /İHP Mobil/);
 assert.match(mainApp, /\.\/lib\/portal-service\.js\?v=[a-f0-9]{12}/);
 assert.match(mainApp, /\.\/pwa-passkeys\.js\?v=[a-f0-9]{12}/);
+assert.match(mainPortalService, /\.\/supabase\.js\?v=[a-f0-9]{12}/);
 assert.match(mainApp, /pwa-enable-push/);
 assert.match(mainApp, /pwa-register-passkey/);
 assert.match(mainApp, /\/mail\/#\/portal\/mail/);

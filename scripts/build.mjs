@@ -224,19 +224,28 @@ function versionStaticAssets(html, version) {
   );
 }
 
-async function versionApplicationImports(version) {
-  const appPath = join(outputDir, "src", "app.js");
-  const application = await readFile(appPath, "utf8");
-  const versioned = application
-    .replace(
-      /(\bfrom\s*["'])(\.{1,2}\/[^"'?#]+\.js)(["'])/g,
-      `$1$2?v=${version}$3`
-    )
-    .replace(
-      /(\bimport\s*\(\s*["'])(\.{1,2}\/[^"'?#]+\.js)(["']\s*\))/g,
-      `$1$2?v=${version}$3`
-    );
-  await writeFile(appPath, versioned, "utf8");
+async function versionJavaScriptImports(directory, version) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      await versionJavaScriptImports(path, version);
+      continue;
+    }
+    if (extname(entry.name) !== ".js") continue;
+
+    const source = await readFile(path, "utf8");
+    const versioned = source
+      .replace(
+        /(\bfrom\s*["'])(\.{1,2}\/[^"'?#]+\.js)(["'])/g,
+        `$1$2?v=${version}$3`
+      )
+      .replace(
+        /(\bimport\s*\(\s*["'])(\.{1,2}\/[^"'?#]+\.js)(["']\s*\))/g,
+        `$1$2?v=${version}$3`
+      );
+    await writeFile(path, versioned, "utf8");
+  }
 }
 
 async function bundlePasskeyClient() {
@@ -312,7 +321,7 @@ await compileDirectory(sourceDir);
 await bundlePasskeyClient();
 await composeApplication();
 const staticAssetVersion = await createStaticAssetVersion();
-await versionApplicationImports(staticAssetVersion);
+await versionJavaScriptImports(join(outputDir, "src"), staticAssetVersion);
 await writeFile(
   join(outputDir, "index.html"),
   versionStaticAssets(finalizedHtml, staticAssetVersion),
