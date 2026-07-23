@@ -65,6 +65,9 @@ assert.match(creditUi, /data-credit-additional-role-rate/);
 assert.match(creditUi, /additionalRoleAllowanceBasisPoints/);
 assert.match(creditServer, /additional_role_allowance_basis_points: additionalRoleAllowance/);
 assert.match(creditServer, /expected - paidAmount - \(correctedByAccount\.get\(accountId\) \|\| 0\)/);
+assert.match(creditServer, /salary-reconciliation:exact-v1:/);
+assert.match(creditServer, /resolution=ignore-duplicates,return=representation/);
+assert.match(creditServer, /metadata\?\.direction === "debit" \? -amount : amount/);
 
 const allowances = {
   vice_president: 350_000,

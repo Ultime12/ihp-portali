@@ -78,6 +78,34 @@ async function rows(path, errorMessage) {
   return payload;
 }
 
+async function claimSalaryReconciliation(reference) {
+  const runKey = `salary-reconciliation:exact-v1:${reference}`;
+  const response = await supabaseRequest("/rest/v1/credit_cron_runs?on_conflict=run_key", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify({
+      run_key: runKey,
+      run_type: "daily_collection",
+      result: { purpose: "weekly_salary_reconciliation", salary_reference: reference }
+    })
+  });
+  const payload = await response.json().catch(() => []);
+  if (!response.ok) throw new Error("Haftalik odeme duzeltme kilidi alinamadi.");
+  return { claimed: Array.isArray(payload) && payload.length > 0, runKey };
+}
+
+async function releaseSalaryReconciliation(runKey) {
+  await supabaseRequest(`/rest/v1/credit_cron_runs?run_key=eq.${encodeURIComponent(runKey)}`, {
+    method: "DELETE",
+    headers: { Prefer: "return=minimal" }
+  }).catch(() => undefined);
+}
+
+function signedAdjustmentAmount(transaction) {
+  const amount = Math.abs(Number(transaction?.amount || 0));
+  return transaction?.metadata?.direction === "debit" ? -amount : amount;
+}
+
 async function reconcileLatestWeeklyAllowance() {
   const [settingsRows, runRows] = await Promise.all([
     rows(
@@ -94,75 +122,82 @@ async function reconcileLatestWeeklyAllowance() {
   if (!settings || !run) return;
 
   const reference = String(run.run_key || "");
+  const claim = await claimSalaryReconciliation(reference);
+  if (!claim.claimed) return;
   const correctionReference = `Haftalik gorev maasi duzeltmesi ${reference}`;
-  const salaryTransactions = await rows(
-    `/rest/v1/credit_transactions?kind=eq.weekly_allowance&reference=eq.${encodeURIComponent(reference)}&select=account_id,amount`,
-    "Haftalik odeme hareketleri alinamadi."
-  );
-  if (!salaryTransactions.length) return;
+  try {
+    const salaryTransactions = await rows(
+      `/rest/v1/credit_transactions?kind=eq.weekly_allowance&reference=eq.${encodeURIComponent(reference)}&select=account_id,amount`,
+      "Haftalik odeme hareketleri alinamadi."
+    );
+    if (!salaryTransactions.length) return;
 
-  const accountIds = [...new Set(salaryTransactions.map((item) => item.account_id).filter(Boolean))];
-  const [accounts, existingCorrections, adminRows] = await Promise.all([
-    rows(
-      `/rest/v1/credit_accounts?id=in.(${accountIds.join(",")})&select=id,profile_id`,
-      "Haftalik odeme hesaplari alinamadi."
-    ),
-    rows(
-      `/rest/v1/credit_transactions?kind=eq.admin_adjustment&reference=eq.${encodeURIComponent(correctionReference)}&select=account_id,amount`,
-      "Haftalik odeme duzeltmeleri alinamadi."
-    ),
-    rows(
-      "/rest/v1/profiles?status=eq.active&roles=cs.%7Bsuper_admin%7D&select=id&limit=1",
-      "Admin profili alinamadi."
-    )
-  ]);
-  const adminId = adminRows[0]?.id;
-  if (!adminId) return;
-
-  const accountById = new Map(accounts.map((account) => [account.id, account]));
-  const profileIds = [...new Set(accounts.map((account) => account.profile_id).filter(Boolean))];
-  const profiles = profileIds.length
-    ? await rows(
-        `/rest/v1/profiles?id=in.(${profileIds.join(",")})&select=id,role,roles,status,is_system_account`,
-        "Haftalik odeme profilleri alinamadi."
+    const accountIds = [...new Set(salaryTransactions.map((item) => item.account_id).filter(Boolean))];
+    const [accounts, existingCorrections, adminRows] = await Promise.all([
+      rows(
+        `/rest/v1/credit_accounts?id=in.(${accountIds.join(",")})&select=id,profile_id`,
+        "Haftalik odeme hesaplari alinamadi."
+      ),
+      rows(
+        `/rest/v1/credit_transactions?kind=eq.admin_adjustment&reference=eq.${encodeURIComponent(correctionReference)}&select=account_id,amount,metadata`,
+        "Haftalik odeme duzeltmeleri alinamadi."
+      ),
+      rows(
+        "/rest/v1/profiles?status=eq.active&roles=cs.%7Bsuper_admin%7D&select=id&limit=1",
+        "Admin profili alinamadi."
       )
-    : [];
-  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-  const paidByAccount = new Map();
-  for (const transaction of salaryTransactions) {
-    paidByAccount.set(
-      transaction.account_id,
-      (paidByAccount.get(transaction.account_id) || 0) + Number(transaction.amount || 0)
-    );
-  }
-  const correctedByAccount = new Map();
-  for (const correction of existingCorrections) {
-    correctedByAccount.set(
-      correction.account_id,
-      (correctedByAccount.get(correction.account_id) || 0) + Number(correction.amount || 0)
-    );
-  }
+    ]);
+    const adminId = adminRows[0]?.id;
+    if (!adminId) throw new Error("Haftalik odeme duzeltmesi icin Admin profili bulunamadi.");
 
-  for (const [accountId, paidAmount] of paidByAccount) {
-    const account = accountById.get(accountId);
-    const profile = profileById.get(account?.profile_id);
-    if (!account || !profile || profile.status !== "active" || profile.is_system_account) continue;
+    const accountById = new Map(accounts.map((account) => [account.id, account]));
+    const profileIds = [...new Set(accounts.map((account) => account.profile_id).filter(Boolean))];
+    const profiles = profileIds.length
+      ? await rows(
+          `/rest/v1/profiles?id=in.(${profileIds.join(",")})&select=id,role,roles,status,is_system_account`,
+          "Haftalik odeme profilleri alinamadi."
+        )
+      : [];
+    const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+    const paidByAccount = new Map();
+    for (const transaction of salaryTransactions) {
+      paidByAccount.set(
+        transaction.account_id,
+        (paidByAccount.get(transaction.account_id) || 0) + Number(transaction.amount || 0)
+      );
+    }
+    const correctedByAccount = new Map();
+    for (const correction of existingCorrections) {
+      correctedByAccount.set(
+        correction.account_id,
+        (correctedByAccount.get(correction.account_id) || 0) + signedAdjustmentAmount(correction)
+      );
+    }
 
-    const expected = calculateWeeklyRoleAllowance(
-      profile.roles,
-      profile.role,
-      settings.role_allowances,
-      settings.additional_role_allowance_basis_points
-    );
-    const delta = expected - paidAmount - (correctedByAccount.get(accountId) || 0);
-    if (!delta) continue;
+    for (const [accountId, paidAmount] of paidByAccount) {
+      const account = accountById.get(accountId);
+      const profile = profileById.get(account?.profile_id);
+      if (!account || !profile || profile.status !== "active" || profile.is_system_account) continue;
 
-    await rpc("admin_adjust_credit_balance", {
-      p_admin_profile_id: adminId,
-      p_account_id: account.id,
-      p_delta: delta,
-      p_reason: correctionReference
-    }).catch(() => undefined);
+      const expected = calculateWeeklyRoleAllowance(
+        profile.roles,
+        profile.role,
+        settings.role_allowances,
+        settings.additional_role_allowance_basis_points
+      );
+      const delta = expected - paidAmount - (correctedByAccount.get(accountId) || 0);
+      if (!delta) continue;
+
+      await rpc("admin_adjust_credit_balance", {
+        p_admin_profile_id: adminId,
+        p_account_id: account.id,
+        p_delta: delta,
+        p_reason: correctionReference
+      });
+    }
+  } catch (error) {
+    await releaseSalaryReconciliation(claim.runKey);
+    throw error;
   }
 }
 
