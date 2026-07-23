@@ -1,5 +1,5 @@
 const DISCIPLINE_ROLES = ["discipline_chair", "discipline_vice_chair", "discipline_member"];
-const REPRESENTATION_ROLES = new Set(["chief_representative", "representative"]);
+const REPRESENTATION_ROLES = ["chief_representative", "representative"];
 
 function normalizedRoles(roles, primaryRole) {
   return [...new Set([...(Array.isArray(roles) ? roles : []), primaryRole].filter(Boolean))];
@@ -19,10 +19,8 @@ function removeSubordinateInstitutionRoles(roles) {
   return [...result];
 }
 
-function additionalContribution(role, amount, basisPoints) {
-  const rawContribution = (amount * basisPoints) / 10_000;
-  if (REPRESENTATION_ROLES.has(role)) return Math.round(rawContribution);
-  return Math.round(rawContribution / 10_000) * 10_000;
+function additionalContribution(amount, basisPoints) {
+  return Math.round((amount * basisPoints) / 10_000);
 }
 
 export function calculateWeeklyRoleAllowance(
@@ -42,11 +40,11 @@ export function calculateWeeklyRoleAllowance(
     .sort((left, right) => right.amount - left.amount || left.role.localeCompare(right.role));
 
   return eligibleRoles.reduce((total, item, index) => (
-    total + (index === 0 ? item.amount : additionalContribution(item.role, item.amount, basisPoints))
+    total + (index === 0 ? item.amount : additionalContribution(item.amount, basisPoints))
   ), 0);
 }
 
 export const SALARY_HIERARCHY = Object.freeze({
   discipline: DISCIPLINE_ROLES,
-  representation: [...REPRESENTATION_ROLES]
+  representation: REPRESENTATION_ROLES
 });

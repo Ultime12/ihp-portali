@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { calculateWeeklyRoleAllowance } from "../server/salary-policy.js";
 
-const [app, portalService, applicationHandler, disciplineHandler, creditUi, creditServer, migration, rateMigration, refinedSalaryMigration] = await Promise.all([
+const [app, portalService, applicationHandler, disciplineHandler, creditUi, creditServer, migration, rateMigration, refinedSalaryMigration, exactSalaryMigration] = await Promise.all([
   readFile(new URL("../src/app.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/lib/portal-service.ts", import.meta.url), "utf8"),
   readFile(new URL("../serverless-handlers/review-application.js", import.meta.url), "utf8"),
@@ -11,7 +11,8 @@ const [app, portalService, applicationHandler, disciplineHandler, creditUi, cred
   readFile(new URL("../server/credit-system.js", import.meta.url), "utf8"),
   readFile(new URL("../supabase/migrations/20260722135701_enforce_dk_admissions_salary_and_archive.sql", import.meta.url), "utf8"),
   readFile(new URL("../supabase/migrations/20260722151908_expose_additional_role_allowance_rate.sql", import.meta.url), "utf8"),
-  readFile(new URL("../supabase/migrations/20260723091835_refine_multi_role_weekly_allowance.sql", import.meta.url), "utf8")
+  readFile(new URL("../supabase/migrations/20260723091835_refine_multi_role_weekly_allowance.sql", import.meta.url), "utf8"),
+  readFile(new URL("../supabase/migrations/20260723142143_exact_multi_role_weekly_allowance.sql", import.meta.url), "utf8")
 ]);
 
 const approvalGuard = app.slice(
@@ -58,9 +59,12 @@ assert.match(rateMigration, /v_settings\.additional_role_allowance_basis_points/
 assert.match(refinedSalaryMigration, /hierarchy_filtered_roles/);
 assert.match(refinedSalaryMigration, /chief_representative/);
 assert.match(refinedSalaryMigration, /discipline_member/);
+assert.match(exactSalaryMigration, /else round\(\(amount::numeric \* settings\.additional_basis_points\) \/ 10000\)::bigint/);
+assert.doesNotMatch(exactSalaryMigration, /\/ 10000\) \* 10000/);
 assert.match(creditUi, /data-credit-additional-role-rate/);
 assert.match(creditUi, /additionalRoleAllowanceBasisPoints/);
 assert.match(creditServer, /additional_role_allowance_basis_points: additionalRoleAllowance/);
+assert.match(creditServer, /expected - paidAmount - \(correctedByAccount\.get\(accountId\) \|\| 0\)/);
 
 const allowances = {
   vice_president: 350_000,
@@ -75,13 +79,13 @@ const allowances = {
 };
 assert.equal(
   calculateWeeklyRoleAllowance(["vice_president", "discipline_member", "chief_representative", "member"], "vice_president", allowances, 3000),
-  444_000,
-  "vice president + chief representative + DK member should total 444K"
+  440_000,
+  "vice president + chief representative + DK member should total 440K without rounding"
 );
 assert.equal(
   calculateWeeklyRoleAllowance(["spokesperson", "credit_officer", "discipline_member", "member"], "spokesperson", allowances, 3000),
-  340_000,
-  "spokesperson + credit officer + DK member should total 340K"
+  331_000,
+  "spokesperson + credit officer + DK member should total 331K without rounding"
 );
 assert.equal(
   calculateWeeklyRoleAllowance(["discipline_chair", "discipline_vice_chair", "discipline_member"], "discipline_chair", allowances, 3000),

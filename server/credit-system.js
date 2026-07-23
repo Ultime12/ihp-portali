@@ -108,7 +108,7 @@ async function reconcileLatestWeeklyAllowance() {
       "Haftalik odeme hesaplari alinamadi."
     ),
     rows(
-      `/rest/v1/credit_transactions?kind=eq.admin_adjustment&reference=eq.${encodeURIComponent(correctionReference)}&select=account_id`,
+      `/rest/v1/credit_transactions?kind=eq.admin_adjustment&reference=eq.${encodeURIComponent(correctionReference)}&select=account_id,amount`,
       "Haftalik odeme duzeltmeleri alinamadi."
     ),
     rows(
@@ -128,11 +128,23 @@ async function reconcileLatestWeeklyAllowance() {
       )
     : [];
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-  const correctedAccounts = new Set(existingCorrections.map((item) => item.account_id));
-
+  const paidByAccount = new Map();
   for (const transaction of salaryTransactions) {
-    if (correctedAccounts.has(transaction.account_id)) continue;
-    const account = accountById.get(transaction.account_id);
+    paidByAccount.set(
+      transaction.account_id,
+      (paidByAccount.get(transaction.account_id) || 0) + Number(transaction.amount || 0)
+    );
+  }
+  const correctedByAccount = new Map();
+  for (const correction of existingCorrections) {
+    correctedByAccount.set(
+      correction.account_id,
+      (correctedByAccount.get(correction.account_id) || 0) + Number(correction.amount || 0)
+    );
+  }
+
+  for (const [accountId, paidAmount] of paidByAccount) {
+    const account = accountById.get(accountId);
     const profile = profileById.get(account?.profile_id);
     if (!account || !profile || profile.status !== "active" || profile.is_system_account) continue;
 
@@ -142,7 +154,7 @@ async function reconcileLatestWeeklyAllowance() {
       settings.role_allowances,
       settings.additional_role_allowance_basis_points
     );
-    const delta = expected - Number(transaction.amount || 0);
+    const delta = expected - paidAmount - (correctedByAccount.get(accountId) || 0);
     if (!delta) continue;
 
     await rpc("admin_adjust_credit_balance", {
