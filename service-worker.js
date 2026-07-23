@@ -1,4 +1,4 @@
-const CACHE_VERSION = "ihp-pwa-2026-07-23-v4";
+const CACHE_VERSION = "ihp-pwa-2026-07-23-v5";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const CORE_ASSETS = [

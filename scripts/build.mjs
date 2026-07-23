@@ -199,8 +199,22 @@ async function composeApplication() {
 }
 
 async function createStaticAssetVersion() {
+  const sourceAssets = [];
+  async function collectSourceAssets(directory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await collectSourceAssets(path);
+      } else if (extname(entry.name) === ".js") {
+        sourceAssets.push(relative(outputDir, path).replaceAll("\\", "/"));
+      }
+    }
+  }
+  await collectSourceAssets(join(outputDir, "src"));
+
   const assetPaths = [
-    "src/app.js",
+    ...sourceAssets,
     "styles.css",
     "premium.css",
     "pwa.css",
@@ -208,8 +222,9 @@ async function createStaticAssetVersion() {
     ...(isMailPortal ? ["mail.css"] : [])
   ];
   const hash = createHash("sha256");
+  hash.update("module-graph-v2");
 
-  for (const assetPath of assetPaths) {
+  for (const assetPath of assetPaths.sort()) {
     hash.update(assetPath);
     hash.update(await readFile(join(outputDir, assetPath)));
   }
