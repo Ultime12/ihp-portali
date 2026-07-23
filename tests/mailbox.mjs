@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import mailboxHandler, { mailHtmlToText, normalizeAddress, sanitizeMailHtml } from "../server/mailbox-api.js";
 import { htmlToPlainText, verifyResendWebhook } from "../server/resend-webhook-api.js";
+import { emailProfile } from "../server/mail.js";
 
 process.env.SUPABASE_URL = "https://project.supabase.co";
 process.env.SUPABASE_ANON_KEY = "anon";
@@ -149,5 +150,29 @@ assert.equal(
   htmlToPlainText("<style>bad{}</style><p>Merhaba<br>Dünya &amp; İHP</p><script>alert(1)</script>"),
   "Merhaba\nDünya & İHP"
 );
+
+{
+  let profileQuery = "";
+  globalThis.fetch = async (url) => {
+    assert.equal(String(url), "https://api.resend.com/emails");
+    return jsonResponse({ id: "notification-email-id" });
+  };
+  const result = await emailProfile(async (path) => {
+    profileQuery = path;
+    return jsonResponse([{
+      id: recipientId,
+      display_name: "Alıcı Üye",
+      email: "recipient@example.test",
+      status: "active"
+    }]);
+  }, recipientId, {
+    subject: "Sistem bildirimi",
+    title: "Yeni kayıt",
+    body: "Kayıt ayrıntıları portalda bulunuyor."
+  });
+  assert.equal(result.ok, true);
+  assert.doesNotMatch(profileQuery, /notifications_enabled/);
+  assert.match(profileQuery, /select=id,display_name,email,status/);
+}
 
 console.log("Mailbox v2 and Resend webhook tests passed.");

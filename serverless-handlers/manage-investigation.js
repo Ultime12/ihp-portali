@@ -678,6 +678,10 @@ export default async function handler(request, response) {
     if (!canDelegateResponsibility(actor.roles, targetAssigneeRoles)) {
       return json(response, 403, { error: "Sorumluluk yalnizca DK hiyerarsisinde alt rutbeye devredilebilir." });
     }
+  } else if (action === "closed") {
+    if (!isAdmin && investigation.opened_by !== actor.authUser.id) {
+      return json(response, 403, { error: "Soruşturmayı yalnızca dosyayı açan yetkili kapatabilir." });
+    }
   } else if (!isAdmin && investigation.assigned_to !== actor.authUser.id) {
     return json(response, 403, { error: "Bu islem icin once sorusturma sorumlulugunu devralmalisiniz." });
   }
@@ -752,13 +756,6 @@ export default async function handler(request, response) {
   if (action === "cancelled" && !actor.roles.some((role) => ["super_admin", "discipline_chair"].includes(role))) {
     return json(response, 403, { error: "Sorusturmayi yalnizca Disiplin Kurulu baskani iptal edebilir." });
   }
-  if (action === "closed" && investigation.defense_status === "pending") {
-    return json(response, 400, { error: "Savunma aşaması tamamlanmadan soruşturma kapatılamaz." });
-  }
-  if (action === "closed" && investigation.hearing_required && !investigation.hearing_held_at) {
-    return json(response, 400, { error: "Zorunlu duruşma tamamlanmadan soruşturma kapatılamaz." });
-  }
-
   const decisionNote = String(body.decisionNote || "").trim();
   if (["closed", "cancelled"].includes(action) && !decisionNote) {
     return json(response, 400, { error: "Kapatma veya iptal icin karar notu zorunludur." });

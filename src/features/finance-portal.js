@@ -578,7 +578,7 @@ function financeCreditMemberPage() {
         <article><span>Transfer vergisi</span><strong>%${taxRate.toLocaleString("tr-TR")}</strong></article>
         <article><span>Kredi faizi</span><strong>%${interestRate.toLocaleString("tr-TR")}</strong></article>
         <article><span>Açık taksit</span><strong>${dueInstallments.length}</strong><small>${activeLoan ? creditLoanLabel(activeLoan.status) : "Aktif borç yok"}</small></article>
-        <article><span>Sonraki ödeme</span><strong>${settings.weekly_allowance_enabled && settings.weekly_allowance_next_at ? formatDate(settings.weekly_allowance_next_at, true) : "Planlanmadı"}</strong></article>
+        <article><span>Haftalık maaşım</span><strong>${creditAmount(data.weeklyAllowance || 0)}</strong><small>${settings.weekly_allowance_enabled && settings.weekly_allowance_next_at ? `Sonraki: ${formatDate(settings.weekly_allowance_next_at, true)}` : "Planlanmadı"}</small></article>
       </div>
     </section>
     <div class="finance-hub-layout">

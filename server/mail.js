@@ -138,10 +138,10 @@ export async function sendPortalEmail({ from, to, subject, title, body, actionUr
 export async function emailProfile(supabaseRequest, profileId, message = {}) {
   if (!profileId) return { ok: false, skipped: true };
   const response = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(profileId)}&select=id,display_name,email,status,notifications_enabled&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(profileId)}&select=id,display_name,email,status&limit=1`
   );
   const [profile] = await response.json().catch(() => []);
-  if (!response.ok || !profile?.email || (profile.notifications_enabled === false && !message.force)) {
+  if (!response.ok || !profile?.email || profile.status !== "active") {
     return { ok: false, skipped: true };
   }
 

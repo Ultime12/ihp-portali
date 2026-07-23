@@ -48,18 +48,8 @@ function ihpInvestigationCanTransferV2(item) {
 }
 
 function ihpInvestigationCanCloseV2(item, status = "closed") {
-  if (!item || ["cancelled", "closed"].includes(item.status)) return false;
-  if (hasRole("super_admin")) {
-    return status === "cancelled" || (
-      item.defense_status !== "pending" &&
-      (!item.hearing_required || item.hearing_held_at)
-    );
-  }
-  if (item.assigned_to !== state.profile?.id) return false;
-  if (status === "cancelled") return hasRole("discipline_chair");
-  if (item.defense_status === "pending") return false;
-  if (item.hearing_required && !item.hearing_held_at) return false;
-  return hasRole("discipline_chair", "discipline_vice_chair", "discipline_member");
+  if (!item || status !== "closed" || ["cancelled", "closed"].includes(item.status)) return false;
+  return hasRole("super_admin") || item.opened_by === state.profile?.id;
 }
 
 function ihpDefenseStatusLabelV2(item) {
@@ -67,74 +57,13 @@ function ihpDefenseStatusLabelV2(item) {
 }
 
 investigationActions = function patchedInvestigationActions(item) {
-  const buttons = [];
-  if (!item) return "";
-  if (hasRole("super_admin")) {
-    buttons.push(`<button class="table-action" type="button" data-action="edit-investigation" data-id="${esc(item.id)}">Düzelt</button>`);
-    if (item.regulation_version !== "2026-07-19") {
-      buttons.push(`<button class="table-action danger-action" type="button" data-action="delete-investigation" data-id="${esc(item.id)}">Kalıcı sil</button>`);
-    }
-  }
-
-  if (
-    item.subject_profile_id === state.profile?.id &&
-    item.defense_status === "pending" &&
-    !["cancelled", "closed"].includes(item.status)
-  ) {
-    buttons.push(`<button class="table-action" type="button" data-action="submit-investigation-defense" data-id="${esc(item.id)}">Savunmamı sun</button>`);
-  }
-
-  if (["cancelled", "closed"].includes(item.status)) {
-    return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
-  }
-
-  if (item.assigned_to === state.profile?.id && item.defense_status === "pending") {
-    buttons.push(`<button class="table-action" type="button" data-action="close-investigation-defense" data-id="${esc(item.id)}">Savunma sunulmadı</button>`);
-  }
-  if (item.assigned_to === state.profile?.id) {
-    buttons.push(`<button class="table-action" type="button" data-action="recuse-investigation" data-id="${esc(item.id)}">Çıkar çatışması / çekil</button>`);
-  }
-  if (!item.assigned_to || ihpInvestigationCanTakeV2(item)) {
-    buttons.push(`<button class="table-action" type="button" data-action="claim-investigation" data-id="${esc(item.id)}">${item.assigned_to ? "Sorumluluğu devral" : "Sorumluluğu al"}</button>`);
-  }
-  if (ihpInvestigationCanTransferV2(item)) {
-    buttons.push(`<button class="table-action" type="button" data-action="transfer-investigation" data-id="${esc(item.id)}">Devret</button>`);
-  }
-  if (Number(item.extension_days || 0) === 0 && hasRole("super_admin", "discipline_chair")) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-investigation-extension" data-id="${esc(item.id)}">Süreyi uzat</button>`);
-  }
-  if (
-    item.defense_status === "pending" &&
-    !item.defense_extended_at &&
-    (hasRole("super_admin", "discipline_chair") || item.assigned_to === state.profile?.id)
-  ) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-defense-extension" data-id="${esc(item.id)}">Savunma ek süresi</button>`);
-  }
-  if ((hasRole("super_admin") || item.assigned_to === state.profile?.id) && !item.hearing_scheduled_at) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-hearing-schedule" data-id="${esc(item.id)}">Duruşma planla</button>`);
-  }
-  if ((hasRole("super_admin") || item.assigned_to === state.profile?.id) && item.hearing_scheduled_at && !item.hearing_held_at) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-hearing-complete" data-id="${esc(item.id)}">Duruşmayı kaydet</button>`);
-  }
-  if (ihpInvestigationCanCloseV2(item, "closed")) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="closed">Kapat</button>`);
-  }
-  if (ihpInvestigationCanCloseV2(item, "cancelled")) {
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="cancelled">İptal et</button>`);
-  }
-  return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
+  if (!ihpInvestigationCanCloseV2(item, "closed")) return "";
+  return `<div class="inline-actions"><button class="table-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="closed">Kapat</button></div>`;
 };
 
 openInvestigationReview = function patchedOpenInvestigationReview(item, status) {
   if (!ihpInvestigationCanCloseV2(item, status)) {
-    showToast(
-      item?.defense_status === "pending"
-        ? "Savunma aşaması tamamlanmadan soruşturma kapatılamaz."
-        : item?.hearing_required && !item?.hearing_held_at
-          ? "Zorunlu duruşma tamamlanmadan soruşturma kapatılamaz."
-        : "Bu işlem için önce soruşturma sorumluluğunu devralmalısınız.",
-      "error"
-    );
+    showToast("Soruşturmayı yalnızca dosyayı açan yetkili kapatabilir.", "error");
     return;
   }
   modal({
@@ -144,7 +73,7 @@ openInvestigationReview = function patchedOpenInvestigationReview(item, status) 
       <form class="form-stack" data-form="investigation-review" data-id="${esc(item.id)}" data-status="${esc(status)}">
         <div class="setup-box"><strong>${esc(item.title)}</strong><p class="security-note">${esc(item.description || "")}</p></div>
         <div class="form-group"><label for="investigation-decision-note">Karar / işlem notu</label><textarea class="field" id="investigation-decision-note" name="decisionNote" required maxlength="900">${esc(item.decision_note || "")}</textarea></div>
-        <p class="security-note">Soruşturma yalnızca sorumlu DK görevlisi tarafından ve savunma aşaması tamamlandıktan sonra kapatılabilir.</p>
+        <p class="security-note">Kapatma işlemi soruşturmayı açan yetkili adına kalıcı olarak kaydedilir.</p>
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Kaydet</button></div>
       </form>
     `

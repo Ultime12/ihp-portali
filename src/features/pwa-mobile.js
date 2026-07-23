@@ -1,6 +1,12 @@
 const IHP_PWA_MOBILE_V1 = true;
 const IHP_PWA_VARIANT = document.querySelector('meta[name="ihp-app-variant"]')?.content || "main";
 const IHP_IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const IHP_PWA_APP = {
+  main: { name: "İHP Mobil", shortName: "İHP", icon: "/assets/pwa/icon-192.png" },
+  dk: { name: "İHP Disiplin Kurulu", shortName: "İHP DK", icon: "/assets/pwa/dk/icon-192.png" },
+  finance: { name: "İHP Finans", shortName: "İHP Finans", icon: "/assets/pwa/finance/icon-192.png" },
+  mail: { name: "İHP Mail", shortName: "İHP Mail", icon: "/assets/pwa/icon-192.png" }
+}[IHP_PWA_VARIANT] || { name: "İHP Mobil", shortName: "İHP", icon: "/assets/pwa/icon-192.png" };
 const ihpPwaState = {
   installPrompt: null,
   registration: null,
@@ -167,8 +173,8 @@ function ihpMobilePage() {
 }
 
 function ihpInstallFloatingButton() {
-  if (IHP_PWA_VARIANT !== "main" || ihpPwaStandalone()) return "";
-  return `<button class="pwa-install-floating" type="button" data-action="pwa-install">${icon("download")}<span><strong>İHP Mobil</strong><small>Telefonuma kur</small></span></button>`;
+  if (ihpPwaStandalone()) return "";
+  return `<button class="pwa-install-floating pwa-install-${esc(IHP_PWA_VARIANT)}" type="button" data-action="pwa-install"><img class="pwa-install-icon" src="${esc(IHP_PWA_APP.icon)}" alt="" /><span><strong>${esc(IHP_PWA_APP.shortName)}</strong><small>Telefonuma kur</small></span></button>`;
 }
 
 function ihpOpenInstallHelp() {
@@ -179,7 +185,7 @@ function ihpOpenInstallHelp() {
       <span>3</span><p>Sağ üstteki <strong>Ekle</strong> düğmesiyle kurulumu tamamlayın.</p>
     </div>`;
   modal({
-    title: "İHP Mobil'i yükle",
+    title: `${IHP_PWA_APP.name} uygulamasını yükle`,
     subtitle: IHP_IS_IOS ? "iPhone ve iPad kurulumu" : "Tarayıcı menüsünden yükleme",
     body: IHP_IS_IOS ? iosBody : `<p class="section-copy">Tarayıcı menüsünü açıp “Uygulamayı yükle” veya “Ana ekrana ekle” seçeneğini kullanın.</p>`,
     actions: `<div class="modal-actions"><button class="btn btn-primary btn-sm" type="button" data-action="close-modal">Tamam</button></div>`
@@ -187,13 +193,13 @@ function ihpOpenInstallHelp() {
 }
 
 async function ihpRequestInstall() {
-  if (ihpPwaStandalone()) return showToast("İHP Mobil bu cihazda zaten kurulu.");
+  if (ihpPwaStandalone()) return showToast(`${IHP_PWA_APP.name} bu cihazda zaten kurulu.`);
   if (!ihpPwaState.installPrompt) return ihpOpenInstallHelp();
   const prompt = ihpPwaState.installPrompt;
   ihpPwaState.installPrompt = null;
   await prompt.prompt();
   const result = await prompt.userChoice;
-  showToast(result.outcome === "accepted" ? "İHP Mobil kuruluyor." : "Kurulum iptal edildi.", result.outcome === "accepted" ? "success" : "error");
+  showToast(result.outcome === "accepted" ? `${IHP_PWA_APP.name} kuruluyor.` : "Kurulum iptal edildi.", result.outcome === "accepted" ? "success" : "error");
   render();
 }
 
@@ -282,15 +288,25 @@ if (IHP_PWA_VARIANT === "main") {
 const ihpPwaBaseLoginPage = loginPage;
 loginPage = function ihpPwaLoginPage() {
   const base = ihpPwaBaseLoginPage();
-  if (!ihpPasskeySupported()) return `${base}${IHP_PWA_VARIANT === "main" ? ihpInstallFloatingButton() : ""}`;
+  if (!ihpPasskeySupported()) return `${base}${ihpInstallFloatingButton()}`;
   const passkey = `<div class="pwa-login-divider"><span>veya</span></div><button class="pwa-passkey-login" type="button" data-action="pwa-passkey-login">${icon("lock")} Face ID veya cihaz anahtarıyla giriş</button>`;
-  return `${base.replace("</form>", `</form>${passkey}`)}${IHP_PWA_VARIANT === "main" ? ihpInstallFloatingButton() : ""}`;
+  return `${base.replace("</form>", `</form>${passkey}`)}${ihpInstallFloatingButton()}`;
 };
+
+function ihpSyncVariantInstallButton() {
+  if (IHP_PWA_VARIANT === "main" || ihpPwaStandalone() || !state.profile) return;
+  if (!document.querySelector(".pwa-install-floating")) {
+    document.body.insertAdjacentHTML("beforeend", ihpInstallFloatingButton());
+  }
+}
 
 const ihpPwaBaseRender = render;
 render = function ihpPwaRender() {
   ihpPwaBaseRender();
-  requestAnimationFrame(ihpSyncAppBadge);
+  requestAnimationFrame(() => {
+    ihpSyncAppBadge();
+    ihpSyncVariantInstallButton();
+  });
 };
 
 const ihpPwaBaseHandleClick = handleClick;
@@ -351,7 +367,7 @@ globalThis.addEventListener("beforeinstallprompt", (event) => {
 
 globalThis.addEventListener("appinstalled", () => {
   ihpPwaState.installPrompt = null;
-  showToast("İHP Mobil telefonunuza kuruldu.", "success");
+  showToast(`${IHP_PWA_APP.name} telefonunuza kuruldu.`, "success");
   if (!state.booting) render();
 });
 

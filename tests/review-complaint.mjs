@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import handler from "../serverless-handlers/review-complaint.js";
 
 process.env.SUPABASE_URL = "https://mock.supabase.test";
@@ -100,20 +101,29 @@ const officialCreateResult = await invoke({
   roles: ["member"],
   body: {
     action: "create",
-    accusedProfileId: "target-member",
-    subject: "Resmî şikâyet",
     description: "Olayın tarih ve ayrıntılarını içeren resmî açıklama.",
-    evidenceNote: "Mesaj ve ekran görüntüsü kayıtları",
-    requestedOutcome: "Disiplin Kurulu tarafından incelenmesi",
-    eventDate: new Date().toISOString().slice(0, 10),
-    learnedAt: new Date().toISOString().slice(0, 10),
-    priority: "normal"
+    evidenceNote: "Mesaj ve ekran görüntüsü kayıtları"
   },
   complaint: null
 });
 assert.equal(officialCreateResult.statusCode, 200);
 assert.equal(officialCreateResult.payload.complaint.source_channel, "dk_portal");
 assert.equal(officialCreateResult.payload.complaint.regulation_version, "2026-07-19");
+assert.equal(officialCreateResult.payload.complaint.accused_profile_id, null);
+assert.equal(officialCreateResult.payload.complaint.event_date, new Date().toISOString().slice(0, 10));
+assert.equal(officialCreateResult.payload.complaint.requested_outcome, "Disiplin Kurulu incelemesi");
+
+const appSource = await readFile(new URL("../src/app.ts", import.meta.url), "utf8");
+const complaintForm = appSource.slice(
+  appSource.indexOf("function openComplaint()"),
+  appSource.indexOf("function openComplaintReview")
+);
+assert.match(complaintForm, /name="description"/);
+assert.match(complaintForm, /name="evidenceNote"/);
+assert.match(complaintForm, /data-case-attachments/);
+assert.doesNotMatch(complaintForm, /name="accusedProfileId"/);
+assert.doesNotMatch(complaintForm, /name="priority"/);
+assert.doesNotMatch(complaintForm, /name="requestedOutcome"/);
 
 const successfulClaimResult = await invoke({
   body: { id: "available", claim: true, status: "reviewing" },

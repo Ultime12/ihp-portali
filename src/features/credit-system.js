@@ -38,7 +38,29 @@ if (!navItems.some(([id]) => id === CREDIT_MANAGEMENT_PAGE_ID)) {
 }
 
 function creditData() {
-  return state.cache.creditSystem || { settings: {}, accounts: [], profiles: [], loans: [], installments: [], transactions: [], cheques: [], gameRequests: [] };
+  const source = state.cache.creditSystem;
+  const data = source && typeof source === "object" ? source : {};
+  const arrays = [
+    "accounts",
+    "profiles",
+    "loans",
+    "installments",
+    "transactions",
+    "cheques",
+    "gameRequests",
+    "scheduledTransfers",
+    "instruments",
+    "series"
+  ];
+  const normalized = {
+    ...data,
+    settings: data.settings && typeof data.settings === "object" ? data.settings : {},
+    account: data.account && typeof data.account === "object" ? data.account : null
+  };
+  arrays.forEach((key) => {
+    normalized[key] = Array.isArray(data[key]) ? data[key] : [];
+  });
+  return normalized;
 }
 
 function creditProfileMap(data = creditData()) {
@@ -121,11 +143,13 @@ function creditTransactionAmountMarkup(item = {}) {
 
 function creditSettingsForm(settings) {
   const allowances = settings.role_allowances || {};
+  const additionalRoleRate = Number(settings.additional_role_allowance_basis_points ?? 3000) / 100;
   return `
     <section class="panel glass credit-settings-panel">
-      <div class="panel-head"><div><span class="panel-kicker">Admin ayarları</span><h3>Ekonomi kuralları</h3></div>${badge("Tüm üyelere açık", "green")}</div>
+      <div class="panel-head"><div><span class="panel-kicker">Admin ayarları</span><h3>Ekonomi kuralları</h3></div>${badge("Yalnızca Admin", "red")}</div>
       <div class="credit-settings-grid">
         <label>Transfer vergisi (%)<input class="field" data-credit-tax type="number" min="0" max="50" step="0.1" value="${Number(settings.transfer_tax_basis_points || 0) / 100}" /></label>
+        <label>Ek görev maaş katkısı (%)<input class="field" data-credit-additional-role-rate type="number" min="0" max="100" step="0.1" value="${additionalRoleRate}" /></label>
         <label>Kredi faizi (%)<input class="field" data-credit-interest type="number" min="0" max="100" step="0.1" value="${Number(settings.loan_interest_basis_points || 0) / 100}" /></label>
         <label>En yüksek kredi<input class="field" data-credit-max-loan type="number" min="1" max="1000000" value="${Number(settings.max_loan_amount || 5000)}" /></label>
         <label>En uzun vade (gün)<input class="field" data-credit-max-term type="number" min="1" max="30" value="${Number(settings.max_term_days || 30)}" /></label>
@@ -133,7 +157,7 @@ function creditSettingsForm(settings) {
         <label class="switch-row"><span>Haftalık rütbe ödemesi</span><input type="checkbox" data-credit-weekly ${settings.weekly_allowance_enabled ? "checked" : ""} /></label>
         <label>İlk / sonraki ödeme zamanı<input class="field" data-credit-weekly-next type="datetime-local" min="${creditDateTimeLocalValue(new Date(Date.now() + 60_000))}" value="${creditDateTimeLocalValue(settings.weekly_allowance_next_at || new Date(Date.now() + 24 * 60 * 60 * 1000))}" ${settings.weekly_allowance_enabled ? "" : "disabled"} /></label>
       </div>
-      <details class="credit-allowance-details"><summary>Rütbeye göre haftalık kredi</summary><div class="credit-allowance-grid">${ROLE_OPTIONS.map(([role, label]) => `<label>${esc(label)}<input class="field" data-credit-allowance="${role}" type="number" min="0" max="1000000" value="${Number(allowances[role] || 0)}" /></label>`).join("")}</div></details>
+      <details class="credit-allowance-details"><summary>Rütbeye göre haftalık kredi</summary><div class="credit-allowance-grid">${ROLE_OPTIONS.map(([role, label]) => `<label>${esc(label)}<input class="field" data-credit-allowance="${role}" type="number" min="0" max="1000000" value="${Number(allowances[role] || 0)}" /></label>`).join("")}</div><p class="credit-safety-note">En yüksek ücretli görev tam ödenir; diğer bağımsız görevler %${additionalRoleRate.toLocaleString("tr-TR")} katkı sağlar. DK hiyerarşisinde yalnızca en üst DK görevi hesaplanır. Baş Temsilci ile Temsilci ayrı görevlerdir.</p></details>
       <div class="panel-actions"><button class="btn btn-primary btn-sm" type="button" data-action="save-credit-settings">Kredi ayarlarını kaydet</button></div>
       <p class="credit-safety-note">Son ödeme: <strong>${settings.weekly_allowance_last_at ? formatDate(settings.weekly_allowance_last_at, true) : "Henüz yapılmadı"}</strong>. Etkin olduğunda sistem seçilen zamandan başlayarak her 7 günde bir ödeme yapar.</p>
     </section>
@@ -385,7 +409,7 @@ function creditMemberPage() {
         <div><span>Transfer vergisi</span><strong>%${taxRate.toLocaleString("tr-TR")}</strong></div>
         <div><span>Kredi faizi</span><strong>%${interestRate.toLocaleString("tr-TR")}</strong></div>
         <div><span>Açık taksit</span><strong>${dueInstallments.length}</strong><small>${activeLoan ? creditLoanLabel(activeLoan.status) : "Aktif kredi yok"}</small></div>
-        <div><span>Son haftalık ödeme</span><strong>${settings.weekly_allowance_last_at ? formatDate(settings.weekly_allowance_last_at) : "—"}</strong><small>Sonraki: ${settings.weekly_allowance_enabled && settings.weekly_allowance_next_at ? formatDate(settings.weekly_allowance_next_at, true) : "Planlanmadı"}</small></div>
+        <div><span>Haftalık maaşım</span><strong>${creditAmount(data.weeklyAllowance || 0)}</strong><small>Sonraki: ${settings.weekly_allowance_enabled && settings.weekly_allowance_next_at ? formatDate(settings.weekly_allowance_next_at, true) : "Planlanmadı"}</small></div>
       </div>
     </section>
     ${gameCreditRequestsPanel(data)}
@@ -506,10 +530,10 @@ function creditAccountsPanel(data) {
   return `
     <section class="panel glass credit-account-admin-panel">
       <div class="panel-head"><div><span class="panel-kicker">Kredi Yönetimi bakiye merkezi</span><h3>Hesaplara kredi ekle veya çek</h3></div>${badge(`${accounts.length} aktif hesap`, "blue")}</div>
-      ${accounts.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Hesap sahibi</th><th>Hesap kodu</th><th>Bakiye</th><th>İşlem</th></tr></thead><tbody>${accounts.map((account) => {
+      ${accounts.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Hesap sahibi</th><th>Hesap kodu</th><th>Haftalık maaş</th><th>Bakiye</th><th>İşlem</th></tr></thead><tbody>${accounts.map((account) => {
         const member = profiles.get(account.profile_id);
         const ownOfficerAccount = !hasRole("super_admin") && account.profile_id === state.profile?.id;
-        return `<tr><td><strong>${esc(member?.display_name || "Bilinmeyen hesap")}</strong><small class="table-subtitle">${esc(member?.email || "")}</small></td><td><code>${esc(account.account_code)}</code></td><td><strong>${creditAmount(account.balance)}</strong></td><td>${ownOfficerAccount ? badge("Kendi hesabın", "gray") : `<button class="table-action" type="button" data-action="open-credit-adjustment" data-id="${esc(account.id)}" data-name="${esc(member?.display_name || account.account_code)}" data-balance="${Number(account.balance || 0)}">Bakiye düzenle</button>`}</td></tr>`;
+        return `<tr><td><strong>${esc(member?.display_name || "Bilinmeyen hesap")}</strong><small class="table-subtitle">${esc(member?.email || "")}</small></td><td><code>${esc(account.account_code)}</code></td><td><strong>${creditAmount(member?.weekly_allowance || 0)}</strong></td><td><strong>${creditAmount(account.balance)}</strong></td><td>${ownOfficerAccount ? badge("Kendi hesabın", "gray") : `<button class="table-action" type="button" data-action="open-credit-adjustment" data-id="${esc(account.id)}" data-name="${esc(member?.display_name || account.account_code)}" data-balance="${Number(account.balance || 0)}">Bakiye düzenle</button>`}</td></tr>`;
       }).join("")}</tbody></table></div>` : emptyCard("Henüz açılmış hesap yok", "Kullanıcılar bilgilerini onaylayıp hesap açtığında burada görünür.")}
     </section>
   `;
@@ -826,6 +850,7 @@ handleClick = async function creditHandleClick(event) {
         module: "credit",
         action: "update_settings",
         transferTaxBasisPoints: Math.round(Number(document.querySelector("[data-credit-tax]").value) * 100),
+        additionalRoleAllowanceBasisPoints: Math.round(Number(document.querySelector("[data-credit-additional-role-rate]").value) * 100),
         loanInterestBasisPoints: Math.round(Number(document.querySelector("[data-credit-interest]").value) * 100),
         maxLoanAmount: Number(document.querySelector("[data-credit-max-loan]").value),
         maxTermDays: Number(document.querySelector("[data-credit-max-term]").value),

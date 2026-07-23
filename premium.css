@@ -799,6 +799,38 @@ body.modal-open { overflow: hidden; }
 .credit-settings-grid > label, .credit-allowance-grid label { color: var(--text-soft); display: grid; font-size: .76rem; gap: .38rem; }
 .credit-allowance-details { background: rgba(5, 20, 43, .3); border: 1px solid rgba(145, 195, 255, .1); border-radius: 17px; margin-top: .85rem; padding: .8rem; }
 .credit-allowance-details summary { cursor: pointer; font-weight: 720; }
+
+.case-detail-disclosure {
+  margin-top: .9rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.case-detail-disclosure summary {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  padding: .7rem .9rem;
+  color: var(--text);
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 780;
+  list-style: none;
+}
+
+.case-detail-disclosure summary::-webkit-details-marker { display: none; }
+.case-detail-disclosure summary::after { content: "+"; color: var(--accent); font-size: 1.15rem; }
+.case-detail-disclosure[open] summary::after { content: "−"; }
+.case-detail-disclosure > .meta-list { margin: 0 .8rem .8rem; }
+.case-detail-disclosure > .inline-actions { padding: 0 .8rem .8rem; }
+.complaint-event-field { min-height: 150px; resize: vertical; }
+
+.premium-app-shell:not(.finance-terminal-shell) .metric-card {
+  min-height: 126px;
+}
 .credit-allowance-grid { display: grid; gap: .65rem; grid-template-columns: repeat(4, minmax(0,1fr)); margin-top: .8rem; }
 .credit-safety-note { color: var(--text-soft); font-size: .76rem; margin: .7rem 0 0; }
 .credit-dashboard-grid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .75fr); margin: 1rem 0; }

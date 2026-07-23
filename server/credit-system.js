@@ -1,4 +1,5 @@
 import { createHash, randomInt } from "node:crypto";
+import { calculateWeeklyRoleAllowance } from "./salary-policy.js";
 
 const ROLE_KEYS = new Set([
   "super_admin", "president", "vice_president", "presidential_aide", "spokesperson",
@@ -64,6 +65,7 @@ async function rpc(name, body) {
 async function processSchedulesBestEffort() {
   try {
     await rpc("process_credit_schedules", {});
+    await reconcileLatestWeeklyAllowance();
   } catch {
     // Status pages stay available even if the background scheduler is temporarily unavailable.
   }
@@ -74,6 +76,82 @@ async function rows(path, errorMessage) {
   const payload = await response.json().catch(() => []);
   if (!response.ok) throw new Error(errorMessage);
   return payload;
+}
+
+async function reconcileLatestWeeklyAllowance() {
+  const [settingsRows, runRows] = await Promise.all([
+    rows(
+      "/rest/v1/credit_settings?id=eq.main&select=role_allowances,additional_role_allowance_basis_points&limit=1",
+      "Haftalik odeme ayarlari alinamadi."
+    ),
+    rows(
+      "/rest/v1/credit_cron_runs?run_type=eq.weekly_allowance&select=run_key,created_at&order=created_at.desc&limit=1",
+      "Haftalik odeme kaydi alinamadi."
+    )
+  ]);
+  const settings = settingsRows[0];
+  const run = runRows[0];
+  if (!settings || !run) return;
+
+  const reference = String(run.run_key || "");
+  const correctionReference = `Haftalik gorev maasi duzeltmesi ${reference}`;
+  const salaryTransactions = await rows(
+    `/rest/v1/credit_transactions?kind=eq.weekly_allowance&reference=eq.${encodeURIComponent(reference)}&select=account_id,amount`,
+    "Haftalik odeme hareketleri alinamadi."
+  );
+  if (!salaryTransactions.length) return;
+
+  const accountIds = [...new Set(salaryTransactions.map((item) => item.account_id).filter(Boolean))];
+  const [accounts, existingCorrections, adminRows] = await Promise.all([
+    rows(
+      `/rest/v1/credit_accounts?id=in.(${accountIds.join(",")})&select=id,profile_id`,
+      "Haftalik odeme hesaplari alinamadi."
+    ),
+    rows(
+      `/rest/v1/credit_transactions?kind=eq.admin_adjustment&reference=eq.${encodeURIComponent(correctionReference)}&select=account_id`,
+      "Haftalik odeme duzeltmeleri alinamadi."
+    ),
+    rows(
+      "/rest/v1/profiles?status=eq.active&roles=cs.%7Bsuper_admin%7D&select=id&limit=1",
+      "Admin profili alinamadi."
+    )
+  ]);
+  const adminId = adminRows[0]?.id;
+  if (!adminId) return;
+
+  const accountById = new Map(accounts.map((account) => [account.id, account]));
+  const profileIds = [...new Set(accounts.map((account) => account.profile_id).filter(Boolean))];
+  const profiles = profileIds.length
+    ? await rows(
+        `/rest/v1/profiles?id=in.(${profileIds.join(",")})&select=id,role,roles,status,is_system_account`,
+        "Haftalik odeme profilleri alinamadi."
+      )
+    : [];
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const correctedAccounts = new Set(existingCorrections.map((item) => item.account_id));
+
+  for (const transaction of salaryTransactions) {
+    if (correctedAccounts.has(transaction.account_id)) continue;
+    const account = accountById.get(transaction.account_id);
+    const profile = profileById.get(account?.profile_id);
+    if (!account || !profile || profile.status !== "active" || profile.is_system_account) continue;
+
+    const expected = calculateWeeklyRoleAllowance(
+      profile.roles,
+      profile.role,
+      settings.role_allowances,
+      settings.additional_role_allowance_basis_points
+    );
+    const delta = expected - Number(transaction.amount || 0);
+    if (!delta) continue;
+
+    await rpc("admin_adjust_credit_balance", {
+      p_admin_profile_id: adminId,
+      p_account_id: account.id,
+      p_delta: delta,
+      p_reason: correctionReference
+    }).catch(() => undefined);
+  }
 }
 
 async function adminStatus() {
@@ -87,17 +165,43 @@ async function adminStatus() {
     rows("/rest/v1/credit_cheques?select=id,issuer_account_id,code_last4,amount,status,redeemed_by_account_id,issued_at,redeemed_at&order=issued_at.desc&limit=150", "Cekler alinamadi."),
     rows("/rest/v1/credit_scheduled_transfers?select=*&order=created_at.desc&limit=150", "Planli transferler alinamadi.")
   ]);
-  return { settings: settingsRows[0] || null, accounts, profiles, loans, installments, transactions, cheques, scheduledTransfers };
+  const settings = settingsRows[0] || null;
+  const salaryProfiles = profiles.map((profile) => ({
+    ...profile,
+    weekly_allowance: settings
+      ? calculateWeeklyRoleAllowance(
+          profile.roles,
+          profile.role,
+          settings.role_allowances,
+          settings.additional_role_allowance_basis_points
+        )
+      : 0
+  }));
+  return { settings, accounts, profiles: salaryProfiles, loans, installments, transactions, cheques, scheduledTransfers };
 }
 
 async function memberStatus(profileId) {
-  const [settingsRows, accountRows, gameRequests] = await Promise.all([
-    rows("/rest/v1/credit_settings?id=eq.main&select=member_access_enabled,weekly_allowance_enabled,weekly_allowance_next_at,weekly_allowance_last_at,transfer_tax_basis_points,loan_interest_basis_points,max_loan_amount,max_term_days,grace_days&limit=1", "Kredi ayarlari alinamadi."),
+  const [settingsRows, accountRows, gameRequests, profileRows] = await Promise.all([
+    rows("/rest/v1/credit_settings?id=eq.main&select=member_access_enabled,weekly_allowance_enabled,weekly_allowance_next_at,weekly_allowance_last_at,transfer_tax_basis_points,loan_interest_basis_points,max_loan_amount,max_term_days,grace_days,role_allowances,additional_role_allowance_basis_points&limit=1", "Kredi ayarlari alinamadi."),
     rows(`/rest/v1/credit_accounts?profile_id=eq.${encodeURIComponent(profileId)}&status=eq.active&select=*&limit=1`, "Kredi hesabi alinamadi."),
-    rows(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(profileId)}&select=*&order=requested_at.desc&limit=20`, "Oyun kredi talepleri alinamadi.")
+    rows(`/rest/v1/game_credit_requests?profile_id=eq.${encodeURIComponent(profileId)}&select=*&order=requested_at.desc&limit=20`, "Oyun kredi talepleri alinamadi."),
+    rows(`/rest/v1/profiles?id=eq.${encodeURIComponent(profileId)}&select=role,roles&limit=1`, "Uye gorevleri alinamadi.")
   ]);
+  const rawSettings = settingsRows[0] || null;
+  const profile = profileRows[0] || null;
+  const weeklyAllowance = rawSettings && profile
+    ? calculateWeeklyRoleAllowance(
+        profile.roles,
+        profile.role,
+        rawSettings.role_allowances,
+        rawSettings.additional_role_allowance_basis_points
+      )
+    : 0;
+  const settings = rawSettings
+    ? Object.fromEntries(Object.entries(rawSettings).filter(([key]) => !["role_allowances", "additional_role_allowance_basis_points"].includes(key)))
+    : null;
   const account = accountRows[0] || null;
-  if (!account) return { settings: settingsRows[0] || null, account: null, transactions: [], cheques: [], loans: [], installments: [], scheduledTransfers: [], gameRequests };
+  if (!account) return { settings, weeklyAllowance, account: null, transactions: [], cheques: [], loans: [], installments: [], scheduledTransfers: [], gameRequests };
   const openedAt = encodeURIComponent(account.opened_at);
   const [transactions, cheques, loans, scheduledTransfers] = await Promise.all([
     rows(`/rest/v1/credit_transactions?account_id=eq.${encodeURIComponent(account.id)}&created_at=gte.${openedAt}&select=*&order=created_at.desc&limit=100`, "Hesap hareketleri alinamadi."),
@@ -118,7 +222,7 @@ async function memberStatus(profileId) {
   const installments = loanIds.length
     ? await rows(`/rest/v1/credit_installments?loan_id=in.(${loanIds.join(",")})&select=*&order=due_at.asc`, "Taksitler alinamadi.")
     : [];
-  return { settings: settingsRows[0] || null, account, transactions, cheques, loans, installments, scheduledTransfers: enrichedScheduledTransfers, gameRequests };
+  return { settings, weeklyAllowance, account, transactions, cheques, loans, installments, scheduledTransfers: enrichedScheduledTransfers, gameRequests };
 }
 
 function boundedInteger(value, minimum, maximum) {
@@ -171,6 +275,7 @@ export default async function handler(request, response) {
     });
     const cronPayload = await cronResponse.json().catch(() => null);
     if (!cronResponse.ok) return json(response, 500, { error: cronPayload?.message || "Otomatik kredi islemleri tamamlanamadi." });
+    await reconcileLatestWeeklyAllowance().catch(() => undefined);
     return json(response, 200, cronPayload || { ok: true });
   }
   if (request.method !== "POST") return json(response, 405, { error: "Yalnizca POST veya cron GET istegi kabul edilir." });
@@ -196,6 +301,7 @@ export default async function handler(request, response) {
     if (action === "update_settings") {
       if (!actor.isAdmin) return json(response, 403, { error: "Admin yetkisi gerekir." });
       const transferTax = boundedInteger(request.body?.transferTaxBasisPoints, 0, 5000);
+      const additionalRoleAllowance = boundedInteger(request.body?.additionalRoleAllowanceBasisPoints, 0, 10000);
       const interest = boundedInteger(request.body?.loanInterestBasisPoints, 0, 10000);
       const maxLoan = boundedInteger(request.body?.maxLoanAmount, 1, 1_000_000);
       const maxTerm = boundedInteger(request.body?.maxTermDays, 1, 30);
@@ -203,7 +309,7 @@ export default async function handler(request, response) {
       const allowances = request.body?.roleAllowances || {};
       const weeklyEnabled = Boolean(request.body?.weeklyAllowanceEnabled);
       const weeklyNext = request.body?.weeklyAllowanceNextAt ? new Date(request.body.weeklyAllowanceNextAt) : null;
-      if ([transferTax, interest, maxLoan, maxTerm, grace].includes(null) || typeof allowances !== "object") {
+      if ([transferTax, additionalRoleAllowance, interest, maxLoan, maxTerm, grace].includes(null) || typeof allowances !== "object") {
         return json(response, 400, { error: "Kredi ayarlari gecersiz." });
       }
       if (weeklyEnabled && (!weeklyNext || Number.isNaN(weeklyNext.getTime()) || weeklyNext.getTime() < Date.now() + 30_000)) {
@@ -223,6 +329,7 @@ export default async function handler(request, response) {
           weekly_allowance_enabled: weeklyEnabled,
           weekly_allowance_next_at: weeklyNext ? weeklyNext.toISOString() : null,
           transfer_tax_basis_points: transferTax,
+          additional_role_allowance_basis_points: additionalRoleAllowance,
           loan_interest_basis_points: interest,
           max_loan_amount: maxLoan,
           max_term_days: maxTerm,

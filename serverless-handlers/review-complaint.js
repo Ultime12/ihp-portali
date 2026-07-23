@@ -111,21 +111,25 @@ async function audit(actorId, complaintId, summary, details = {}) {
 }
 
 async function createComplaint(actor, body, response) {
-  const accusedProfileId = String(body.accusedProfileId || "");
-  const subject = String(body.subject || "").trim();
+  const accusedProfileId = String(body.accusedProfileId || "").trim();
   const description = String(body.description || "").trim();
   const evidenceNote = String(body.evidenceNote || "").trim();
-  const requestedOutcome = String(body.requestedOutcome || "").trim();
+  const generatedSubject = description.replace(/\s+/g, " ").slice(0, 137).trim();
+  const subject = String(body.subject || generatedSubject || "Olay bildirimi").trim();
+  const requestedOutcome = String(body.requestedOutcome || "Disiplin Kurulu incelemesi").trim();
   const lateFilingReason = String(body.lateFilingReason || "").trim();
   const priority = String(body.priority || "normal");
-  const eventDate = parseDateOnly(body.eventDate);
-  const learnedAt = parseDateOnly(body.learnedAt);
   const today = utcDateOnly();
+  const todayValue = today.toISOString().slice(0, 10);
+  const eventDateValue = String(body.eventDate || todayValue);
+  const learnedAtValue = String(body.learnedAt || todayValue);
+  const eventDate = parseDateOnly(eventDateValue);
+  const learnedAt = parseDateOnly(learnedAtValue);
   const earliestAllowed = new Date(today);
   earliestAllowed.setUTCDate(earliestAllowed.getUTCDate() - 30);
 
-  if (!accusedProfileId || accusedProfileId === actor.authUser.id) {
-    return json(response, 400, { error: "Şikâyet edilen aktif üye seçilmelidir; kişi kendisini şikâyet edemez." });
+  if (accusedProfileId === actor.authUser.id) {
+    return json(response, 400, { error: "Kişi kendisini şikâyet edemez." });
   }
   if (subject.length < 3 || subject.length > 140 || description.length < 10 || description.length > 12000) {
     return json(response, 400, { error: "Şikâyet başlığı veya olay açıklaması geçersiz." });
@@ -143,12 +147,14 @@ async function createComplaint(actor, body, response) {
     return json(response, 400, { error: "30 günlük süre aşıldıysa doğrulanabilir haklı neden açıklanmalıdır." });
   }
 
-  const targetResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(accusedProfileId)}&select=id,status,is_system_account&limit=1`
-  );
-  const [target] = await targetResponse.json().catch(() => []);
-  if (!targetResponse.ok || !target || target.status !== "active" || target.is_system_account) {
-    return json(response, 404, { error: "Şikâyet edilen aktif üye bulunamadı." });
+  if (accusedProfileId) {
+    const targetResponse = await supabaseRequest(
+      `/rest/v1/profiles?id=eq.${encodeURIComponent(accusedProfileId)}&select=id,status,is_system_account&limit=1`
+    );
+    const [target] = await targetResponse.json().catch(() => []);
+    if (!targetResponse.ok || !target || target.status !== "active" || target.is_system_account) {
+      return json(response, 404, { error: "Şikâyet edilen aktif üye bulunamadı." });
+    }
   }
 
   const insertResponse = await supabaseRequest("/rest/v1/complaints", {
@@ -157,14 +163,14 @@ async function createComplaint(actor, body, response) {
     body: JSON.stringify({
       complainant_profile_id: actor.authUser.id,
       created_by: actor.authUser.id,
-      accused_profile_id: accusedProfileId,
+      accused_profile_id: accusedProfileId || null,
       subject,
       description,
       evidence_note: evidenceNote,
       requested_outcome: requestedOutcome,
       late_filing_reason: lateFilingReason || null,
-      event_date: String(body.eventDate),
-      learned_at: String(body.learnedAt),
+      event_date: eventDateValue,
+      learned_at: learnedAtValue,
       priority,
       status: "new",
       regulation_version: CURRENT_REGULATION_VERSION,
@@ -177,8 +183,8 @@ async function createComplaint(actor, body, response) {
   }
 
   const complaint = inserted?.[0] || null;
-  await audit(actor.authUser.id, complaint?.id || accusedProfileId, "Resmî DK portalı şikâyeti oluşturuldu", {
-    accused_profile_id: accusedProfileId,
+  await audit(actor.authUser.id, complaint?.id || actor.authUser.id, "Resmî DK portalı şikâyeti oluşturuldu", {
+    accused_profile_id: accusedProfileId || null,
     regulation_version: CURRENT_REGULATION_VERSION
   });
   return json(response, 200, { ok: true, complaint });

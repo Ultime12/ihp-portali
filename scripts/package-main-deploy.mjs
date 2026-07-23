@@ -34,7 +34,7 @@ await writeFile(
     name: "ihp-portali-deployment",
     private: true,
     type: "module",
-    engines: { node: "24.x" },
+    engines: { node: "22.x" },
     dependencies: { "web-push": "3.6.7" }
   }, null, 2),
   "utf8"

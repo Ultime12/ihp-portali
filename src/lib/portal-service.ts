@@ -210,39 +210,43 @@ export async function uploadCaseAttachments(
   );
   validateCaseAttachmentFiles(files, existing.length);
 
-  const uploaded = [];
-  for (const file of files) {
-    const uniqueId = globalThis.crypto?.randomUUID?.()
-      || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const objectPath = [
-      profileId,
-      parentType,
-      parentId,
-      `${uniqueId}-${safeObjectFileName(file.name)}`
-    ].join("/");
-    const contentType = caseAttachmentContentType(file);
+  const pendingRows: Array<Record<string, string | number>> = [];
+  const uploadedPaths: string[] = [];
+  try {
+    for (const file of files) {
+      const uniqueId = globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const objectPath = [
+        profileId,
+        parentType,
+        parentId,
+        `${uniqueId}-${safeObjectFileName(file.name)}`
+      ].join("/");
+      const contentType = caseAttachmentContentType(file);
 
-    await uploadStorageObject(CASE_ATTACHMENT_BUCKET, objectPath, file, contentType);
-    try {
-      const rows = await restRequest("case_attachments", {
-        method: "POST",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify({
-          [parentColumn]: parentId,
-          uploaded_by: profileId,
-          file_name: file.name.slice(0, 180),
-          object_path: objectPath,
-          content_type: contentType,
-          size_bytes: file.size
-        })
+      await uploadStorageObject(CASE_ATTACHMENT_BUCKET, objectPath, file, contentType);
+      uploadedPaths.push(objectPath);
+      pendingRows.push({
+        [parentColumn]: parentId,
+        uploaded_by: profileId,
+        file_name: file.name.slice(0, 180),
+        object_path: objectPath,
+        content_type: contentType,
+        size_bytes: file.size
       });
-      uploaded.push(rows?.[0]);
-    } catch (error) {
-      await removeStorageObject(CASE_ATTACHMENT_BUCKET, objectPath).catch(() => undefined);
-      throw error;
     }
+
+    return await restRequest("case_attachments", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(pendingRows)
+    });
+  } catch (error) {
+    await Promise.allSettled(
+      uploadedPaths.map((objectPath) => removeStorageObject(CASE_ATTACHMENT_BUCKET, objectPath))
+    );
+    throw error;
   }
-  return uploaded;
 }
 
 export async function downloadCaseAttachment(attachment) {
@@ -339,6 +343,13 @@ export async function disciplineAppeal(payload: Record<string, any>) {
 }
 
 export async function applyDisciplineSanction(payload: Record<string, any>) {
+  return serverRequest("/api/apply-discipline", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function manageDisciplineRecord(payload: Record<string, any>) {
   return serverRequest("/api/apply-discipline", {
     method: "POST",
     body: JSON.stringify(payload)

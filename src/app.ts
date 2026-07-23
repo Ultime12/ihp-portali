@@ -38,6 +38,7 @@ import {
   loadSettings,
   loadYouthActivities,
   applyDisciplineSanction,
+  manageDisciplineRecord,
   manageMember,
   manageInvestigation,
   reviewComplaint,
@@ -534,6 +535,15 @@ function canReviewApplication(item) {
   }
   if (committeeName === "Gençlik Kolları") return hasRole("youth_chair");
   return false;
+}
+
+function canApproveApplication(item) {
+  if (!canReviewApplication(item)) return false;
+  if (hasRole("super_admin")) return true;
+  if (targetCommitteeName(item) === "Disiplin Kurulu") {
+    return hasRole("discipline_chair", "discipline_vice_chair");
+  }
+  return true;
 }
 
 function canClaimApplication(item) {
@@ -1243,10 +1253,9 @@ function dashboardPage() {
 
 function metric(label, value, note, iconName) {
   return `
-    <article class="metric-card glass">
+    <article class="metric-card glass" title="${esc(note)}" aria-label="${esc(label)}: ${esc(value)}. ${esc(note)}">
       <div class="metric-top"><span>${esc(label)}</span>${icon(iconName)}</div>
       <strong>${String(value).padStart(2, "0")}</strong>
-      <small>${esc(note)}</small>
     </article>
   `;
 }
@@ -1636,33 +1645,19 @@ const DISCIPLINE_CREDIT_TARIFFS = [
   ["S-03", "S-03 · En ağır sistem zararı", 1000000, "system"]
 ];
 
-const DISCIPLINE_COMPENSATION_TARIFFS = [
-  ["C-25", "25.000 kredi", 25000, 1],
-  ["C-50", "50.000 kredi", 50000, 1],
-  ["C-75", "75.000 kredi", 75000, 1],
-  ["C-100", "100.000 kredi", 100000, 1],
-  ["C-150", "150.000 kredi", 150000, 1],
-  ["C-200", "200.000 kredi", 200000, 1],
-  ["C-250", "250.000 kredi", 250000, 1],
-  ["C-350", "350.000 kredi", 350000, 1],
-  ["C-500", "500.000 kredi · iki bağımsız ağır sonuç gerekir", 500000, 2]
-];
-
 function disciplineTariff(value) {
   return DISCIPLINE_CREDIT_TARIFFS.find(([code]) => code === value) || null;
 }
 
-function disciplineCompensation(value) {
-  return DISCIPLINE_COMPENSATION_TARIFFS.find(([code]) => code === value) || null;
-}
-
 function disciplineFinancialRecipients(memberId = "") {
-  const source = (state.cache.members || []).length ? state.cache.members : state.cache.disciplineMembers || [];
-  const disciplineRoles = new Set(["discipline_chair", "discipline_vice_chair", "discipline_member"]);
+  const source = (state.cache.disciplineMembers || []).length
+    ? state.cache.disciplineMembers
+    : state.cache.members || [];
   return visibleProfiles(source).filter((profile) => (
     profile.id !== memberId
+    && profile.id !== state.profile?.id
+    && profile.status === "active"
     && !isSystemProfile(profile)
-    && !rolesOf(profile).some((role) => disciplineRoles.has(role))
   ));
 }
 
@@ -1918,7 +1913,7 @@ function applicationActions(item) {
       <div class="inline-actions">
         ${canClaimApplication(item) ? `<button class="table-action" type="button" data-action="claim-application" data-id="${esc(item.id)}">Sorumluluğu al</button>` : ""}
         <button class="table-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="reviewing">İncelemede</button>
-        <button class="table-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="accepted">Onayla</button>
+        ${canApproveApplication(item) ? `<button class="table-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="accepted">Onayla</button>` : ""}
         <button class="table-action danger-action" type="button" data-action="open-application-review" data-id="${esc(item.id)}" data-status="rejected">Reddet</button>
         ${hasRole("super_admin") ? `<button class="table-action danger-action" type="button" data-action="delete-application" data-id="${esc(item.id)}">Sil</button>` : ""}
       </div>
@@ -1984,6 +1979,10 @@ function applicationsPage() {
 
 function openApplicationReview(item, status) {
   if (!item || !canReviewApplication(item)) return;
+  if (status === "accepted" && !canApproveApplication(item)) {
+    showToast("Disiplin Kurulu üyeleri başvuruları inceleyebilir ancak üye kabul edemez.", "error");
+    return;
+  }
   modal({
     title: statusLabel(status),
     subtitle: `${applicationPersonLabel(item)} için başvuru kararı.`,
@@ -2158,38 +2157,18 @@ function complaintsPage() {
 }
 
 function openComplaint() {
-  const members = (state.cache.complaintMembers || state.cache.members || [])
-    .filter((member) => member.id !== state.profile?.id && member.status !== "left" && !isTechnicalSuperAdmin(member));
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Istanbul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date());
   modal({
     title: "Şikayet yaz",
-    subtitle: "Resmî başvuru yalnızca DK sistemi üzerinden ve doğrulanmış üye hesabıyla yapılır.",
+    subtitle: "Olayı ve varsa kanıtları iletin.",
     body: `
       <form class="form-stack" data-form="complaint">
-        <div class="form-grid">
-          <div class="form-group"><label for="complaint-accused">Şikâyet edilen üye</label><select class="field" id="complaint-accused" name="accusedProfileId" required><option value="">Üye seçin</option>${members.map((member) => `<option value="${esc(member.id)}">${esc(member.display_name)}</option>`).join("")}</select></div>
-          <div class="form-group"><label for="complaint-priority">Öncelik</label><select class="field" id="complaint-priority" name="priority">${["normal", "important", "urgent"].map((value) => `<option value="${value}">${priorityLabel(value)}</option>`).join("")}</select></div>
-        </div>
-        <div class="form-grid">
-          <div class="form-group"><label for="complaint-event-date">Olay tarihi</label><input class="field" id="complaint-event-date" name="eventDate" type="date" max="${esc(today)}" required /></div>
-          <div class="form-group"><label for="complaint-learned-at">Olayı öğrenme tarihi</label><input class="field" id="complaint-learned-at" name="learnedAt" type="date" max="${esc(today)}" value="${esc(today)}" required /><p class="security-note">Başvuru, öğrenme tarihinden itibaren 30 gün içinde yapılmalıdır.</p></div>
-        </div>
-        <div class="form-group"><label for="complaint-late-reason">Süre aşımı gerekçesi (gerekiyorsa)</label><textarea class="field" id="complaint-late-reason" name="lateFilingReason" maxlength="2000" placeholder="Öğrenme tarihinden sonra 30 gün geçtiyse sağlık, teknik engel veya başka doğrulanabilir haklı nedeni açıklayın."></textarea></div>
-        <div class="form-group"><label for="complaint-subject">Başlık</label><input class="field" id="complaint-subject" name="subject" required minlength="3" maxlength="140" /></div>
-        <div class="form-group"><label for="complaint-description">Olayın ayrıntılı açıklaması</label><textarea class="field" id="complaint-description" name="description" required minlength="10" maxlength="12000"></textarea></div>
-        <div class="form-group"><label for="complaint-evidence-note">Kanıt açıklaması</label><textarea class="field" id="complaint-evidence-note" name="evidenceNote" required minlength="3" maxlength="1200" placeholder="Mevcut kanıtları ve bunların olayla bağlantısını açıklayın."></textarea></div>
-        <div class="form-group"><label for="complaint-requested-outcome">Talep</label><textarea class="field" id="complaint-requested-outcome" name="requestedOutcome" required minlength="3" maxlength="2000" placeholder="Disiplin Kurulundan talep ettiğiniz işlemi açıkça belirtin."></textarea></div>
+        <div class="form-group"><label for="complaint-description">Olay</label><textarea class="field complaint-event-field" id="complaint-description" name="description" required minlength="10" maxlength="12000" placeholder="Ne oldu?"></textarea></div>
+        <div class="form-group"><label for="complaint-evidence-note">Kanıt notu</label><textarea class="field" id="complaint-evidence-note" name="evidenceNote" required minlength="3" maxlength="1200" placeholder="Kanıtı kısaca açıklayın."></textarea></div>
         <div class="form-group">
-          <label for="complaint-evidence-file">Fotoğraf veya dosya (isteğe bağlı)</label>
+          <label for="complaint-evidence-file">Fotoğraf veya dosya</label>
           <input class="field" id="complaint-evidence-file" type="file" multiple data-case-attachments accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.doc,.docx,.txt,image/jpeg,image/png,image/webp,image/heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
           <p class="security-note" data-case-attachment-status>En fazla 10 dosya; her biri en fazla 6 MB.</p>
         </div>
-        <p class="security-note">Ön inceleme başladıktan sonra başvuru geri çekilemez. Süresi aşan başvurular yalnızca doğrulanabilir haklı neden varsa değerlendirilir.</p>
         <div class="modal-actions"><button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button><button class="btn btn-primary btn-sm" type="submit">Şikayeti gönder</button></div>
       </form>
     `
@@ -2325,33 +2304,12 @@ function investigationDefenseStatusLabel(item) {
 }
 
 function investigationActions(item) {
-  const buttons = [];
-  if (!item) return "";
-  if (["cancelled", "closed"].includes(item.status)) return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
-  const assignedToOther = item.assigned_to && item.assigned_to !== state.profile?.id;
-  const canTakeFromAssignee = assignedToOther && (
-    hasRole("super_admin", "discipline_chair") ||
-    disciplineRank(state.profile) > disciplineRank(item.assignee)
-  );
-  if (!item.assigned_to || canTakeFromAssignee) {
-    buttons.push(`<button class="table-action" type="button" data-action="claim-investigation" data-id="${esc(item.id)}">${item.assigned_to ? "Sorumluluğu devral" : "Sorumluluğu al"}</button>`);
-  }
-  if (hasRole("super_admin") || item.assigned_to === state.profile?.id) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="closed">Kapat</button>`);
-  }
-  if (Number(item.extension_days || 0) === 0 && hasRole("super_admin", "discipline_chair")) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-investigation-extension" data-id="${esc(item.id)}">Süreyi uzat</button>`);
-  }
-  if ((hasRole("super_admin") || item.assigned_to === state.profile?.id) && !item.hearing_scheduled_at) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-hearing-schedule" data-id="${esc(item.id)}">Duruşma planla</button>`);
-  }
-  if ((hasRole("super_admin") || item.assigned_to === state.profile?.id) && item.hearing_scheduled_at && !item.hearing_held_at) {
-    buttons.push(`<button class="table-action" type="button" data-action="open-hearing-complete" data-id="${esc(item.id)}">Duruşmayı kaydet</button>`);
-  }
-  if (hasRole("discipline_chair")) {
-    buttons.push(`<button class="table-action danger-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="cancelled">İptal et</button>`);
-  }
-  return buttons.length ? `<div class="inline-actions">${buttons.join("")}</div>` : "";
+  if (
+    !item ||
+    ["cancelled", "closed"].includes(item.status) ||
+    (!hasRole("super_admin") && item.opened_by !== state.profile?.id)
+  ) return "";
+  return `<div class="inline-actions"><button class="table-action" type="button" data-action="open-investigation-review" data-id="${esc(item.id)}" data-status="closed">Kapat</button></div>`;
 }
 
 function investigationsPage() {
@@ -2390,7 +2348,7 @@ function investigationsPage() {
                       <div class="meta-row"><span>İlgili üye</span><strong>${esc(investigationSubjectLabel(item))}</strong></div>
                       <div class="meta-row"><span>Sınıflandırma</span><strong>${esc(investigationClassificationLabel(item.classification))}</strong></div>
                       <div class="meta-row"><span>İsnat edilen maddeler</span><strong>${esc((item.alleged_articles || []).join(", ") || "Arşiv kaydı")}</strong></div>
-                      <div class="meta-row"><span>Sorumlu</span><strong>${esc(item.assignee?.display_name || "Henüz alınmadı")}</strong></div>
+                      <div class="meta-row"><span>Soruşturmayı açan</span><strong>${esc(item.opener?.display_name || "Yetkili")}</strong></div>
                       <div class="meta-row"><span>Savunma</span><strong>${esc(investigationDefenseStatusLabel(item))}</strong></div>
                       ${item.defense_text ? `<div class="meta-row"><span>Savunma metni</span><strong>${esc(item.defense_text)}</strong></div>` : ""}
                       ${item.defense_note ? `<div class="meta-row"><span>Savunma işlem notu</span><strong>${esc(item.defense_note)}</strong></div>` : ""}
@@ -2426,7 +2384,7 @@ function openInvestigation(sourceComplaint = null) {
   );
   modal({
     title: "Soruşturma aç",
-    subtitle: "Dosya açıldıktan sonra bir Disiplin Kurulu personeli sorumluluğu alarak işlemi yürütür.",
+    subtitle: "Dosyayı açan Disiplin Kurulu yetkilisi soruşturmayı kapatır ve varsa ceza kararnamesini yazar.",
     body: `
       <form class="form-stack" data-form="investigation">
         <div class="form-group"><label for="investigation-subject">İlgili üye</label><select class="field" id="investigation-subject" name="subjectProfileId" required><option value="">Seçin</option>${members.map((member) => `<option value="${esc(member.id)}" ${sourceComplaint?.accused_profile_id === member.id ? "selected" : ""}>${esc(member.display_name)} · ${esc(roleLabels(member))}</option>`).join("")}</select></div>
@@ -2452,7 +2410,7 @@ function openInvestigation(sourceComplaint = null) {
 
 function openInvestigationReview(item, status) {
   if (!item) return;
-  const canReview = hasRole("discipline_chair") || item.assigned_to === state.profile?.id;
+  const canReview = hasRole("super_admin") || item.opened_by === state.profile?.id;
   if (!canReview) return;
   modal({
     title: statusLabel(status),
@@ -2908,6 +2866,7 @@ async function loadPage(page) {
         loadInvestigations().catch(() => [])
       ]);
       state.cache.discipline = records;
+      state.cache.members = members;
       state.cache.disciplineMembers = members;
       state.cache.investigations = investigations;
     }
@@ -3180,7 +3139,11 @@ function openDiscipline(item = null) {
   );
   const investigations = (state.cache.investigations || []).filter((row) => (
     row.id === item?.investigation_id
-    || (["open", "reviewing"].includes(row.status) && !usedInvestigationIds.has(row.id))
+    || (
+      ["open", "reviewing"].includes(row.status) &&
+      !usedInvestigationIds.has(row.id) &&
+      (hasRole("super_admin") || row.opened_by === state.profile?.id)
+    )
   ));
   const financialRecipients = disciplineFinancialRecipients(item?.member_id || "");
   modal({
@@ -3239,21 +3202,13 @@ function openDiscipline(item = null) {
               <option value="">Seçin</option>
               ${financialRecipients.map((profile) => `<option value="${esc(profile.id)}" ${item?.financial_recipient_profile_id === profile.id ? "selected" : ""}>${esc(profile.display_name)}</option>`).join("")}
             </select>
-            <p class="security-note">Kararı veren veya DK görevlisi alıcı olamaz.</p>
+            <p class="security-note">Ceza verilen üye ve kararı veren kişi alıcı olamaz; yalnızca aktif üyeler listelenir.</p>
           </div>
         </div>
-        <div class="form-grid" data-discipline-compensation-fields>
-          <div class="form-group">
-            <label for="discipline-compensation">Doğrulanabilir zarar tazminatı</label>
-            <select class="field" id="discipline-compensation" name="compensation_code">
-              <option value="">Tazminat yok</option>
-              ${DISCIPLINE_COMPENSATION_TARIFFS.map(([code, label]) => `<option value="${code}" ${item?.compensation_code === code ? "selected" : ""}>${esc(label)}</option>`).join("")}
-            </select>
-          </div>
-          <div class="form-group" data-discipline-independent-outcomes hidden>
-            <label for="discipline-independent-outcomes">Bağımsız ağır zarar sonucu</label>
-            <input class="field" id="discipline-independent-outcomes" name="independent_heavy_outcomes" type="number" min="1" max="10" step="1" value="1" />
-          </div>
+        <div class="form-group" data-discipline-compensation-fields>
+          <label for="discipline-compensation">Tazminat tutarı</label>
+          <input class="field" id="discipline-compensation" name="compensation_amount" type="number" min="0" max="1000000000" step="1" value="${esc(item?.compensation_amount || 0)}" inputmode="numeric" />
+          <p class="security-note">Tazminat uygulanmayacaksa 0 bırakın. Vergi ve kesin borç toplamı sistem tarafından hesaplanır.</p>
         </div>
         <div class="form-group" data-discipline-compensation-evidence hidden>
           <label for="discipline-compensation-evidence">Tazminat delili ve zarar hesabı</label>
@@ -3387,48 +3342,33 @@ function openDisciplineAppealReview(item, appealDecision) {
 function syncApplicationCommittee(roleSelect) {
   const committeeSelect = document.querySelector("[data-application-committee]");
   const committeeHidden = document.querySelector("[data-application-committee-hidden]");
-  if (!roleSelect || !committeeSelect) return;
+  if (!roleSelect) return;
   const committeeId = committeeIdForRole(roleSelect.value);
-  if (committeeId) {
+  if (committeeId && committeeSelect) {
     committeeSelect.value = committeeId;
-    if (committeeHidden) committeeHidden.value = committeeId;
   }
+  if (committeeHidden) committeeHidden.value = committeeId || "";
 }
 
 function openApplication() {
-  const committees = (state.cache.committees || []).filter((committee) => committee.status === "active");
   const requestableRoles = ROLE_OPTIONS.filter(
     ([value]) => !["super_admin", "president", "vice_president", "presidential_aide", "discipline_chair", "youth_chair", "credit_officer"].includes(value)
   );
   modal({
     title: "Başvuru yap",
-    subtitle: "Kendi adınızla kurul veya rol başvurusu açılır.",
+    subtitle: "Rolü seçip başvurun.",
     body: `
       <form class="form-stack" data-form="application">
-        <div class="setup-box">
-          <strong>${esc(state.profile.display_name)}</strong>
-          <p class="security-note">Başvuru sizin profilinize bağlanır; anonim kayıt oluşturulmaz.</p>
-        </div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label for="application-committee">Başvurulan kurum</label>
-            <select class="field" id="application-committee" name="target_committee_id_display" required data-application-committee disabled>
-              <option value="">Seçin</option>
-              ${committees.map((committee) => `<option value="${esc(committee.id)}">${esc(committee.name)}</option>`).join("")}
-            </select>
-            <input type="hidden" name="target_committee_id" data-application-committee-hidden />
-            <p class="security-note">Rol seçildiğinde kurum otomatik seçilir.</p>
-          </div>
-          <div class="form-group">
-            <label for="application-role">Talep edilen rol</label>
-            <select class="field" id="application-role" name="requested_role" data-application-role>
-              ${requestableRoles.map(([value, label]) => `<option value="${esc(value)}">${esc(label)} · ${esc(committeeNameForRole(value))}</option>`).join("")}
-            </select>
-          </div>
+        <input type="hidden" name="target_committee_id" data-application-committee-hidden />
+        <div class="form-group">
+          <label for="application-role">Rol</label>
+          <select class="field" id="application-role" name="requested_role" data-application-role>
+            ${requestableRoles.map(([value, label]) => `<option value="${esc(value)}">${esc(label)} · ${esc(committeeNameForRole(value))}</option>`).join("")}
+          </select>
         </div>
         <div class="form-group">
-          <label for="application-notes">Başvuru notu</label>
-          <textarea class="field" id="application-notes" name="notes" maxlength="700" placeholder="Neden bu kurul veya role başvuruyorsunuz?"></textarea>
+          <label for="application-notes">Not <span class="cell-sub">(isteğe bağlı)</span></label>
+          <textarea class="field" id="application-notes" name="notes" maxlength="700" placeholder="Kısa bir not ekleyebilirsiniz."></textarea>
         </div>
         <div class="modal-actions">
           <button class="btn btn-secondary btn-sm" type="button" data-action="close-modal">Vazgeç</button>
@@ -3560,7 +3500,11 @@ async function submitDisciplineDecision(form, values) {
       action_taken: values.decree_text,
       privacy_level: values.privacy_level || "restricted"
     };
-    await updateRecord("discipline_records", form.dataset.id, legacyPayload);
+    await manageDisciplineRecord({
+      action: "update_legacy",
+      recordId: form.dataset.id,
+      payload: legacyPayload
+    });
     await uploadCaseAttachments("discipline", form.dataset.id, attachments);
     showToast("Arşiv kaydındaki teknik metin düzeltildi.");
     closeModal();
@@ -3574,11 +3518,10 @@ async function submitDisciplineDecision(form, values) {
   const violatedArticles = disciplineDecisionTextList(values.violated_articles);
   const aggravatingFactors = disciplineDecisionTextList(values.aggravating_factors);
   const tariffCode = String(values.tariff_code || "").trim().toUpperCase() || null;
-  const compensationCode = String(values.compensation_code || "").trim().toUpperCase() || null;
+  const compensationAmount = Number(values.compensation_amount || 0);
   const recipientType = String(values.recipient_type || "").trim().toLowerCase() || null;
   const recipientProfileId = String(values.recipient_profile_id || "").trim() || null;
   const financialInstallments = Number(values.financial_installments || 1);
-  const independentHeavyOutcomes = Number(values.independent_heavy_outcomes || 1);
   const sanctionEffect = String(values.sanction_effect || "none");
   const sanctionDays = values.sanction_days ? Number(values.sanction_days) : null;
   const effectiveSanction = sanctionEffect === "none" && pointDelta !== 0 ? "points_only" : sanctionEffect;
@@ -3599,13 +3542,16 @@ async function submitDisciplineDecision(form, values) {
   if (effectiveSanction === "party_suspension" && (!Number.isInteger(sanctionDays) || sanctionDays < 1 || sanctionDays > 365)) {
     throw new Error("Süreli uzaklaştırma için 1-365 gün arasında süre girin.");
   }
-  if ((tariffCode || compensationCode) && (!Number.isInteger(financialInstallments) || financialInstallments < 1 || financialInstallments > 3)) {
+  if (!Number.isSafeInteger(compensationAmount) || compensationAmount < 0 || compensationAmount > 1_000_000_000) {
+    throw new Error("Tazminat tutarı 0 ile 1.000.000.000 kredi arasında tam sayı olmalıdır.");
+  }
+  if ((tariffCode || compensationAmount > 0) && (!Number.isInteger(financialInstallments) || financialInstallments < 1 || financialInstallments > 3)) {
     throw new Error("Finansal karar en fazla üç taksite bölünebilir.");
   }
-  if (compensationCode && String(values.compensation_evidence || "").trim().length < 10) {
+  if (compensationAmount > 0 && String(values.compensation_evidence || "").trim().length < 10) {
     throw new Error("Tazminat için doğrulanabilir zarar açıklaması zorunludur.");
   }
-  if ((tariffCode || compensationCode) && recipientType === "victim" && !recipientProfileId) {
+  if ((tariffCode || compensationAmount > 0) && recipientType === "victim" && !recipientProfileId) {
     throw new Error("Zarar gören üye seçilmelidir.");
   }
 
@@ -3626,9 +3572,8 @@ async function submitDisciplineDecision(form, values) {
     aggravatingFactors,
     recipientType,
     recipientProfileId,
-    compensationCode,
+    compensationAmount,
     compensationEvidence: String(values.compensation_evidence || "").trim(),
-    independentHeavyOutcomes,
     financialInstallments
   });
 
@@ -3808,6 +3753,10 @@ async function submitForm(event) {
     }
 
     if (form.dataset.form === "application-review") {
+      const application = (state.cache.applications || []).find((item) => item.id === form.dataset.id);
+      if (form.dataset.status === "accepted" && !canApproveApplication(application)) {
+        throw new Error("Disiplin Kurulu üyeleri başvuruları inceleyebilir ancak üye kabul edemez.");
+      }
       await reviewApplication({
         id: form.dataset.id,
         status: form.dataset.status,
@@ -3821,20 +3770,20 @@ async function submitForm(event) {
     if (form.dataset.form === "complaint") {
       const attachments = validatedCaseAttachmentFiles(form);
       const rows = await createComplaint({
-        accusedProfileId: values.accusedProfileId,
-        subject: values.subject,
         description: values.description,
-        evidenceNote: values.evidenceNote,
-        requestedOutcome: values.requestedOutcome,
-        eventDate: values.eventDate,
-        learnedAt: values.learnedAt,
-        lateFilingReason: values.lateFilingReason || "",
-        priority: values.priority || "normal",
+        evidenceNote: values.evidenceNote
       });
       const complaint = rows?.[0];
       if (!complaint?.id) throw new Error("Åikayet kaydÄ± oluÅŸturuldu ancak dosya kimliÄŸi alÄ±namadÄ±.");
-      await uploadCaseAttachments("complaint", complaint.id, attachments);
-      showToast("Şikayet kaydedildi.");
+      let attachmentWarning = "";
+      if (attachments.length) {
+        try {
+          await uploadCaseAttachments("complaint", complaint.id, attachments);
+        } catch (error) {
+          attachmentWarning = `Şikayet kaydedildi; ekler yüklenemedi: ${error.message}`;
+        }
+      }
+      showToast(attachmentWarning || "Şikayet kaydedildi.", attachmentWarning ? "error" : "success");
       closeModal();
       await loadPage("complaints");
     }
@@ -3876,8 +3825,15 @@ async function submitForm(event) {
         evidenceSummary: values.evidenceSummary
       });
       if (!result?.investigation?.id) throw new Error("SoruÅŸturma aÃ§Ä±ldÄ± ancak dosya kimliÄŸi alÄ±namadÄ±.");
-      await uploadCaseAttachments("investigation", result.investigation.id, attachments);
-      showToast("Soruşturma açıldı.");
+      let attachmentWarning = "";
+      if (attachments.length) {
+        try {
+          await uploadCaseAttachments("investigation", result.investigation.id, attachments);
+        } catch (error) {
+          attachmentWarning = `Soruşturma açıldı; ekler yüklenemedi: ${error.message}`;
+        }
+      }
+      showToast(attachmentWarning || "Soruşturma açıldı.", attachmentWarning ? "error" : "success");
       closeModal();
       await loadPage("investigations");
     }
@@ -4142,9 +4098,9 @@ async function handleClick(event) {
   if (action === "delete-discipline") {
     const id = target.dataset.id;
     confirmModal("Disiplin kaydı arşivlensin mi?", "Kurumsal kayıt silinmez; arşiv etiketiyle korunur.", async () => {
-      await updateRecord("discipline_records", id, {
-        archived: true,
-        notes: `Arşivleyen: ${state.profile.display_name} - ${new Date().toLocaleString("tr-TR")}`
+      await manageDisciplineRecord({
+        action: "archive",
+        recordId: id
       });
       closeModal();
       showToast("Disiplin kaydı arşivlendi.");
@@ -4155,7 +4111,7 @@ async function handleClick(event) {
     const id = target.dataset.id;
     if (!hasRole("super_admin")) return;
     confirmModal("Disiplin kaydı kalıcı silinsin mi?", "Bu teknik düzeltme geri alınamaz.", async () => {
-      await deleteRecord("discipline_records", id);
+      await manageDisciplineRecord({ action: "delete_legacy", recordId: id });
       closeModal();
       showToast("Disiplin kaydı kalıcı olarak silindi.");
       await loadPage("discipline");

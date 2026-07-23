@@ -37,8 +37,8 @@ complaintsPage = function mainComplaintsPage() {
   return `
     ${pageHeader(
       "Şikayetlerim",
-      "Disiplin Kurulu başvurularım",
-      "Geçmiş başvurularınızı burada izleyebilir ve yeni şikâyetinizi doğrudan iletebilirsiniz.",
+      "Bildirim ve takip",
+      "Olayı bildirin, durumunu buradan takip edin.",
       isTechnicalSuperAdmin() ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-complaint">${icon("plus")} Şikâyet Yaz</button>`
     )}
     <div class="card-grid application-grid">
@@ -47,19 +47,15 @@ complaintsPage = function mainComplaintsPage() {
           ? rows.map((item) => `
               <article class="entity-card glass application-card">
                 <div class="entity-top">
-                  ${badge(complaintTargetLabel(item), "blue")}
                   ${badgeForStatus(item.status)}
                 </div>
-                <h3 style="margin-top:.85rem">${esc(item.subject)}</h3>
+                <h3 style="margin-top:.85rem">Olay</h3>
                 <p>${esc(item.description || "Açıklama eklenmedi.")}</p>
                 <div class="meta-list">
-                  <div class="meta-row"><span>Öncelik</span><strong>${esc(priorityLabel(item.priority || "normal"))}</strong></div>
-                  <div class="meta-row"><span>Sorumlu</span><strong>${esc(item.assignee?.display_name || "Henüz alınmadı")}</strong></div>
-                  <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
-                  <div class="meta-row"><span>Ön inceleme</span><strong>${esc(complaintPreliminaryOutcomeLabel(item.preliminary_outcome))}</strong></div>
-                  <div class="meta-row"><span>Talep</span><strong>${esc(item.requested_outcome || "Belirtilmedi")}</strong></div>
+                  <div class="meta-row"><span>Kanıt notu</span><strong>${esc(item.evidence_note || "Eklenmedi")}</strong></div>
                   <div class="meta-row meta-row-stack"><span>Dosya ekleri</span>${caseAttachmentsMarkup(item)}</div>
                   <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
+                  ${item.decision_note ? `<div class="meta-row"><span>Sonuç</span><strong>${esc(item.decision_note)}</strong></div>` : ""}
                 </div>
               </article>
             `).join("")

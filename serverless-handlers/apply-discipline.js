@@ -45,7 +45,7 @@ async function authenticateActor(request) {
 
   const authUser = await authResponse.json();
   const profileResponse = await supabaseRequest(
-    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,role,roles,status&limit=1`
+    `/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,display_name,role,roles,status&limit=1`
   );
   const [profile] = await profileResponse.json().catch(() => []);
   if (!profile || profile.status !== "active") return null;
@@ -81,6 +81,109 @@ function cleanTextArray(value, limit = 20) {
 function cleanInteger(value, fallback = 0) {
   const number = Number(value);
   return Number.isInteger(number) ? number : fallback;
+}
+
+function hasAnyRole(roles, allowed) {
+  return roles.some((role) => allowed.has(role));
+}
+
+async function manageStoredRecord(actor, body) {
+  const action = String(body.action || "");
+  const recordId = String(body.recordId || "");
+  if (!recordId) {
+    return { status: 400, body: { error: "Disiplin kaydi kimligi eksik." } };
+  }
+
+  const recordResponse = await supabaseRequest(
+    `/rest/v1/discipline_records?id=eq.${encodeURIComponent(recordId)}&select=id,regulation_version,archived,notes&limit=1`
+  );
+  const [record] = await recordResponse.json().catch(() => []);
+  if (!recordResponse.ok || !record) {
+    return { status: 404, body: { error: "Disiplin kaydi bulunamadi." } };
+  }
+
+  if (action === "archive") {
+    const allowed = new Set(["super_admin", "discipline_chair", "discipline_vice_chair", "discipline_member"]);
+    if (!hasAnyRole(actor.roles, allowed)) {
+      return { status: 403, body: { error: "Disiplin kaydini arsivleme yetkiniz yok." } };
+    }
+    if (record.archived) return { status: 200, body: { ok: true, disciplineRecord: record } };
+
+    const archiveNote = `Arsivleyen: ${actor.profile.display_name || "Yetkili"} - ${new Date().toLocaleString("tr-TR", { timeZone: "Europe/Istanbul" })}`;
+    const updateResponse = await supabaseRequest(
+      `/rest/v1/discipline_records?id=eq.${encodeURIComponent(recordId)}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          archived: true,
+          notes: cleanText([record.notes, archiveNote].filter(Boolean).join("\n"), 12000)
+        })
+      }
+    );
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return { status: updateResponse.status, body: { error: updated?.message || "Disiplin kaydi arsivlenemedi." } };
+    }
+    await supabaseRequest("/rest/v1/audit_logs", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        action: "archive",
+        actor_id: actor.authUser.id,
+        target_type: "discipline_records",
+        target_id: recordId,
+        details: { summary: "Disiplin kaydi arsivlendi" }
+      })
+    }).catch(() => undefined);
+    return { status: 200, body: { ok: true, disciplineRecord: updated?.[0] || null } };
+  }
+
+  if (!actor.roles.includes("super_admin")) {
+    return { status: 403, body: { error: "Bu teknik islemi yalnizca Admin yapabilir." } };
+  }
+  if (record.regulation_version === CURRENT_REGULATION_VERSION) {
+    return { status: 409, body: { error: "Guncel yonetmelik kaydi degistirilemez veya kalici silinemez." } };
+  }
+
+  if (action === "update_legacy") {
+    const source = body.payload || {};
+    const payload = {
+      record_type: cleanText(source.record_type, 160),
+      reason: cleanText(source.reason, 500),
+      description: cleanText(source.description, 12000),
+      decree_text: cleanText(source.decree_text, 50000),
+      action_taken: cleanText(source.action_taken, 50000),
+      privacy_level: ["own", "restricted", "private"].includes(source.privacy_level) ? source.privacy_level : "restricted"
+    };
+    const updateResponse = await supabaseRequest(
+      `/rest/v1/discipline_records?id=eq.${encodeURIComponent(recordId)}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify(payload)
+      }
+    );
+    const updated = await updateResponse.json().catch(() => null);
+    if (!updateResponse.ok) {
+      return { status: updateResponse.status, body: { error: updated?.message || "Arsiv kaydi duzeltilemedi." } };
+    }
+    return { status: 200, body: { ok: true, disciplineRecord: updated?.[0] || null } };
+  }
+
+  if (action === "delete_legacy") {
+    const deleteResponse = await supabaseRequest(
+      `/rest/v1/discipline_records?id=eq.${encodeURIComponent(recordId)}`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } }
+    );
+    if (!deleteResponse.ok) {
+      const result = await deleteResponse.json().catch(() => null);
+      return { status: deleteResponse.status, body: { error: result?.message || "Arsiv kaydi silinemedi." } };
+    }
+    return { status: 200, body: { ok: true } };
+  }
+
+  return { status: 400, body: { error: "Disiplin kaydi islemi gecersiz." } };
 }
 
 function statusForError(error) {
@@ -143,9 +246,36 @@ export default async function handler(request, response) {
   if (!actor) return json(response, 401, { error: "Geçerli üye oturumu bulunamadı." });
 
   const body = request.body || {};
+  if (["archive", "update_legacy", "delete_legacy"].includes(String(body.action || ""))) {
+    const result = await manageStoredRecord(actor, body);
+    return json(response, result.status, result.body);
+  }
   const effect = String(body.effect || "none");
   if (!body.memberId || !VALID_EFFECTS.has(effect)) {
     return json(response, 400, { error: "Disiplin kararı bilgileri geçersiz." });
+  }
+
+  const isReward = effect === "reward_points" || cleanInteger(body.pointDelta) > 0;
+  if (!isReward) {
+    if (!body.investigationId) {
+      return json(response, 400, { error: "Ceza kararnamesi için açık bir soruşturma seçilmelidir." });
+    }
+    const investigationResponse = await supabaseRequest(
+      `/rest/v1/investigations?id=eq.${encodeURIComponent(body.investigationId)}&select=id,subject_profile_id,opened_by,status&limit=1`
+    );
+    const [investigation] = await investigationResponse.json().catch(() => []);
+    if (!investigationResponse.ok || !investigation) {
+      return json(response, 404, { error: "İlgili soruşturma bulunamadı." });
+    }
+    if (investigation.subject_profile_id !== body.memberId) {
+      return json(response, 400, { error: "Soruşturma ile ceza verilecek üye eşleşmiyor." });
+    }
+    if (!["open", "reviewing"].includes(investigation.status)) {
+      return json(response, 409, { error: "Yalnızca açık bir soruşturma için ceza kararnamesi yazılabilir." });
+    }
+    if (!actor.roles.includes("super_admin") && investigation.opened_by !== actor.authUser.id) {
+      return json(response, 403, { error: "Disiplin cezasını yalnızca soruşturmayı açan yetkili verebilir." });
+    }
   }
 
   const payload = {
@@ -165,16 +295,15 @@ export default async function handler(request, response) {
     aggravatingFactors: cleanTextArray(body.aggravatingFactors, 10),
     recipientType: cleanText(body.recipientType, 20) || null,
     recipientProfileId: body.recipientProfileId || null,
-    compensationCode: cleanText(body.compensationCode, 20) || null,
+    compensationAmount: cleanInteger(body.compensationAmount),
     compensationEvidence: cleanText(body.compensationEvidence, 12000),
-    independentHeavyOutcomes: cleanInteger(body.independentHeavyOutcomes, 1),
     financialInstallments: cleanInteger(body.financialInstallments, 1),
     financialDueDays: 3,
     regulationVersion: CURRENT_REGULATION_VERSION
   };
 
   try {
-    const result = await rpc("apply_20260719_discipline_decision", {
+    const result = await rpc("apply_20260719_discipline_decision_amount", {
       p_actor_profile_id: actor.authUser.id,
       p_payload: payload
     });

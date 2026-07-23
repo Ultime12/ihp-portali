@@ -675,7 +675,7 @@ function disciplineFinancialLines(value = "") {
 
 function syncDisciplineFinancialFields() {
   const tariffSelect = document.getElementById("discipline-tariff");
-  const compensationSelect = document.getElementById("discipline-compensation");
+  const compensationInput = document.getElementById("discipline-compensation");
   const recipientFields = document.querySelector("[data-discipline-recipient-fields]");
   const recipientType = document.getElementById("discipline-recipient-type");
   const recipientProfileField = document.querySelector("[data-discipline-recipient-profile]");
@@ -683,18 +683,17 @@ function syncDisciplineFinancialFields() {
   const targetMemberId = document.getElementById("discipline-member")?.value || "";
   const compensationEvidenceField = document.querySelector("[data-discipline-compensation-evidence]");
   const compensationEvidence = document.getElementById("discipline-compensation-evidence");
-  const independentField = document.querySelector("[data-discipline-independent-outcomes]");
-  const independentInput = document.getElementById("discipline-independent-outcomes");
   const summary = document.querySelector("[data-discipline-financial-summary]");
-  if (!tariffSelect || !compensationSelect || !recipientType) return;
+  if (!tariffSelect || !compensationInput || !recipientType) return;
 
   const tariff = disciplineTariff(tariffSelect.value);
-  const compensation = disciplineCompensation(compensationSelect.value);
-  const hasFinancialDecision = Boolean(tariff || compensation);
-  const recipientMode = tariff?.[3] || (compensation ? "victim" : null);
+  const compensationAmount = Math.max(0, Number(compensationInput.value || 0));
+  const hasCompensation = Number.isSafeInteger(compensationAmount) && compensationAmount > 0;
+  const hasFinancialDecision = Boolean(tariff || hasCompensation);
+  const recipientMode = tariff?.[3] || (hasCompensation ? "victim" : null);
 
   recipientFields.hidden = !hasFinancialDecision;
-  if (recipientMode === "victim" || (!tariff && compensation)) recipientType.value = "victim";
+  if (recipientMode === "victim" || (!tariff && hasCompensation)) recipientType.value = "victim";
   if (recipientMode === "system") recipientType.value = "system";
   recipientType.disabled = false;
   recipientType.dataset.locked = recipientMode === "victim_or_system" ? "false" : "true";
@@ -710,18 +709,11 @@ function syncDisciplineFinancialFields() {
   recipientProfile.disabled = !needsVictim;
   recipientProfile.required = needsVictim;
 
-  compensationEvidenceField.hidden = !compensation;
-  compensationEvidence.disabled = !compensation;
-  compensationEvidence.required = Boolean(compensation);
-  independentField.hidden = !compensation;
-  independentInput.disabled = !compensation;
-  independentInput.required = Boolean(compensation);
-  if (compensation && Number(independentInput.value || 1) < compensation[3]) {
-    independentInput.value = String(compensation[3]);
-  }
+  compensationEvidenceField.hidden = !hasCompensation;
+  compensationEvidence.disabled = !hasCompensation;
+  compensationEvidence.required = hasCompensation;
 
   const base = tariff?.[2] || 0;
-  const compensationAmount = compensation?.[2] || 0;
   const factors = disciplineFinancialLines(document.getElementById("discipline-aggravating-factors")?.value);
   summary.hidden = !hasFinancialDecision;
   if (hasFinancialDecision) {
@@ -790,7 +782,7 @@ handleFilter = async function patchedDisciplineHandleFilter(event) {
     syncDisciplineInvestigationRequirement();
     return;
   }
-  if (event.target.closest("#discipline-tariff, #discipline-compensation, #discipline-recipient-type, #discipline-aggravating-factors, #discipline-independent-outcomes")) {
+  if (event.target.closest("#discipline-tariff, #discipline-compensation, #discipline-recipient-type, #discipline-aggravating-factors")) {
     syncDisciplineFinancialFields();
     return;
   }
@@ -809,7 +801,7 @@ openDisciplineDetails = function patchedOpenDisciplineDetails(item) {
       "beforeend",
       `<div class="meta-row"><span>Kredi ceza tarifesi</span><strong>${esc(item.financial_tariff_code || "Yalnızca tazminat")}</strong></div>
        <div class="meta-row"><span>Temel ceza</span><strong>${Number(item.financial_base_amount || item.credit_fine_amount || 0).toLocaleString("tr-TR")} kredi</strong></div>
-       <div class="meta-row"><span>Tazminat</span><strong>${Number(item.compensation_amount || 0).toLocaleString("tr-TR")} kredi${item.compensation_code ? ` · ${esc(item.compensation_code)}` : ""}</strong></div>
+       <div class="meta-row"><span>Tazminat</span><strong>${Number(item.compensation_amount || 0).toLocaleString("tr-TR")} kredi</strong></div>
        <div class="meta-row"><span>Vergi</span><strong>${Number(item.financial_tax_amount || 0).toLocaleString("tr-TR")} kredi</strong></div>
        <div class="meta-row"><span>Toplam borç</span><strong>${financialTotal.toLocaleString("tr-TR")} kredi · ${esc(item.credit_fine_installments || 1)} taksit</strong></div>
        <div class="meta-row"><span>Alıcı</span><strong>${item.financial_recipient_type === "victim" ? "Zarar gören üye" : "İHP kurumsal hesabı"}</strong></div>

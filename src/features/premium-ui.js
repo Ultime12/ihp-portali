@@ -287,6 +287,12 @@ let clientErrorCount = 0;
 function reportClientError(type, message) {
   if (clientErrorCount >= 5) return;
   const cleanMessage = sanitizeClientError(message);
+  const currentRoute = route();
+  if (cleanMessage === "Script error.") return;
+  if (
+    cleanMessage === "Geçerli ve aktif üye oturumu bulunamadı." &&
+    (!getSession() || ["home", "login"].includes(currentRoute))
+  ) return;
   const signature = `${type}:${cleanMessage}`;
   if (clientErrorSignatures.has(signature)) return;
   clientErrorSignatures.add(signature);
@@ -295,7 +301,7 @@ function reportClientError(type, message) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     keepalive: true,
-    body: JSON.stringify({ type, message: cleanMessage, page: route().split("/").slice(0, 2).join("/"), timestamp: new Date().toISOString() })
+    body: JSON.stringify({ type, message: cleanMessage, page: currentRoute.split("/").slice(0, 2).join("/"), timestamp: new Date().toISOString() })
   }).catch(() => {});
 }
 

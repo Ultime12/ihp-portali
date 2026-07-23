@@ -1,4 +1,4 @@
-const CACHE_VERSION = "ihp-pwa-2026-07-15-v1";
+const CACHE_VERSION = "ihp-pwa-2026-07-23-v4";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const CORE_ASSETS = [
@@ -58,14 +58,13 @@ async function navigationResponse(request) {
 }
 
 async function staticResponse(request) {
-  const cached = await caches.match(request);
-  const network = fetch(request)
-    .then(async (response) => {
-      await putSafe(RUNTIME_CACHE, request, response);
-      return response;
-    })
-    .catch(() => null);
-  return cached || (await network) || Response.error();
+  try {
+    const response = await fetch(request);
+    await putSafe(RUNTIME_CACHE, request, response);
+    return response;
+  } catch {
+    return (await caches.match(request)) || Response.error();
+  }
 }
 
 self.addEventListener("fetch", (event) => {

@@ -68,7 +68,7 @@ await writeFile(
       name: "ihp-finans-deployment",
       private: true,
       type: "module",
-      engines: { node: "24.x" }
+      engines: { node: "22.x" }
     },
     null,
     2

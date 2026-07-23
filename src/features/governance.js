@@ -18,12 +18,15 @@ STATUS_LABELS.awaiting_result = "Sonuç bekliyor";
 STATUS_LABELS.runoff_required = "İkinci tur gerekli";
 
 function governanceData() {
-  return state.cache.governance || {
-    proposals: [],
-    elections: [],
-    election_results: {},
-    executive_members: [],
-    permissions: {}
+  const source = state.cache.governance;
+  const data = source && typeof source === "object" ? source : {};
+  return {
+    ...data,
+    proposals: Array.isArray(data.proposals) ? data.proposals : [],
+    elections: Array.isArray(data.elections) ? data.elections : [],
+    election_results: data.election_results && typeof data.election_results === "object" ? data.election_results : {},
+    executive_members: Array.isArray(data.executive_members) ? data.executive_members : [],
+    permissions: data.permissions && typeof data.permissions === "object" ? data.permissions : {}
   };
 }
 
@@ -307,13 +310,23 @@ renderPortalPage = function patchedGovernanceRenderPortalPage(page) {
 const governanceBaseLoadPage = loadPage;
 loadPage = async function patchedGovernanceLoadPage(page) {
   await governanceBaseLoadPage(page);
-  if (["governance", "regulation"].includes(page)) {
+  if (!["governance", "regulation"].includes(page) || !getSession() || !state.profile) return;
+  try {
     const [governance, regulations] = await Promise.all([
       governanceAction({ action: "list" }),
       loadRegulations()
     ]);
+    if (!getSession() || !state.profile) return;
     state.cache.governance = governance;
     state.cache.regulation = regulations;
+    render();
+  } catch (error) {
+    if (!getSession() || !state.profile || isAuthenticationError(error)) return;
+    state.pageError = {
+      page,
+      message: error?.message || "Yönetim kayıtları yüklenemedi."
+    };
+    showToast(state.pageError.message, "error");
     render();
   }
 };

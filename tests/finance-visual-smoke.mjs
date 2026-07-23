@@ -175,6 +175,7 @@ try {
     assert.equal(await page.locator(".finance-broker-symbol").count(), instruments.length, `${viewport.name}: instruments`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `${viewport.name}: market overflow`);
     await page.screenshot({ path: join(output, `${viewport.name}-market.png`), fullPage: true });
+
     assert.deepEqual(errors, [], `${viewport.name}: finance client errors`);
     await context.close();
   }

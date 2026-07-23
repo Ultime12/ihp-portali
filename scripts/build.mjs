@@ -1,4 +1,5 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, extname, join, relative } from "node:path";
 import { stripTypeScriptTypes } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -33,6 +34,7 @@ const featureFiles = isMailPortal
     ]
   : isFinancePortal
   ? [
+      "pdf-builder.js",
       "credit-system.js",
       "finance-system.js",
       "premium-ui.js",
@@ -69,7 +71,8 @@ const pwaDefinitions = {
     description: "İHP öğrenci topluluğu mobil çalışma alanı.",
     themeColor: "#071528",
     backgroundColor: "#071528",
-    startUrl: "/#/portal/overview"
+    startUrl: "/#/portal/overview",
+    iconRoot: "/assets/pwa"
   },
   dk: {
     name: "İHP Disiplin Kurulu",
@@ -77,7 +80,8 @@ const pwaDefinitions = {
     description: "İHP Disiplin Kurulu güvenli çalışma alanı.",
     themeColor: "#21070d",
     backgroundColor: "#140408",
-    startUrl: "/#/portal/overview"
+    startUrl: "/#/portal/overview",
+    iconRoot: "/assets/pwa/dk"
   },
   finance: {
     name: "İHP Finans",
@@ -85,7 +89,8 @@ const pwaDefinitions = {
     description: "İHP kredi ve sanal portföy çalışma alanı.",
     themeColor: "#030b08",
     backgroundColor: "#030b08",
-    startUrl: "/#/portal/overview"
+    startUrl: "/#/portal/overview",
+    iconRoot: "/assets/pwa/finance"
   },
   mail: {
     name: "İHP Mail",
@@ -93,7 +98,8 @@ const pwaDefinitions = {
     description: "İHP kurumsal posta çalışma alanı.",
     themeColor: "#071528",
     backgroundColor: "#071528",
-    startUrl: "/#/portal/mail"
+    startUrl: "/#/portal/mail",
+    iconRoot: "/assets/pwa"
   }
 };
 
@@ -103,7 +109,7 @@ function pwaManifest() {
     ? [
         { name: "Portal", short_name: "Portal", url: "/#/portal/overview", icons: [{ src: "/assets/pwa/icon-192.png", sizes: "192x192", type: "image/png" }] },
         { name: "İHP Mail", short_name: "Mail", url: "/mail/#/portal/mail", icons: [{ src: "/assets/pwa/icon-192.png", sizes: "192x192", type: "image/png" }] },
-        { name: "İHP Finans", short_name: "Finans", url: "/finans/#/portal/overview", icons: [{ src: "/assets/pwa/icon-192.png", sizes: "192x192", type: "image/png" }] }
+        { name: "İHP Finans", short_name: "Finans", url: "/finans/#/portal/overview", icons: [{ src: "/assets/pwa/finance/icon-192.png", sizes: "192x192", type: "image/png" }] }
       ]
     : [];
   return {
@@ -122,9 +128,9 @@ function pwaManifest() {
     theme_color: definition.themeColor,
     prefer_related_applications: false,
     icons: [
-      { src: "/assets/pwa/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/assets/pwa/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/assets/pwa/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+      { src: `${definition.iconRoot}/icon-192.png`, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: `${definition.iconRoot}/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: `${definition.iconRoot}/icon-maskable-512.png`, sizes: "512x512", type: "image/png", purpose: "maskable" }
     ],
     shortcuts
   };
@@ -192,6 +198,47 @@ async function composeApplication() {
   await writeFile(appPath, optimized.code, "utf8");
 }
 
+async function createStaticAssetVersion() {
+  const assetPaths = [
+    "src/app.js",
+    "styles.css",
+    "premium.css",
+    "pwa.css",
+    ...(isDisciplinePortal ? ["dk.css"] : []),
+    ...(isMailPortal ? ["mail.css"] : [])
+  ];
+  const hash = createHash("sha256");
+
+  for (const assetPath of assetPaths) {
+    hash.update(assetPath);
+    hash.update(await readFile(join(outputDir, assetPath)));
+  }
+
+  return hash.digest("hex").slice(0, 12);
+}
+
+function versionStaticAssets(html, version) {
+  return html.replace(
+    /(href|src)="(\.\/(?:styles|premium|pwa|dk|mail)\.css|\.\/src\/app\.js)"/g,
+    `$1="$2?v=${version}"`
+  );
+}
+
+async function versionApplicationImports(version) {
+  const appPath = join(outputDir, "src", "app.js");
+  const application = await readFile(appPath, "utf8");
+  const versioned = application
+    .replace(
+      /(\bfrom\s*["'])(\.{1,2}\/[^"'?#]+\.js)(["'])/g,
+      `$1$2?v=${version}$3`
+    )
+    .replace(
+      /(\bimport\s*\(\s*["'])(\.{1,2}\/[^"'?#]+\.js)(["']\s*\))/g,
+      `$1$2?v=${version}$3`
+    );
+  await writeFile(appPath, versioned, "utf8");
+}
+
 async function bundlePasskeyClient() {
   await build({
     entryPoints: [join(sourceDir, "pwa-passkeys.ts")],
@@ -238,12 +285,21 @@ const finalizedHtml = outputHtml
   .replace('name="ihp-app-variant" content="main"', `name="ihp-app-variant" content="${buildVariant}"`)
   .replace('name="theme-color" content="#071528"', `name="theme-color" content="${pwaDefinition.themeColor}"`)
   .replace('name="application-name" content="İHP Mobil"', `name="application-name" content="${pwaDefinition.name}"`)
-  .replace('name="apple-mobile-web-app-title" content="İHP Mobil"', `name="apple-mobile-web-app-title" content="${pwaDefinition.shortName}"`);
-await writeFile(join(outputDir, "index.html"), finalizedHtml, "utf8");
+  .replace('name="apple-mobile-web-app-title" content="İHP Mobil"', `name="apple-mobile-web-app-title" content="${pwaDefinition.shortName}"`)
+  .replace('href="./assets/pwa/icon-192.png"', `href=".${pwaDefinition.iconRoot}/icon-192.png"`)
+  .replace(
+    '<link rel="icon" href="./assets/ihp-logo.svg" type="image/svg+xml" />',
+    pwaDefinition.iconRoot === "/assets/pwa"
+      ? '<link rel="icon" href="./assets/ihp-logo.svg" type="image/svg+xml" />'
+      : `<link rel="icon" href=".${pwaDefinition.iconRoot}/icon-192.png" type="image/png" />`
+  );
 await copyFile(join(rootPath, "styles.css"), join(outputDir, "styles.css"));
 await copyFile(join(rootPath, "premium.css"), join(outputDir, "premium.css"));
 await copyFile(join(rootPath, "pwa.css"), join(outputDir, "pwa.css"));
-await copyFile(join(rootPath, "service-worker.js"), join(outputDir, "service-worker.js"));
+const serviceWorker = (await readFile(join(rootPath, "service-worker.js"), "utf8"))
+  .replaceAll("/assets/pwa/icon-192.png", `${pwaDefinition.iconRoot}/icon-192.png`)
+  .replaceAll("/assets/pwa/icon-512.png", `${pwaDefinition.iconRoot}/icon-512.png`);
+await writeFile(join(outputDir, "service-worker.js"), serviceWorker, "utf8");
 await writeFile(join(outputDir, "manifest.webmanifest"), JSON.stringify(pwaManifest(), null, 2), "utf8");
 if (isDisciplinePortal) {
   await copyFile(join(rootPath, "dk.css"), join(outputDir, "dk.css"));
@@ -255,6 +311,13 @@ await copyDirectory(join(rootPath, "assets"), join(outputDir, "assets"));
 await compileDirectory(sourceDir);
 await bundlePasskeyClient();
 await composeApplication();
+const staticAssetVersion = await createStaticAssetVersion();
+await versionApplicationImports(staticAssetVersion);
+await writeFile(
+  join(outputDir, "index.html"),
+  versionStaticAssets(finalizedHtml, staticAssetVersion),
+  "utf8"
+);
 
 console.log(
   isDisciplinePortal

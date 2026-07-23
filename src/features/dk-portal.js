@@ -309,10 +309,10 @@ complaintsPage = function dkComplaintsPage() {
   return `
     ${pageHeader(
       isManager ? "Gelen Şikayetler" : "Şikayetlerim",
-      isManager ? "Şikayet Dosyaları" : "Resmî Disiplin Başvurusu",
+      isManager ? "Bildirimler" : "Bildirim ve takip",
       isManager
-        ? "Kurula iletilen şikayet kayıtları."
-        : "Başvurular doğrulanmış kimlikle kaydedilir ve Disiplin Kurulu tarafından incelenir.",
+        ? "Kurula iletilen olaylar."
+        : "Olayı bildirin, durumunu buradan takip edin.",
       isManager ? "" : `<button class="btn btn-primary btn-sm" type="button" data-action="open-complaint">${icon("plus")} Şikayet Yaz</button>`
     )}
     <div class="card-grid application-grid">
@@ -321,26 +321,28 @@ complaintsPage = function dkComplaintsPage() {
           ? rows.map((item) => `
               <article class="entity-card glass application-card">
                 <div class="entity-top">
-                  ${badge(complaintTargetLabel(item), "blue")}
                   ${badgeForStatus(item.status)}
                 </div>
-                <h3 style="margin-top:.85rem">${esc(item.subject)}</h3>
+                <h3 style="margin-top:.85rem">Olay</h3>
                 <p>${esc(item.description || "Açıklama eklenmedi.")}</p>
                 <div class="meta-list">
                   <div class="meta-row"><span>Şikayet eden</span><strong>${esc(complaintPersonLabel(item))}</strong></div>
-                  <div class="meta-row"><span>Öncelik</span><strong>${esc(priorityLabel(item.priority || "normal"))}</strong></div>
                   <div class="meta-row"><span>Sorumlu</span><strong>${esc(item.assignee?.display_name || "Henüz alınmadı")}</strong></div>
-                  <div class="meta-row"><span>İşleyen yetkili</span><strong>${esc(item.decider?.display_name || "Henüz işlem yok")}</strong></div>
-                  <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
-                  <div class="meta-row"><span>Olay tarihi</span><strong>${formatDate(item.event_date)}</strong></div>
-                  <div class="meta-row"><span>Öğrenme tarihi</span><strong>${formatDate(item.learned_at)}</strong></div>
-                  <div class="meta-row"><span>Talep</span><strong>${esc(item.requested_outcome || "Belirtilmedi")}</strong></div>
-                  ${item.late_filing_reason ? `<div class="meta-row"><span>Süre aşımı gerekçesi</span><strong>${esc(item.late_filing_reason)}</strong></div>` : ""}
                   <div class="meta-row"><span>Kanıt notu</span><strong>${esc(item.evidence_note || "Eklenmedi")}</strong></div>
                   <div class="meta-row meta-row-stack"><span>Dosya ekleri</span>${caseAttachmentsMarkup(item)}</div>
                   <div class="meta-row"><span>Tarih</span><strong>${formatDate(item.created_at, true)}</strong></div>
                 </div>
-                ${isManager ? complaintActions(item) : ""}
+                ${isManager ? `
+                  <details class="case-detail-disclosure">
+                    <summary>İşlem ayrıntıları</summary>
+                    <div class="meta-list">
+                      <div class="meta-row"><span>Hedef</span><strong>${esc(complaintTargetLabel(item))}</strong></div>
+                      <div class="meta-row"><span>İşleyen yetkili</span><strong>${esc(item.decider?.display_name || "Henüz işlem yok")}</strong></div>
+                      <div class="meta-row"><span>Karar notu</span><strong>${esc(item.decision_note || "Henüz karar yok")}</strong></div>
+                    </div>
+                    ${complaintActions(item)}
+                  </details>
+                ` : ""}
               </article>
             `).join("")
           : emptyCard(

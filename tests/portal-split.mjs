@@ -10,7 +10,7 @@ const [mainApp, dkApp, splitSource, portalCore] = await Promise.all([
 
 assert.match(mainApp, /Şikayetlerim/);
 assert.match(dkApp, /Şikayetlerim/);
-assert.match(dkApp, /Resmî Disiplin Başvurusu/);
+assert.match(dkApp, /Bildirim ve takip/);
 assert.match(splitSource, /Şikayetlerim/);
 assert.match(splitSource, /MAIN_DISCIPLINE_PAGES/);
 assert.match(splitSource, /targetCommitteeName\(item\) === "Disiplin Kurulu"/);

@@ -26,7 +26,7 @@ await writeFile(
     name: "ihp-mail-deployment",
     private: true,
     type: "module",
-    engines: { node: "24.x" }
+    engines: { node: "22.x" }
   }, null, 2),
   "utf8"
 );

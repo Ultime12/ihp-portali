@@ -219,4 +219,49 @@ const subjectClaim = await invoke({
 assert.equal(subjectClaim.statusCode, 403);
 assert.match(subjectClaim.payload.error, /aynı dosyada kurul işlemi yapamaz/);
 
-console.log("Soruşturma hedef, sorumluluk ve çıkar çatışması kuralları doğrulandı.");
+const openerClose = await invoke({
+  actorId: "case-opener",
+  body: {
+    action: "closed",
+    id: "external-workflow-case",
+    decisionNote: "Site dışındaki inceleme tamamlandı ve dosya kapatıldı."
+  },
+  investigation: {
+    id: "external-workflow-case",
+    subject_profile_id: "subject",
+    opened_by: "case-opener",
+    assigned_to: null,
+    status: "open",
+    defense_status: "pending",
+    hearing_required: true,
+    hearing_held_at: null,
+    recused_profile_ids: []
+  }
+});
+assert.equal(openerClose.statusCode, 200);
+assert.equal(openerClose.payload.investigation.status, "closed");
+assert.equal(openerClose.payload.investigation.decided_by, "case-opener");
+
+const otherMemberClose = await invoke({
+  actorId: "other-member",
+  body: {
+    action: "closed",
+    id: "external-workflow-case",
+    decisionNote: "Başka bir görevli kapatmaya çalıştı."
+  },
+  investigation: {
+    id: "external-workflow-case",
+    subject_profile_id: "subject",
+    opened_by: "case-opener",
+    assigned_to: null,
+    status: "open",
+    defense_status: "pending",
+    hearing_required: true,
+    hearing_held_at: null,
+    recused_profile_ids: []
+  }
+});
+assert.equal(otherMemberClose.statusCode, 403);
+assert.match(otherMemberClose.payload.error, /yalnızca dosyayı açan yetkili/);
+
+console.log("Soruşturma hedef, kapanış ve çıkar çatışması kuralları doğrulandı.");

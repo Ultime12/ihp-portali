@@ -16,7 +16,7 @@ assert.match(app, /İHP \/ Disiplin Kurulu/);
 assert.match(app, /Bu hesap DK sistemine yetkili değil/);
 assert.match(app, /Gelen Şikayetler/);
 assert.match(app, /DK Başvuruları/);
-assert.match(app, /Şikayet Dosyaları/);
+assert.match(app, /Bildirimler/);
 assert.doesNotMatch(app, /E-posta veya Admin/);
 assert.doesNotMatch(app, /Sistem hazır/);
 assert.doesNotMatch(app, /Tek, kapalı merkez/);
